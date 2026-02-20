@@ -6,3 +6,4 @@ local_model_distilbert-base-uncased/
 tmp_trainer/
 answerdotai/
 __pycache__/
+.env.local

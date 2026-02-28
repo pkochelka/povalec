@@ -10,8 +10,8 @@ load_dotenv(".env.local")
 AUTH_TOKEN: str | None = os.getenv("AUTH_TOKEN")
 BASE_URL = "https://ai.ufal.mff.cuni.cz/api/v1"
 
-#MODEL_ID = "LLM3-AMD-MI210.llama3.3:latest" # LLAMA
-MODEL_ID = "LLM3-AMD-MI210.gpt-oss:120b" # Gpt
+MODEL_ID = "LLM3-AMD-MI210.llama3.3:latest" # LLAMA
+#MODEL_ID = "LLM3-AMD-MI210.gpt-oss:120b" # Gpt
 
 
 HEADERS = {

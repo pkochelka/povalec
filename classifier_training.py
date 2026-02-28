@@ -9,15 +9,12 @@ from transformers import AutoModelForSequenceClassification, Trainer, AutoTokeni
 HF_TOKEN = os.environ.get("HF_TOKEN")
 
 #model_name = 'distilbert-base-uncased'
-model_name = 'answerdotai/ModernBERT-base'
+#model_name = 'answerdotai/ModernBERT-base'
+model_name = 'answerdotai/ModernBERT-large'
 
-COLUMN_NAME_EU_PARTY = "EU Party"
+df = pd.read_csv("data/preprocessed/full.csv")
 
-df = pd.read_csv("data/full.csv")
-
-df[COLUMN_NAME_EU_PARTY] = df[COLUMN_NAME_EU_PARTY].apply(lambda x: x.split('/')[-1])
-df = df[~df[COLUMN_NAME_EU_PARTY].str.contains(r"\bNA\b", case=False, na=False)]
-df["labels"] = df[COLUMN_NAME_EU_PARTY].astype("category").cat.codes
+df["labels"] = df["EU Party"].astype("category").cat.codes
 df = df[["en", "labels"]]
 
 def download_model() -> tuple[AutoTokenizer, AutoModelForSequenceClassification]:
@@ -37,8 +34,6 @@ def load_model() -> tuple[AutoTokenizer, AutoModelForSequenceClassification]:
     tokenizer = AutoTokenizer.from_pretrained(f"./local_model_{model_name}/")
     model = AutoModelForSequenceClassification.from_pretrained(f"./local_model_{model_name}/")
     return tokenizer, model
-
-print(df["labels"].unique())
 
 tokenizer, model = download_model()
 dataset = Dataset.from_pandas(df, preserve_index=False)

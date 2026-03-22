@@ -10,8 +10,8 @@ load_dotenv(".env.local")
 AUTH_TOKEN: str | None = os.getenv("AUTH_TOKEN")
 BASE_URL = "https://ai.ufal.mff.cuni.cz/api/v1"
 
-MODEL_ID = "LLM3-AMD-MI210.llama3.3:latest" # LLAMA
-#MODEL_ID = "LLM3-AMD-MI210.gpt-oss:120b" # Gpt
+#MODEL_ID = "LLM3-AMD-MI210.llama3.3:latest" # LLAMA
+MODEL_ID = "LLM3-AMD-MI210.gpt-oss:120b" # Gpt
 
 
 HEADERS = {
@@ -44,7 +44,7 @@ def call_api(user_message: str, model_id: str = MODEL_ID) -> dict():
             f"{BASE_URL}/chat/completions",
             headers=HEADERS,
             json=payload,
-            timeout=300, # seconds
+            timeout=540, # seconds
         )
         resp.raise_for_status()   # raise on HTTP 4xx/5xx
     except requests.HTTPError as http_err:

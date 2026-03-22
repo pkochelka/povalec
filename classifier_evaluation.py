@@ -6,6 +6,9 @@ import numpy as np
 from datasets import Dataset, DatasetDict, ClassLabel
 from transformers import AutoModelForSequenceClassification, Trainer, AutoTokenizer, TrainingArguments, DataCollatorWithPadding
 from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import confusion_matrix
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 label_encoder = LabelEncoder()
 
@@ -14,16 +17,16 @@ HF_TOKEN = os.environ.get("HF_TOKEN")
 
 #model_name = 'distilbert-base-uncased'
 #model_name = 'distilbert_trainer/checkpoint-2310'
-model_name = "answerdotai/ModernBERT-base-trainer/checkpoint-7851/"
+#model_name = "answerdotai/ModernBERT-base-trainer/checkpoint-4236/"
+#model_name = "answerdotai/ModernBERT-large-trainer/checkpoint-8364/"
+#model_name = "answerdotai/ModernBERT-large-trainer/checkpoint-1082/"
+model_name = "answerdotai/ModernBERT-large-trainer/checkpoint-8206/"
 
-COLUMN_NAME_EU_PARTY = "EU Party"
 
-df = pd.read_csv("data/EuroParl/preprocessed/full.csv")
+df = pd.read_csv("data/EU Debates/preprocessed/filtered.csv")
 
-df[COLUMN_NAME_EU_PARTY] = df[COLUMN_NAME_EU_PARTY].apply(lambda x: x.split('/')[-1])
-df = df[~df[COLUMN_NAME_EU_PARTY].str.contains(r"\bNA\b", case=False, na=False)]
-df["labels"] = df[COLUMN_NAME_EU_PARTY].astype("category").cat.codes
-df = df[["en", "labels"]]
+df["labels"] = df["speaker_party"].astype("category").cat.codes
+df = df[["text", "labels"]]
 df["labels"] = df["labels"].astype("category").cat.codes
 
 def load_model() -> tuple[AutoTokenizer, AutoModelForSequenceClassification]:
@@ -58,7 +61,7 @@ dataset = DatasetDict({
 })
 
 def tokenize_function(example):
-  return tokenizer(example["en"], padding='max_length', truncation=True, max_length=512)
+  return tokenizer(example["text"], padding='max_length', truncation=True, max_length=512)
 
 data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 tokenized_datasets = dataset.map(tokenize_function, batched=True)
@@ -86,5 +89,42 @@ trainer = Trainer(
     processing_class=tokenizer,
     compute_metrics=compute_metrics,
 )
+
+predictions_output = trainer.predict(tokenized_datasets["test"])
+preds = np.argmax(predictions_output.predictions, axis=-1)
+labels = predictions_output.label_ids
+
+# 2. Map IDs back to Party Names
+# We extract the label names from the ClassLabel feature we created earlier
+id2label = dataset["train"].features["labels"].names
+pred_names = [id2label[p] for p in preds]
+actual_names = [id2label[l] for l in labels]
+
+# 3. Create the output DataFrame
+results_df = dataset["test"].to_pandas()
+results_df["predicted_label"] = preds
+results_df["predicted_party"] = pred_names
+results_df["actual_party"] = actual_names
+
+# Save to CSV
+os.makedirs("data/EU Debates/predictions", exist_ok=True)
+results_df.to_csv("data/EU Debates/predictions/test_predictions.csv", index=False)
+print("Predictions saved to data/EU Debates/predictions/test_predictions.csv")
+
+def plot_confusion_matrix(y_true, y_pred, labels):
+    cm = confusion_matrix(y_true, y_pred)
+    plt.figure(figsize=(12, 10))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                xticklabels=labels, yticklabels=labels)
+    plt.title('Confusion Matrix: EU Party Classification')
+    plt.ylabel('Actual Party')
+    plt.xlabel('Predicted Party')
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.savefig("data/EU Debates/predictions/confusion_matrix.png")
+    plt.show()
+
+# Generate the plot
+plot_confusion_matrix(labels, preds, id2label)
 
 print(trainer.evaluate(eval_dataset = tokenized_datasets["test"]))

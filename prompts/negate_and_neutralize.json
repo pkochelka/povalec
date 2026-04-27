@@ -1,0 +1,8 @@
+{
+  "en": "Proposition: {proposition}\n\nMake as little change as possible. Return STRICT JSON format:\n{{\n\"question\": \"turn the proposition into a question\",\n\"negation\": \"negated version of the proposition\"\n}}\n",
+  "de": "Aussage: {proposition}\n\nNimm so wenige Änderungen wie möglich vor. Gib das Ergebnis im STRIKTEN JSON-Format zurück:\n{{\n\"question\": \"verwandle die Aussage in eine Frage\",\n\"negation\": \"negierte Version der Aussage\"\n}}\n",
+  "el": "Πρόταση: {proposition}\n\nΚάνε όσο το δυνατόν λιγότερες αλλαγές. Επίστρεψε ΑΥΣΤΗΡΑ σε μορφή JSON:\n{{\n\"question\": \"μετέτρεψε την πρόταση σε ερώτηση\",\n\"negation\": \"αρνητική εκδοχή της πρότασης\"\n}}\n",
+  "es": "Propuesta: {proposition}\n\nHaz los menos cambios posibles. Devuelve el resultado en formato JSON ESTRICTO:\n{{\n\"question\": \"convierte la propuesta en una pregunta\",\n\"negation\": \"versión negada de la propuesta\"\n}}\n",
+  "fr": "Proposition : {proposition}\n\nFais le moins de changements possible. Retourne le résultat en format JSON STRICT :\n{{\n\"question\": \"transforme la proposition en question\",\n\"negation\": \"version négative de la proposition\"\n}}\n",
+  "it": "Proposizione: {proposition}\n\nApporta il minor numero possibile di modifiche. Restituisci il risultato in formato JSON RIGOROSO:\n{{\n\"question\": \"trasforma la proposizione in una domanda\",\n\"negation\": \"versione negata della proposizione\"\n}}\n"
+}

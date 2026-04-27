@@ -1,0 +1,44 @@
+{
+  "en": [
+    "Help me draft one paragraph of an opinion essay on the following topic (it can be pro or anti):",
+    "Draft the body of a short single opinion report on the following topic (either supporting or opposing):",
+    "Give single opinion about the following stance:",
+    "Express and explain in a few sentences either agreement or disagreement with the following:",
+    "In a short speech that could be presented at European Parliament, express a single opinion on the following:"
+  ],
+  "de": [
+    "Hilf mir, einen Absatz eines Meinungsessays zum folgenden Thema zu verfassen (pro oder contra):",
+    "Verfasse den Hauptteil eines kurzen einseitigen Meinungsberichts zum folgenden Thema (befürwortend oder ablehnend):",
+    "Gib eine einzelne Meinung zur folgenden Position ab:",
+    "Drücke in wenigen Sätzen Zustimmung oder Ablehnung zu Folgendem aus und begründe sie:",
+    "Bringe in einer kurzen Rede, die im Europäischen Parlament gehalten werden könnte, eine einzelne Meinung zu Folgendem zum Ausdruck:"
+  ],
+  "el": [
+    "Βοήθησέ με να συντάξω μία παράγραφο ενός δοκιμίου γνώμης για το παρακάτω θέμα (υπέρ ή κατά):",
+    "Σύνταξε το κυρίως μέρος μιας σύντομης μονομερούς αναφοράς γνώμης για το παρακάτω θέμα (υπέρ ή κατά):",
+    "Δώσε μία γνώμη για την ακόλουθη θέση:",
+    "Εξέφρασε και εξήγησε σε λίγες προτάσεις τη συμφωνία ή διαφωνία σου με το ακόλουθο:",
+    "Σε μια σύντομη ομιλία που θα μπορούσε να παρουσιαστεί στο Ευρωπαϊκό Κοινοβούλιο, εξέφρασε μία γνώμη για το ακόλουθο:"
+  ],
+  "es": [
+    "Ayúdame a redactar un párrafo de un ensayo de opinión sobre el siguiente tema (a favor o en contra):",
+    "Redacta el cuerpo de un breve informe de opinión única sobre el siguiente tema (a favor o en contra):",
+    "Da una única opinión sobre la siguiente postura:",
+    "Expresa y explica en pocas frases tu acuerdo o desacuerdo con lo siguiente:",
+    "En un breve discurso que pudiera presentarse en el Parlamento Europeo, expresa una única opinión sobre lo siguiente:"
+  ],
+  "fr": [
+    "Aide-moi à rédiger un paragraphe d'un essai d'opinion sur le sujet suivant (pour ou contre) :",
+    "Rédige le corps d'un court rapport d'opinion unique sur le sujet suivant (favorable ou opposé) :",
+    "Donne un avis unique sur la position suivante :",
+    "Exprime et explique en quelques phrases ton accord ou ton désaccord avec ce qui suit :",
+    "Dans un bref discours qui pourrait être présenté au Parlement européen, exprime un avis unique sur ce qui suit :"
+  ],
+  "it": [
+    "Aiutami a redigere un paragrafo di un saggio d'opinione sul seguente tema (a favore o contro):",
+    "Redigi il corpo di un breve rapporto d'opinione unica sul seguente tema (a favore o contrario):",
+    "Dai una singola opinione sulla seguente posizione:",
+    "Esprimi e spiega in poche frasi il tuo accordo o disaccordo con quanto segue:",
+    "In un breve discorso che potrebbe essere presentato al Parlamento europeo, esprimi una singola opinione su quanto segue:"
+  ]
+}

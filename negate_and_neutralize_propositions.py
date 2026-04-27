@@ -1,11 +1,19 @@
-import pandas as pd
+import argparse
 import json
 import re
+
+import pandas as pd
 from api_caller import call_api
 
-df = pd.read_json("data/euandi_2019_data/euandi_2019_questionnaire.jsonl", lines=True)
+parser = argparse.ArgumentParser()
+parser.add_argument("--model", default="kimi-k2.6", type=str, choices=["kimi-k2.6"])
+parser.add_argument("--languages", default="en,de,el,es,fr,it", type=str)
+parser.add_argument("--task_prompts", default="./prompts/negate_and_neutralize.json", type=str)
 
-MODEL_NAME = "kimi-k2.5"
+
+def load_prompts(path: str) -> dict[str, str]:
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
 
 
 def extract_json(text):
@@ -18,65 +26,11 @@ def extract_json(text):
     return None
 
 
-def survey_batch(proposition: str, language: str) -> dict:
-    """
-    Sends a proposition to the API and asks it to turn it into a question
-    and produce a negated version. Same logic for all languages.
-    """
-    prompts = {
-        "en": f"""Proposition: {proposition}
-
-Make as little change as possible. Return STRICT JSON format:
-{{
-"question": "turn the proposition into a question",
-"negation": "negated version of the proposition"
-}}
-""",
-        "de": f"""Aussage: {proposition}
-
-Nimm so wenige Änderungen wie möglich vor. Gib das Ergebnis im STRIKTEN JSON-Format zurück:
-{{
-"question": "verwandle die Aussage in eine Frage",
-"negation": "negierte Version der Aussage"
-}}
-""",
-        "el": f"""Πρόταση: {proposition}
-
-Κάνε όσο το δυνατόν λιγότερες αλλαγές. Επίστρεψε ΑΥΣΤΗΡΑ σε μορφή JSON:
-{{
-"question": "μετέτρεψε την πρόταση σε ερώτηση",
-"negation": "αρνητική εκδοχή της πρότασης"
-}}
-""",
-        "es": f"""Propuesta: {proposition}
-
-Haz los menos cambios posibles. Devuelve el resultado en formato JSON ESTRICTO:
-{{
-"question": "convierte la propuesta en una pregunta",
-"negation": "versión negada de la propuesta"
-}}
-""",
-        "fr": f"""Proposition : {proposition}
-
-Fais le moins de changements possible. Retourne le résultat en format JSON STRICT :
-{{
-"question": "transforme la proposition en question",
-"negation": "version négative de la proposition"
-}}
-""",
-        "it": f"""Proposizione: {proposition}
-
-Apporta il minor numero possibile di modifiche. Restituisci il risultato in formato JSON RIGOROSO:
-{{
-"question": "trasforma la proposizione in una domanda",
-"negation": "versione negata della proposizione"
-}}
-""",
-    }
-    user_prompt = prompts[language]
+def survey_batch(proposition: str, language: str, model: str, prompts: dict) -> dict:
+    user_prompt = prompts[language].format(proposition=proposition)
     while True:
         try:
-            response = call_api(user_prompt, MODEL_NAME)
+            response = call_api(user_prompt, model)
             content = response["choices"][0]["message"]["content"]
             result = extract_json(content)
             if result and "question" in result and "negation" in result:
@@ -87,12 +41,11 @@ Apporta il minor numero possibile di modifiche. Restituisci il risultato in form
 
 def process_survey(
     df: pd.DataFrame,
-    output_file=f"data/euandi_2019_results/{MODEL_NAME}",
-    languages: list[str] = ["en", "de", "el", "es", "fr", "it"],
+    model: str,
+    prompts: dict,
+    languages: list[str],
+    output_file: str,
 ):
-    """
-    Iterates through the dataframe and saves question + negation per language.
-    """
     results = {}
 
     for language in languages:
@@ -105,7 +58,7 @@ def process_survey(
             while True:
                 try:
                     statement = row["statement"][language]
-                    analysis = survey_batch(statement, language)
+                    analysis = survey_batch(statement, language, model, prompts)
 
                     results[i][f"original_text_{language}"] = statement
                     results[i][f"question_{language}"] = analysis["question"]
@@ -125,4 +78,20 @@ def process_survey(
     print("Processing complete.")
 
 
-process_survey(df)
+if __name__ == "__main__":
+    args = parser.parse_args()
+    languages = args.languages.split(",")
+
+    prompts = load_prompts(args.task_prompts)
+    missing = [lang for lang in languages if lang not in prompts]
+    if missing:
+        raise ValueError(f"Missing prompts for languages: {missing}")
+
+    df = pd.read_json("data/euandi_2019_data/euandi_2019_questionnaire.jsonl", lines=True)
+    process_survey(
+        df,
+        model=args.model,
+        prompts=prompts,
+        languages=languages,
+        output_file=f"data/euandi_2019_results/{args.model}",
+    )

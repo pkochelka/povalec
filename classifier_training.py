@@ -14,16 +14,32 @@ HF_TOKEN = os.environ.get("HF_TOKEN")
 model_name = 'answerdotai/ModernBERT-base'
 #model_name = 'answerdotai/ModernBERT-large'
 
-#df = pd.read_csv("data/EuroParl/scored_llama/full.csv")
-df = pd.read_csv("data/EuroParl Custom/en_parties_classifier.csv")
-df = df.dropna(subset=["en", "party_group_std"])
-df["en"] = df["en"].astype(str)
+df_train = pd.read_csv("data/combined/train.csv")
+df_train["labels"] = df_train["speaker_party"].astype("category").cat.codes
+df_train = df_train[["text", "labels"]]
+df_train["text"] = df_train["text"].astype(str)
+df_train["labels"] = df_train["labels"].astype("category").cat.codes
 
-df["labels"] = df["party_group_std"].astype("category").cat.codes
-print(df["party_group_std"].unique())
-df = df[["en", "labels"]]
-df["labels"] = df["labels"].astype("category").cat.codes
+df_dev = pd.read_csv("data/combined/dev.csv")
+df_dev["labels"] = df_dev["speaker_party"].astype("category").cat.codes
+df_dev = df_dev[["text", "labels"]]
+df_dev["text"] = df_dev["text"].astype(str)
+df_dev["labels"] = df_dev["labels"].astype("category").cat.codes
 
+df_test = pd.read_csv("data/combined/test.csv")
+df_test["labels"] = df_test["speaker_party"].astype("category").cat.codes
+df_test = df_test[["text", "labels"]]
+df_test["text"] = df_test["text"].astype(str)
+df_test["labels"] = df_test["labels"].astype("category").cat.codes
+
+X_train = df_train["text"]
+y_train = df_train["labels"]
+
+X_dev = df_dev["text"]
+y_dev = df_dev["labels"]
+
+X_test = df_test["text"]
+y_test = df_test["labels"]
 
 
 def download_model() -> tuple[AutoTokenizer, AutoModelForSequenceClassification]:
@@ -31,7 +47,7 @@ def download_model() -> tuple[AutoTokenizer, AutoModelForSequenceClassification]
     model = AutoModelForSequenceClassification.from_pretrained(
         model_name,
         token = HF_TOKEN,
-        num_labels = len(df["labels"].unique())
+        num_labels = len(df_train["labels"].unique())
     )
     
     model.save_pretrained(f'./local_model_{model_name}')
@@ -40,42 +56,29 @@ def download_model() -> tuple[AutoTokenizer, AutoModelForSequenceClassification]
     return tokenizer, model
 
 def load_model() -> tuple[AutoTokenizer, AutoModelForSequenceClassification]:
-    tokenizer = AutoTokenizer.from_pretrained(f"./local_model_{model_name}/", num_labels = len(df["labels"].unique()))
-    model = AutoModelForSequenceClassification.from_pretrained(f"./local_model_{model_name}/", num_labels = len(df["labels"].unique()))
+    tokenizer = AutoTokenizer.from_pretrained(f"./local_model_{model_name}/", num_labels = len(df_train["labels"].unique()))
+    model = AutoModelForSequenceClassification.from_pretrained(f"./local_model_{model_name}/", num_labels = len(df_train["labels"].unique()))
     return tokenizer, model
 
-print(df["labels"].unique())
-
 tokenizer, model = download_model()
-dataset = Dataset.from_pandas(df, preserve_index=False)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", device)
 
 model.to(device)
 
-
-num_labels = len(df["labels"].unique())
-
-dataset = dataset.cast_column(
-    "labels",
-    ClassLabel(num_classes=num_labels)
-)
-
-train_test = dataset.train_test_split(
-    test_size=0.2, seed=42, stratify_by_column="labels"
-)
-
-
-val_test = train_test["test"].train_test_split(
-    test_size=0.5, seed=42, stratify_by_column="labels"
-)
+ds_train = Dataset.from_pandas(df_train, preserve_index=False)
+ds_val = Dataset.from_pandas(df_dev, preserve_index=False)
+ds_test = Dataset.from_pandas(df_test, preserve_index=False)
 
 dataset = DatasetDict({
-    "train": train_test["train"],
-    "validation": val_test["train"],
-    "test": val_test["test"],
+    "train": ds_train,
+    "validation": ds_val,
+    "test": ds_test
 })
+
+num_labels = len(df_train["labels"].unique())
+dataset = dataset.cast_column("labels", ClassLabel(num_classes=num_labels))
 
 train_labels = dataset["train"]["labels"]
 
@@ -101,7 +104,7 @@ def weighted_loss(outputs, labels, num_items_in_batch=None):
 
 def tokenize_function(example):
     tokens = tokenizer(
-        example["en"],
+        example["text"],
         truncation=True,
         max_length=256,
         return_overflowing_tokens=True,
@@ -118,32 +121,11 @@ data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 tokenized_datasets = dataset.map(
     tokenize_function,
     batched=True,
-    remove_columns=["en"]
+    remove_columns=["text"]
 )
 
 accuracy = evaluate.load("accuracy")
 f1 = evaluate.load("f1")
-
-def predict_speech(text):
-    inputs = tokenizer(
-        text,
-        truncation=True,
-        max_length=256,
-        return_overflowing_tokens=True,
-        stride=50,
-        return_tensors="pt"
-    )
-
-    inputs = {k: v.to(model.device) for k, v in inputs.items()}
-
-    with torch.no_grad():
-        outputs = model(**inputs)
-        logits = outputs.logits
-
-    avg_logits = logits.mean(dim=0)
-    pred = torch.argmax(avg_logits).item()
-
-    return pred
 
 def compute_metrics(eval_pred):
     logits, labels = eval_pred
@@ -170,7 +152,7 @@ training_args = TrainingArguments(f"{model_name}-trainer", fp16=True, eval_strat
     metric_for_best_model="f1_macro",
     gradient_checkpointing=True,
     gradient_accumulation_steps=2,
-    per_device_train_batch_size=8,
+    per_device_train_batch_size=64,
     weight_decay=0.1,
     num_train_epochs=2,
     lr_scheduler_type="cosine",
@@ -191,24 +173,28 @@ trainer = Trainer(
 
 trainer.train()
 
+def predict_speech(text):
+    inputs = tokenizer(
+        text,
+        truncation=True,
+        max_length=256,
+        return_tensors="pt"
+    ).to(model.device)
+
+    with torch.no_grad():
+        logits = model(**inputs).logits
+
+    return torch.argmax(logits, dim=-1).item()
+
 def evaluate_full_speeches(dataset_split):
-    preds = []
-    labels = []
+    preds, labels = [], []
 
     for example in dataset_split:
-        text = example["en"]
-        label = example["labels"]
+        preds.append(predict_speech(example["text"]))
+        labels.append(example["labels"])
 
-        pred = predict_speech(text)
-
-        preds.append(pred)
-        labels.append(label)
-
-    preds = np.array(preds)
-    labels = np.array(labels)
-
-    acc = (preds == labels).mean()
-
+    acc = (np.array(preds) == np.array(labels)).mean()
     print("Speech-level accuracy:", acc)
 
 evaluate_full_speeches(dataset["test"])
+

@@ -1,43 +1,69 @@
 #!/usr/bin/env python3
+import argparse
+import os
 import torch
 import pandas as pd
-import numpy as np
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
-from sklearn.metrics import classification_report, confusion_matrix
 
-model_path = "./answerdotai/ModernBERT-base-trainer/2epochs-full-data-debates-filtered-europarl-unfiltered" 
-test_data_path = "./data/euandi_2019_results/LLaMa_speeches.csv"
-device = 0 if torch.cuda.is_available() else -1
+parser = argparse.ArgumentParser()
+parser.add_argument("--transformer", default="./answerdotai/ModernBERT-large-trainer/en-6epochs-full-data-debates-filtered-europarl-unfiltered", type=str)
+parser.add_argument("--llm", default="gpt-oss-120b", type=str, choices=["gpt-oss-120b", "qwen3.5-122b"])
+parser.add_argument("--input", default=None, type=str, help="Input CSV; defaults to ./data/euandi_2019_results/{llm}/speeches_{languages}{variant}.csv")
+parser.add_argument("--variant", default="_negated", type=str, choices=["", "_question", "_negated"])
+parser.add_argument("--languages", default="en", type=str)
+parser.add_argument("--batch_size", default=8, type=int)
+parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
 
-print(f"--- Loading model from: {model_path} ---")
 
-def run_evaluation():
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
-    model = AutoModelForSequenceClassification.from_pretrained(model_path)
-    
+def classify_dataframe(df, languages, variant, classifier, batch_size):
+    for language in languages:
+        lang_variant = f"{language}{variant}"
+        v = 0
+        found = False
+        while True:
+            col = f"answer_{lang_variant}_v{v}"
+            if col not in df.columns:
+                break
+            found = True
+            valid_mask = df[col].notna() & df[col].astype(str).str.strip().ne("")
+            valid_texts = df.loc[valid_mask, col].astype(str).tolist()
+            if valid_texts:
+                results = classifier(valid_texts, batch_size=batch_size)
+                predictions = [res["label"] for res in results]
+                df.loc[valid_mask, f"predicted_label_{lang_variant}_v{v}"] = predictions
+            v += 1
+        if not found:
+            print(f"[{lang_variant}] no answer columns found, skipping.")
+    return df
+
+
+def run_evaluation(transformer_path, input_path, output_path, languages, variant, batch_size, device):
+    print(f"--- Loading model from: {transformer_path} ---")
+    tokenizer = AutoTokenizer.from_pretrained(transformer_path)
+    model = AutoModelForSequenceClassification.from_pretrained(transformer_path)
+
     classifier = pipeline(
-        "text-classification", 
-        model=model, 
-        tokenizer=tokenizer, 
+        "text-classification",
+        model=model,
+        tokenizer=tokenizer,
         device=device,
         truncation=True,
-        max_length=1024
+        max_length=512,
     )
 
-    df_test = pd.read_csv(test_data_path, sep=";", encoding="utf-8-sig")
-    
-    texts = df_test["answer"].astype(str).tolist()
+    df = pd.read_csv(input_path, sep=";", encoding="utf-8-sig")
+    print(f"Loaded {len(df)} rows from {input_path}")
 
-    print(f"Classifying {len(texts)} samples...")
+    df = classify_dataframe(df, languages, variant, classifier, batch_size)
 
-    results = classifier(texts, batch_size=16)
-    print(results)
+    df.to_csv(output_path, sep=";", index=False, encoding="utf-8-sig")
+    print(f"Predictions saved to {output_path}")
 
-    predictions = [int(res['label'].split('_')[-1]) for res in results]
-    
-    df_test["predicted_label"] = predictions
-    df_test.to_csv("./data/euandi_2019_results/test_predictions_output_llama.csv", sep=";", index=False, encoding="utf-8-sig")
-    print("Predictions saved to test_predictions_output.csv")
 
 if __name__ == "__main__":
-    run_evaluation()
+    args = parser.parse_args()
+    languages = args.languages.split(",")
+    input_path = args.input or f"./data/euandi_2019_results/{args.llm}/speeches_en,de,el,es,fr,it{args.variant}.csv"
+    stem, ext = os.path.splitext(input_path)
+    output_path = f"{stem}_classified{ext}"
+    run_evaluation(args.transformer, input_path, output_path, languages, args.variant, args.batch_size, args.device)

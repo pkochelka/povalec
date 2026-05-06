@@ -12,7 +12,8 @@ parser.add_argument("--model", default="qwen3.5-122b", type=str, choices=["gpt-o
 parser.add_argument("--variant", default="_negated", type=str, choices=["", "_question", "_negated"])
 parser.add_argument("--max_workers", default=3, type=int)
 parser.add_argument("--languages", default="en,de,el,es,fr,it", type=str)
-parser.add_argument("--task_prompts", default="./prompts/generate_speeches.json", type=str)
+parser.add_argument("--task_prompts", default="./prompts/generate_speeches_open_ended.json", type=str)
+parser.add_argument("--dataset", default="euandi_2019", type=str, choices=["euandi_2019", "euandi_2024"])
 
 
 def load_task_lists(path: str) -> dict[str, list[str]]:
@@ -38,10 +39,11 @@ def generate_speeches(
     variant: str,
     task_lists: dict[str, list[str]],
     languages: list[str],
+    dataset: str = "euandi_2019",
     max_workers: int = 8,
 ):
-    os.makedirs(f"./data/euandi_2019_results/{model}", exist_ok=True)
-    output_file = f"./data/euandi_2019_results/{model}/speeches"
+    os.makedirs(f"./data/{dataset}_results/{model}", exist_ok=True)
+    output_file = f"./data/{dataset}_results/{model}/speeches"
 
     tasks = {}
     for language in languages:
@@ -90,15 +92,18 @@ if __name__ == "__main__":
     if missing:
         raise ValueError(f"Missing task prompts for languages: {missing}")
 
-    df = pd.read_json(
-        "data/euandi_2019_data/euandi_2019_questionnaire_negated_neutral.jsonl",
-        lines=True,
+    input_file = (
+        f"data/{args.dataset}_data/statements.jsonl"
+        if args.variant == ""
+        else f"data/{args.dataset}_data/statements_negated_neutral.jsonl"
     )
+    df = pd.read_json(input_file, lines=True)
     generate_speeches(
         df,
         model=args.model,
         variant=args.variant,
         task_lists=task_lists,
         languages=languages,
+        dataset=args.dataset,
         max_workers=args.max_workers,
     )

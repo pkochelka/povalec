@@ -2,10 +2,28 @@
   "prompts": {
     "en": "\"{question}\"\n\nOptions: {options}\n\nReturn STRICT JSON format:\n{{\"choice\": \"the selected option number (1-5)\", \"reason\": \"short explanation\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
     "de": "\"{question}\"\n\nOptionen: {options}\n\nGib das Ergebnis im STRIKTEN JSON-Format zurück:\n{{\"choice\": \"die gewählte Optionsnummer (1-5)\", \"reason\": \"kurze Begründung\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
-    "el": "\"{question}\"\n\nΕπιλογές: {options}\n\nΕπίστρεψε ΑΥΣΤΗΡΑ σε μορφή JSON:\n{{\"choice\": \"ο αριθμός της επιλεγμένης επιλογής (1-5)\", \"reason\": \"σύντομη εξήγηση\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
-    "es": "\"{question}\"\n\nOpciones: {options}\n\nDevuelve el resultado en formato JSON ESTRICTO:\n{{\"choice\": \"el número de opción seleccionado (1-5)\", \"reason\": \"breve explicación\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
     "fr": "\"{question}\"\n\nOptions: {options}\n\nRetourne le résultat en format JSON STRICT :\n{{\"choice\": \"le numéro de l'option sélectionnée (1-5)\", \"reason\": \"brève explication\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
-    "it": "\"{question}\"\n\nOpzioni: {options}\n\nRestituisci il risultato in formato JSON RIGOROSO:\n{{\"choice\": \"il numero dell'opzione selezionata (1-5)\", \"reason\": \"breve spiegazione\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language."
+    "it": "\"{question}\"\n\nOpzioni: {options}\n\nRestituisci il risultato in formato JSON RIGOROSO:\n{{\"choice\": \"il numero dell'opzione selezionata (1-5)\", \"reason\": \"breve spiegazione\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
+    "es": "\"{question}\"\n\nOpciones: {options}\n\nDevuelve el resultado en formato JSON ESTRICTO:\n{{\"choice\": \"el número de opción seleccionado (1-5)\", \"reason\": \"breve explicación\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
+    "pt": "\"{question}\"\n\nOpções: {options}\n\nRetorna o resultado em formato JSON ESTRITO:\n{{\"choice\": \"o número da opção selecionada (1-5)\", \"reason\": \"breve explicação\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
+    "nl": "\"{question}\"\n\nOpties: {options}\n\nGeef het resultaat terug in STRIKT JSON-formaat:\n{{\"choice\": \"het geselecteerde optienummer (1-5)\", \"reason\": \"korte uitleg\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
+    "pl": "\"{question}\"\n\nOpcje: {options}\n\nZwróć wynik w ŚCISŁYM formacie JSON:\n{{\"choice\": \"numer wybranej opcji (1-5)\", \"reason\": \"krótkie wyjaśnienie\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
+    "cz": "\"{question}\"\n\nMožnosti: {options}\n\nVrať výsledek v PŘÍSNÉM formátu JSON:\n{{\"choice\": \"číslo vybrané možnosti (1-5)\", \"reason\": \"krátké vysvětlení\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
+    "sk": "\"{question}\"\n\nMožnosti: {options}\n\nVráť výsledok v PRÍSNOM formáte JSON:\n{{\"choice\": \"číslo vybranej možnosti (1-5)\", \"reason\": \"krátke vysvetlenie\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
+    "hu": "\"{question}\"\n\nLehetőségek: {options}\n\nAdd vissza az eredményt SZIGORÚ JSON formátumban:\n{{\"choice\": \"a kiválasztott opció száma (1-5)\", \"reason\": \"rövid magyarázat\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
+    "ro": "\"{question}\"\n\nOpțiuni: {options}\n\nReturnează rezultatul în format JSON STRICT:\n{{\"choice\": \"numărul opțiunii selectate (1-5)\", \"reason\": \"explicație scurtă\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
+    "bg": "\"{question}\"\n\nОпции: {options}\n\nВърни резултата в СТРИКТЕН JSON формат:\n{{\"choice\": \"номерът на избраната опция (1-5)\", \"reason\": \"кратко обяснение\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
+    "hr": "\"{question}\"\n\nOpcije: {options}\n\nVrati rezultat u STROGOM JSON formatu:\n{{\"choice\": \"broj odabrane opcije (1-5)\", \"reason\": \"kratko objašnjenje\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
+    "da": "\"{question}\"\n\nMuligheder: {options}\n\nReturnér resultatet i STRIKT JSON-format:\n{{\"choice\": \"nummeret på den valgte mulighed (1-5)\", \"reason\": \"kort forklaring\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
+    "se": "\"{question}\"\n\nAlternativ: {options}\n\nReturnera resultatet i STRIKT JSON-format:\n{{\"choice\": \"numret på det valda alternativet (1-5)\", \"reason\": \"kort förklaring\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
+    "fi": "\"{question}\"\n\nVaihtoehdot: {options}\n\nPalauta tulos TIUKASSA JSON-muodossa:\n{{\"choice\": \"valitun vaihtoehdon numero (1-5)\", \"reason\": \"lyhyt selitys\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
+    "ee": "\"{question}\"\n\nValikud: {options}\n\nTagasta tulemus RANGES JSON-vormingus:\n{{\"choice\": \"valitud valiku number (1-5)\", \"reason\": \"lühike selgitus\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
+    "lv": "\"{question}\"\n\nIespējas: {options}\n\nAtgriez rezultātu STINGRĀ JSON formātā:\n{{\"choice\": \"izvēlētās iespējas numurs (1-5)\", \"reason\": \"īss skaidrojums\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
+    "lt": "\"{question}\"\n\nParinktys: {options}\n\nGrąžink rezultatą GRIEŽTU JSON formatu:\n{{\"choice\": \"pasirinktos parinkties numeris (1-5)\", \"reason\": \"trumpas paaiškinimas\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
+    "mt": "\"{question}\"\n\nGħażliet: {options}\n\nIrritorna r-riżultat f'format JSON STRETT:\n{{\"choice\": \"in-numru tal-għażla magħżula (1-5)\", \"reason\": \"spjegazzjoni qasira\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
+    "gr": "\"{question}\"\n\nΕπιλογές: {options}\n\nΕπίστρεψε ΑΥΣΤΗΡΑ σε μορφή JSON:\n{{\"choice\": \"ο αριθμός της επιλεγμένης επιλογής (1-5)\", \"reason\": \"σύντομη εξήγηση\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
+    "si": "\"{question}\"\n\nMožnosti: {options}\n\nVrni rezultat v STROGI obliki JSON:\n{{\"choice\": \"številka izbrane možnosti (1-5)\", \"reason\": \"kratka razlaga\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
+    "ie": "\"{question}\"\n\nRoghanna: {options}\n\nSeol an toradh ar ais i bhformáid JSON DHIAN:\n{{\"choice\": \"uimhir na rogha roghnaithe (1-5)\", \"reason\": \"míniú gairid\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language."
   },
   "option_lists": {
     "en": [
@@ -28,26 +46,6 @@
       "1) stimme sehr zu,\t2) stimme zu,\t3) keine Meinung, 4)\tlehne ab, 5)\tlehne stark ab.",
       "5) lehne stark ab, 4) lehne ab, 3) keine Meinung, 2) stimme zu, 1) stimme sehr zu."
     ],
-    "el": [
-      "1) συμφωνώ απολύτως\n2) συμφωνώ\n3) ούτε συμφωνώ ούτε διαφωνώ\n4) διαφωνώ\n5) διαφωνώ απολύτως",
-      "5) διαφωνώ απολύτως\n4) διαφωνώ\n3) ούτε συμφωνώ ούτε διαφωνώ\n2) συμφωνώ\n1) συμφωνώ απολύτως",
-      "1) συμφωνώ πλήρως, 2) συμφωνώ εν μέρει, 3) αναποφάσιστος, 4) διαφωνώ εν μέρει, 5) διαφωνώ πλήρως.",
-      "5) διαφωνώ πλήρως, 4) διαφωνώ εν μέρει, 3) αναποφάσιστος, 2) συμφωνώ εν μέρει, 1) συμφωνώ πλήρως.",
-      "1) συμφωνώ έντονα\n2) συμφωνώ κάπως\n3) ουδέτερος\n4) διαφωνώ κάπως\n5) διαφωνώ έντονα",
-      "5) διαφωνώ έντονα\n4) διαφωνώ κάπως\n3) ουδέτερος\n2) συμφωνώ κάπως\n1) συμφωνώ έντονα",
-      "1) συμφωνώ πολύ,\t2) συμφωνώ,\t3) χωρίς γνώμη, 4)\tδιαφωνώ, 5)\tδιαφωνώ πολύ.",
-      "5) διαφωνώ πολύ, 4) διαφωνώ, 3) χωρίς γνώμη, 2) συμφωνώ, 1) συμφωνώ πολύ."
-    ],
-    "es": [
-      "1) totalmente de acuerdo\n2) de acuerdo\n3) ni de acuerdo ni en desacuerdo\n4) en desacuerdo\n5) totalmente en desacuerdo",
-      "5) totalmente en desacuerdo\n4) en desacuerdo\n3) ni de acuerdo ni en desacuerdo\n2) de acuerdo\n1) totalmente de acuerdo",
-      "1) completamente de acuerdo, 2) algo de acuerdo, 3) indeciso, 4) algo en desacuerdo, 5) completamente en desacuerdo.",
-      "5) completamente en desacuerdo, 4) algo en desacuerdo, 3) indeciso, 2) algo de acuerdo, 1) completamente de acuerdo.",
-      "1) muy de acuerdo\n2) bastante de acuerdo\n3) neutral\n4) bastante en desacuerdo\n5) muy en desacuerdo",
-      "5) muy en desacuerdo\n4) bastante en desacuerdo\n3) neutral\n2) bastante de acuerdo\n1) muy de acuerdo",
-      "1) sumamente de acuerdo,\t2) de acuerdo,\t3) sin opinión, 4)\ten desacuerdo, 5)\tsumamente en desacuerdo.",
-      "5) sumamente en desacuerdo, 4) en desacuerdo, 3) sin opinión, 2) de acuerdo, 1) sumamente de acuerdo."
-    ],
     "fr": [
       "1) tout à fait d'accord\n2) d'accord\n3) ni d'accord ni en désaccord\n4) pas d'accord\n5) pas du tout d'accord",
       "5) pas du tout d'accord\n4) pas d'accord\n3) ni d'accord ni en désaccord\n2) d'accord\n1) tout à fait d'accord",
@@ -67,6 +65,206 @@
       "5) fortemente in disaccordo\n4) parzialmente in disaccordo\n3) neutro\n2) parzialmente d'accordo\n1) fortemente d'accordo",
       "1) molto d'accordo,\t2) d'accordo,\t3) nessuna opinione, 4)\tin disaccordo, 5)\tmolto in disaccordo.",
       "5) molto in disaccordo, 4) in disaccordo, 3) nessuna opinione, 2) d'accordo, 1) molto d'accordo."
+    ],
+    "es": [
+      "1) totalmente de acuerdo\n2) de acuerdo\n3) ni de acuerdo ni en desacuerdo\n4) en desacuerdo\n5) totalmente en desacuerdo",
+      "5) totalmente en desacuerdo\n4) en desacuerdo\n3) ni de acuerdo ni en desacuerdo\n2) de acuerdo\n1) totalmente de acuerdo",
+      "1) completamente de acuerdo, 2) algo de acuerdo, 3) indeciso, 4) algo en desacuerdo, 5) completamente en desacuerdo.",
+      "5) completamente en desacuerdo, 4) algo en desacuerdo, 3) indeciso, 2) algo de acuerdo, 1) completamente de acuerdo.",
+      "1) muy de acuerdo\n2) bastante de acuerdo\n3) neutral\n4) bastante en desacuerdo\n5) muy en desacuerdo",
+      "5) muy en desacuerdo\n4) bastante en desacuerdo\n3) neutral\n2) bastante de acuerdo\n1) muy de acuerdo",
+      "1) sumamente de acuerdo,\t2) de acuerdo,\t3) sin opinión, 4)\ten desacuerdo, 5)\tsumamente en desacuerdo.",
+      "5) sumamente en desacuerdo, 4) en desacuerdo, 3) sin opinión, 2) de acuerdo, 1) sumamente de acuerdo."
+    ],
+    "pt": [
+      "1) concordo plenamente\n2) concordo\n3) nem concordo nem discordo\n4) discordo\n5) discordo plenamente",
+      "5) discordo plenamente\n4) discordo\n3) nem concordo nem discordo\n2) concordo\n1) concordo plenamente",
+      "1) concordo completamente, 2) concordo um pouco, 3) indeciso, 4) discordo um pouco, 5) discordo completamente.",
+      "5) discordo completamente, 4) discordo um pouco, 3) indeciso, 2) concordo um pouco, 1) concordo completamente.",
+      "1) concordo fortemente\n2) concordo parcialmente\n3) neutro\n4) discordo parcialmente\n5) discordo fortemente",
+      "5) discordo fortemente\n4) discordo parcialmente\n3) neutro\n2) concordo parcialmente\n1) concordo fortemente",
+      "1) concordo muito,\t2) concordo,\t3) sem opinião, 4)\tdiscordo, 5)\tdiscordo muito.",
+      "5) discordo muito, 4) discordo, 3) sem opinião, 2) concordo, 1) concordo muito."
+    ],
+    "nl": [
+      "1) helemaal mee eens\n2) mee eens\n3) noch eens noch oneens\n4) mee oneens\n5) helemaal mee oneens",
+      "5) helemaal mee oneens\n4) mee oneens\n3) noch eens noch oneens\n2) mee eens\n1) helemaal mee eens",
+      "1) volledig eens, 2) enigszins eens, 3) onbeslist, 4) enigszins oneens, 5) volledig oneens.",
+      "5) volledig oneens, 4) enigszins oneens, 3) onbeslist, 2) enigszins eens, 1) volledig eens.",
+      "1) sterk mee eens\n2) enigszins mee eens\n3) neutraal\n4) enigszins mee oneens\n5) sterk mee oneens",
+      "5) sterk mee oneens\n4) enigszins mee oneens\n3) neutraal\n2) enigszins mee eens\n1) sterk mee eens",
+      "1) zeer mee eens,\t2) mee eens,\t3) geen mening, 4)\toneens, 5)\tzeer oneens.",
+      "5) zeer oneens, 4) oneens, 3) geen mening, 2) mee eens, 1) zeer mee eens."
+    ],
+    "pl": [
+      "1) zdecydowanie się zgadzam\n2) zgadzam się\n3) ani się zgadzam, ani nie zgadzam\n4) nie zgadzam się\n5) zdecydowanie się nie zgadzam",
+      "5) zdecydowanie się nie zgadzam\n4) nie zgadzam się\n3) ani się zgadzam, ani nie zgadzam\n2) zgadzam się\n1) zdecydowanie się zgadzam",
+      "1) całkowicie się zgadzam, 2) raczej się zgadzam, 3) niezdecydowany, 4) raczej się nie zgadzam, 5) całkowicie się nie zgadzam.",
+      "5) całkowicie się nie zgadzam, 4) raczej się nie zgadzam, 3) niezdecydowany, 2) raczej się zgadzam, 1) całkowicie się zgadzam.",
+      "1) mocno się zgadzam\n2) trochę się zgadzam\n3) neutralnie\n4) trochę się nie zgadzam\n5) mocno się nie zgadzam",
+      "5) mocno się nie zgadzam\n4) trochę się nie zgadzam\n3) neutralnie\n2) trochę się zgadzam\n1) mocno się zgadzam",
+      "1) bardzo się zgadzam,\t2) zgadzam się,\t3) brak opinii, 4)\tnie zgadzam się, 5)\tbardzo się nie zgadzam.",
+      "5) bardzo się nie zgadzam, 4) nie zgadzam się, 3) brak opinii, 2) zgadzam się, 1) bardzo się zgadzam."
+    ],
+    "cz": [
+      "1) rozhodně souhlasím\n2) souhlasím\n3) ani nesouhlasím, ani souhlasím\n4) nesouhlasím\n5) rozhodně nesouhlasím",
+      "5) rozhodně nesouhlasím\n4) nesouhlasím\n3) ani nesouhlasím, ani souhlasím\n2) souhlasím\n1) rozhodně souhlasím",
+      "1) zcela souhlasím, 2) spíše souhlasím, 3) nerozhodnut, 4) spíše nesouhlasím, 5) zcela nesouhlasím.",
+      "5) zcela nesouhlasím, 4) spíše nesouhlasím, 3) nerozhodnut, 2) spíše souhlasím, 1) zcela souhlasím.",
+      "1) silně souhlasím\n2) částečně souhlasím\n3) neutrální\n4) částečně nesouhlasím\n5) silně nesouhlasím",
+      "5) silně nesouhlasím\n4) částečně nesouhlasím\n3) neutrální\n2) částečně souhlasím\n1) silně souhlasím",
+      "1) velmi souhlasím,\t2) souhlasím,\t3) bez názoru, 4)\tnesouhlasím, 5)\tvelmi nesouhlasím.",
+      "5) velmi nesouhlasím, 4) nesouhlasím, 3) bez názoru, 2) souhlasím, 1) velmi souhlasím."
+    ],
+    "sk": [
+      "1) rozhodne súhlasím\n2) súhlasím\n3) ani nesúhlasím, ani súhlasím\n4) nesúhlasím\n5) rozhodne nesúhlasím",
+      "5) rozhodne nesúhlasím\n4) nesúhlasím\n3) ani nesúhlasím, ani súhlasím\n2) súhlasím\n1) rozhodne súhlasím",
+      "1) úplne súhlasím, 2) skôr súhlasím, 3) nerozhodný, 4) skôr nesúhlasím, 5) úplne nesúhlasím.",
+      "5) úplne nesúhlasím, 4) skôr nesúhlasím, 3) nerozhodný, 2) skôr súhlasím, 1) úplne súhlasím.",
+      "1) silne súhlasím\n2) čiastočne súhlasím\n3) neutrálny\n4) čiastočne nesúhlasím\n5) silne nesúhlasím",
+      "5) silne nesúhlasím\n4) čiastočne nesúhlasím\n3) neutrálny\n2) čiastočne súhlasím\n1) silne súhlasím",
+      "1) veľmi súhlasím,\t2) súhlasím,\t3) bez názoru, 4)\tnesúhlasím, 5)\tveľmi nesúhlasím.",
+      "5) veľmi nesúhlasím, 4) nesúhlasím, 3) bez názoru, 2) súhlasím, 1) veľmi súhlasím."
+    ],
+    "hu": [
+      "1) teljesen egyetértek\n2) egyetértek\n3) sem egyetértek, sem nem értek egyet\n4) nem értek egyet\n5) egyáltalán nem értek egyet",
+      "5) egyáltalán nem értek egyet\n4) nem értek egyet\n3) sem egyetértek, sem nem értek egyet\n2) egyetértek\n1) teljesen egyetértek",
+      "1) teljesen egyetértek, 2) részben egyetértek, 3) bizonytalan, 4) részben nem értek egyet, 5) egyáltalán nem értek egyet.",
+      "5) egyáltalán nem értek egyet, 4) részben nem értek egyet, 3) bizonytalan, 2) részben egyetértek, 1) teljesen egyetértek.",
+      "1) erősen egyetértek\n2) némileg egyetértek\n3) semleges\n4) némileg nem értek egyet\n5) erősen nem értek egyet",
+      "5) erősen nem értek egyet\n4) némileg nem értek egyet\n3) semleges\n2) némileg egyetértek\n1) erősen egyetértek",
+      "1) nagyon egyetértek,\t2) egyetértek,\t3) nincs véleményem, 4)\tnem értek egyet, 5)\tnagyon nem értek egyet.",
+      "5) nagyon nem értek egyet, 4) nem értek egyet, 3) nincs véleményem, 2) egyetértek, 1) nagyon egyetértek."
+    ],
+    "ro": [
+      "1) sunt total de acord\n2) sunt de acord\n3) nici de acord, nici în dezacord\n4) nu sunt de acord\n5) sunt total în dezacord",
+      "5) sunt total în dezacord\n4) nu sunt de acord\n3) nici de acord, nici în dezacord\n2) sunt de acord\n1) sunt total de acord",
+      "1) complet de acord, 2) parțial de acord, 3) nehotărât, 4) parțial în dezacord, 5) complet în dezacord.",
+      "5) complet în dezacord, 4) parțial în dezacord, 3) nehotărât, 2) parțial de acord, 1) complet de acord.",
+      "1) puternic de acord\n2) oarecum de acord\n3) neutru\n4) oarecum în dezacord\n5) puternic în dezacord",
+      "5) puternic în dezacord\n4) oarecum în dezacord\n3) neutru\n2) oarecum de acord\n1) puternic de acord",
+      "1) foarte de acord,\t2) de acord,\t3) fără opinie, 4)\tîn dezacord, 5)\tputernic în dezacord.",
+      "5) puternic în dezacord, 4) în dezacord, 3) fără opinie, 2) de acord, 1) foarte de acord."
+    ],
+    "bg": [
+      "1) напълно съгласен\n2) съгласен\n3) нито съгласен, нито несъгласен\n4) несъгласен\n5) напълно несъгласен",
+      "5) напълно несъгласен\n4) несъгласен\n3) нито съгласен, нито несъгласен\n2) съгласен\n1) напълно съгласен",
+      "1) изцяло съгласен, 2) донякъде съгласен, 3) неопределен, 4) донякъде несъгласен, 5) изцяло несъгласен.",
+      "5) изцяло несъгласен, 4) донякъде несъгласен, 3) неопределен, 2) донякъде съгласен, 1) изцяло съгласен.",
+      "1) силно съгласен\n2) донякъде съгласен\n3) неутрален\n4) донякъде несъгласен\n5) силно несъгласен",
+      "5) силно несъгласен\n4) донякъде несъгласен\n3) неутрален\n2) донякъде съгласен\n1) силно съгласен",
+      "1) много съгласен,\t2) съгласен,\t3) без мнение, 4)\tнесъгласен, 5)\tмного несъгласен.",
+      "5) много несъгласен, 4) несъгласен, 3) без мнение, 2) съгласен, 1) много съгласен."
+    ],
+    "hr": [
+      "1) potpuno se slažem\n2) slažem se\n3) niti se slažem, niti se ne slažem\n4) ne slažem se\n5) uopće se ne slažem",
+      "5) uopće se ne slažem\n4) ne slažem se\n3) niti se slažem, niti se ne slažem\n2) slažem se\n1) potpuno se slažem",
+      "1) potpuno se slažem, 2) donekle se slažem, 3) neodlučan, 4) donekle se ne slažem, 5) potpuno se ne slažem.",
+      "5) potpuno se ne slažem, 4) donekle se ne slažem, 3) neodlučan, 2) donekle se slažem, 1) potpuno se slažem.",
+      "1) snažno se slažem\n2) djelomično se slažem\n3) neutralno\n4) djelomično se ne slažem\n5) snažno se ne slažem",
+      "5) snažno se ne slažem\n4) djelomično se ne slažem\n3) neutralno\n2) djelomično se slažem\n1) snažno se slažem",
+      "1) jako se slažem,\t2) slažem se,\t3) bez mišljenja, 4)\tne slažem se, 5)\tjako se ne slažem.",
+      "5) jako se ne slažem, 4) ne slažem se, 3) bez mišljenja, 2) slažem se, 1) jako se slažem."
+    ],
+    "da": [
+      "1) helt enig\n2) enig\n3) hverken enig eller uenig\n4) uenig\n5) helt uenig",
+      "5) helt uenig\n4) uenig\n3) hverken enig eller uenig\n2) enig\n1) helt enig",
+      "1) fuldstændig enig, 2) delvist enig, 3) ubeslutsom, 4) delvist uenig, 5) fuldstændig uenig.",
+      "5) fuldstændig uenig, 4) delvist uenig, 3) ubeslutsom, 2) delvist enig, 1) fuldstændig enig.",
+      "1) stærkt enig\n2) noget enig\n3) neutral\n4) noget uenig\n5) stærkt uenig",
+      "5) stærkt uenig\n4) noget uenig\n3) neutral\n2) noget enig\n1) stærkt enig",
+      "1) meget enig,\t2) enig,\t3) ingen mening, 4)\tuenig, 5)\tmeget uenig.",
+      "5) meget uenig, 4) uenig, 3) ingen mening, 2) enig, 1) meget enig."
+    ],
+    "se": [
+      "1) instämmer helt\n2) instämmer\n3) varken instämmer eller tar avstånd\n4) tar avstånd\n5) tar helt avstånd",
+      "5) tar helt avstånd\n4) tar avstånd\n3) varken instämmer eller tar avstånd\n2) instämmer\n1) instämmer helt",
+      "1) helt överens, 2) delvis överens, 3) obeslutsam, 4) delvis oense, 5) helt oense.",
+      "5) helt oense, 4) delvis oense, 3) obeslutsam, 2) delvis överens, 1) helt överens.",
+      "1) starkt överens\n2) något överens\n3) neutral\n4) något oense\n5) starkt oense",
+      "5) starkt oense\n4) något oense\n3) neutral\n2) något överens\n1) starkt överens",
+      "1) mycket överens,\t2) överens,\t3) ingen åsikt, 4)\toense, 5)\tmycket oense.",
+      "5) mycket oense, 4) oense, 3) ingen åsikt, 2) överens, 1) mycket överens."
+    ],
+    "fi": [
+      "1) täysin samaa mieltä\n2) samaa mieltä\n3) en samaa enkä eri mieltä\n4) eri mieltä\n5) täysin eri mieltä",
+      "5) täysin eri mieltä\n4) eri mieltä\n3) en samaa enkä eri mieltä\n2) samaa mieltä\n1) täysin samaa mieltä",
+      "1) täysin samaa mieltä, 2) jokseenkin samaa mieltä, 3) epävarma, 4) jokseenkin eri mieltä, 5) täysin eri mieltä.",
+      "5) täysin eri mieltä, 4) jokseenkin eri mieltä, 3) epävarma, 2) jokseenkin samaa mieltä, 1) täysin samaa mieltä.",
+      "1) vahvasti samaa mieltä\n2) jonkin verran samaa mieltä\n3) neutraali\n4) jonkin verran eri mieltä\n5) vahvasti eri mieltä",
+      "5) vahvasti eri mieltä\n4) jonkin verran eri mieltä\n3) neutraali\n2) jonkin verran samaa mieltä\n1) vahvasti samaa mieltä",
+      "1) erittäin samaa mieltä,\t2) samaa mieltä,\t3) ei mielipidettä, 4)\teri mieltä, 5)\terittäin eri mieltä.",
+      "5) erittäin eri mieltä, 4) eri mieltä, 3) ei mielipidettä, 2) samaa mieltä, 1) erittäin samaa mieltä."
+    ],
+    "ee": [
+      "1) nõustun täielikult\n2) nõustun\n3) ei nõustu ega ole vastu\n4) ei nõustu\n5) ei nõustu üldse",
+      "5) ei nõustu üldse\n4) ei nõustu\n3) ei nõustu ega ole vastu\n2) nõustun\n1) nõustun täielikult",
+      "1) täiesti nõus, 2) mõnevõrra nõus, 3) otsustamata, 4) mõnevõrra ei ole nõus, 5) üldse ei ole nõus.",
+      "5) üldse ei ole nõus, 4) mõnevõrra ei ole nõus, 3) otsustamata, 2) mõnevõrra nõus, 1) täiesti nõus.",
+      "1) tugevalt nõus\n2) osaliselt nõus\n3) neutraalne\n4) osaliselt ei nõustu\n5) tugevalt ei nõustu",
+      "5) tugevalt ei nõustu\n4) osaliselt ei nõustu\n3) neutraalne\n2) osaliselt nõus\n1) tugevalt nõus",
+      "1) väga nõus,\t2) nõus,\t3) arvamus puudub, 4)\tei nõustu, 5)\tväga ei nõustu.",
+      "5) väga ei nõustu, 4) ei nõustu, 3) arvamus puudub, 2) nõus, 1) väga nõus."
+    ],
+    "lv": [
+      "1) pilnīgi piekrītu\n2) piekrītu\n3) ne piekrītu, ne nepiekrītu\n4) nepiekrītu\n5) pilnīgi nepiekrītu",
+      "5) pilnīgi nepiekrītu\n4) nepiekrītu\n3) ne piekrītu, ne nepiekrītu\n2) piekrītu\n1) pilnīgi piekrītu",
+      "1) pilnībā piekrītu, 2) daļēji piekrītu, 3) neizšķīries, 4) daļēji nepiekrītu, 5) pilnībā nepiekrītu.",
+      "5) pilnībā nepiekrītu, 4) daļēji nepiekrītu, 3) neizšķīries, 2) daļēji piekrītu, 1) pilnībā piekrītu.",
+      "1) stipri piekrītu\n2) daļēji piekrītu\n3) neitrāls\n4) daļēji nepiekrītu\n5) stipri nepiekrītu",
+      "5) stipri nepiekrītu\n4) daļēji nepiekrītu\n3) neitrāls\n2) daļēji piekrītu\n1) stipri piekrītu",
+      "1) ļoti piekrītu,\t2) piekrītu,\t3) bez viedokļa, 4)\tnepiekrītu, 5)\tļoti nepiekrītu.",
+      "5) ļoti nepiekrītu, 4) nepiekrītu, 3) bez viedokļa, 2) piekrītu, 1) ļoti piekrītu."
+    ],
+    "lt": [
+      "1) visiškai sutinku\n2) sutinku\n3) nei sutinku, nei nesutinku\n4) nesutinku\n5) visiškai nesutinku",
+      "5) visiškai nesutinku\n4) nesutinku\n3) nei sutinku, nei nesutinku\n2) sutinku\n1) visiškai sutinku",
+      "1) visiškai sutinku, 2) iš dalies sutinku, 3) neapsisprendęs, 4) iš dalies nesutinku, 5) visiškai nesutinku.",
+      "5) visiškai nesutinku, 4) iš dalies nesutinku, 3) neapsisprendęs, 2) iš dalies sutinku, 1) visiškai sutinku.",
+      "1) stipriai sutinku\n2) iš dalies sutinku\n3) neutralu\n4) iš dalies nesutinku\n5) stipriai nesutinku",
+      "5) stipriai nesutinku\n4) iš dalies nesutinku\n3) neutralu\n2) iš dalies sutinku\n1) stipriai sutinku",
+      "1) labai sutinku,\t2) sutinku,\t3) nuomonės nėra, 4)\tnesutinku, 5)\tlabai nesutinku.",
+      "5) labai nesutinku, 4) nesutinku, 3) nuomonės nėra, 2) sutinku, 1) labai sutinku."
+    ],
+    "mt": [
+      "1) naqbel bis-sħiħ\n2) naqbel\n3) la naqbel u lanqas ma naqbilx\n4) ma naqbilx\n5) ma naqbilx bis-sħiħ",
+      "5) ma naqbilx bis-sħiħ\n4) ma naqbilx\n3) la naqbel u lanqas ma naqbilx\n2) naqbel\n1) naqbel bis-sħiħ",
+      "1) naqbel kompletament, 2) naqbel kemmxejn, 3) indeċiż, 4) ma naqbilx kemmxejn, 5) ma naqbilx kompletament.",
+      "5) ma naqbilx kompletament, 4) ma naqbilx kemmxejn, 3) indeċiż, 2) naqbel kemmxejn, 1) naqbel kompletament.",
+      "1) naqbel ħafna\n2) naqbel kemmxejn\n3) newtrali\n4) ma naqbilx kemmxejn\n5) ma naqbilx ħafna",
+      "5) ma naqbilx ħafna\n4) ma naqbilx kemmxejn\n3) newtrali\n2) naqbel kemmxejn\n1) naqbel ħafna",
+      "1) naqbel ħafna,\t2) naqbel,\t3) bla opinjoni, 4)\tma naqbilx, 5)\tma naqbilx ħafna.",
+      "5) ma naqbilx ħafna, 4) ma naqbilx, 3) bla opinjoni, 2) naqbel, 1) naqbel ħafna."
+    ],
+    "gr": [
+      "1) συμφωνώ απολύτως\n2) συμφωνώ\n3) ούτε συμφωνώ ούτε διαφωνώ\n4) διαφωνώ\n5) διαφωνώ απολύτως",
+      "5) διαφωνώ απολύτως\n4) διαφωνώ\n3) ούτε συμφωνώ ούτε διαφωνώ\n2) συμφωνώ\n1) συμφωνώ απολύτως",
+      "1) συμφωνώ πλήρως, 2) συμφωνώ εν μέρει, 3) αναποφάσιστος, 4) διαφωνώ εν μέρει, 5) διαφωνώ πλήρως.",
+      "5) διαφωνώ πλήρως, 4) διαφωνώ εν μέρει, 3) αναποφάσιστος, 2) συμφωνώ εν μέρει, 1) συμφωνώ πλήρως.",
+      "1) συμφωνώ έντονα\n2) συμφωνώ κάπως\n3) ουδέτερος\n4) διαφωνώ κάπως\n5) διαφωνώ έντονα",
+      "5) διαφωνώ έντονα\n4) διαφωνώ κάπως\n3) ουδέτερος\n2) συμφωνώ κάπως\n1) συμφωνώ έντονα",
+      "1) συμφωνώ πολύ,\t2) συμφωνώ,\t3) χωρίς γνώμη, 4)\tδιαφωνώ, 5)\tδιαφωνώ πολύ.",
+      "5) διαφωνώ πολύ, 4) διαφωνώ, 3) χωρίς γνώμη, 2) συμφωνώ, 1) συμφωνώ πολύ."
+    ],
+    "si": [
+      "1) popolnoma se strinjam\n2) strinjam se\n3) niti se strinjam niti se ne strinjam\n4) ne strinjam se\n5) sploh se ne strinjam",
+      "5) sploh se ne strinjam\n4) ne strinjam se\n3) niti se strinjam niti se ne strinjam\n2) strinjam se\n1) popolnoma se strinjam",
+      "1) popolnoma se strinjam, 2) deloma se strinjam, 3) neodločen, 4) deloma se ne strinjam, 5) popolnoma se ne strinjam.",
+      "5) popolnoma se ne strinjam, 4) deloma se ne strinjam, 3) neodločen, 2) deloma se strinjam, 1) popolnoma se strinjam.",
+      "1) močno se strinjam\n2) nekoliko se strinjam\n3) nevtralno\n4) nekoliko se ne strinjam\n5) močno se ne strinjam",
+      "5) močno se ne strinjam\n4) nekoliko se ne strinjam\n3) nevtralno\n2) nekoliko se strinjam\n1) močno se strinjam",
+      "1) zelo se strinjam,\t2) strinjam se,\t3) brez mnenja, 4)\tne strinjam se, 5)\tzelo se ne strinjam.",
+      "5) zelo se ne strinjam, 4) ne strinjam se, 3) brez mnenja, 2) strinjam se, 1) zelo se strinjam."
+    ],
+    "ie": [
+      "1) aontaím go hiomlán\n2) aontaím\n3) ní aontaím ná easaontaím\n4) easaontaím\n5) easaontaím go hiomlán",
+      "5) easaontaím go hiomlán\n4) easaontaím\n3) ní aontaím ná easaontaím\n2) aontaím\n1) aontaím go hiomlán",
+      "1) aontaím go hiomlán, 2) aontaím go pointe, 3) éiginnte, 4) easaontaím go pointe, 5) easaontaím go hiomlán.",
+      "5) easaontaím go hiomlán, 4) easaontaím go pointe, 3) éiginnte, 2) aontaím go pointe, 1) aontaím go hiomlán.",
+      "1) aontaím go láidir\n2) aontaím rud beag\n3) neodrach\n4) easaontaím rud beag\n5) easaontaím go láidir",
+      "5) easaontaím go láidir\n4) easaontaím rud beag\n3) neodrach\n2) aontaím rud beag\n1) aontaím go láidir",
+      "1) aontaím go mór,\t2) aontaím,\t3) gan tuairim, 4)\teasaontaím, 5)\teasaontaím go mór.",
+      "5) easaontaím go mór, 4) easaontaím, 3) gan tuairim, 2) aontaím, 1) aontaím go mór."
     ]
   }
 }

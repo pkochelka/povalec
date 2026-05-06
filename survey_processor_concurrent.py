@@ -13,6 +13,7 @@ parser.add_argument("--variant", default="_question", type=str, choices=["", "_q
 parser.add_argument("--max_workers", default=4, type=int)
 parser.add_argument("--languages", default="en,de,el,es,fr,it", type=str)
 parser.add_argument("--task_prompts", default="./prompts/survey_processor_concurrent.json", type=str)
+parser.add_argument("--dataset", default="euandi_2019", type=str, choices=["euandi_2019", "euandi_2024"])
 
 
 def load_prompts(path: str) -> tuple[dict[str, str], dict[str, list[str]]]:
@@ -51,10 +52,11 @@ def process_survey(
     prompts: dict[str, str],
     option_lists: dict[str, list[str]],
     languages: list[str],
+    dataset: str = "euandi_2019",
     max_workers: int = 8,
 ):
-    os.makedirs(f"./data/euandi_2019_results/{model}", exist_ok=True)
-    output_file = f"./data/euandi_2019_results/{model}/"
+    os.makedirs(f"./data/{dataset}_results/{model}", exist_ok=True)
+    output_file = f"./data/{dataset}_results/{model}/"
 
     tasks = {}
     for language in languages:
@@ -104,7 +106,7 @@ if __name__ == "__main__":
         raise ValueError(f"Missing prompts or option lists for languages: {missing}")
 
     df = pd.read_json(
-        "data/euandi_2019_data/euandi_2019_questionnaire_negated_neutral.jsonl",
+        f"data/{args.dataset}_data/statements_negated_neutral.jsonl",
         lines=True,
     )
     process_survey(
@@ -114,5 +116,6 @@ if __name__ == "__main__":
         prompts=prompts,
         option_lists=option_lists,
         languages=languages,
+        dataset=args.dataset,
         max_workers=args.max_workers,
     )

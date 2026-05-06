@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 
 def stance_to_likert(score):
     """Map [-1, 1] stance score to [1, 5] Likert scale (linear, for plotting only)."""
-    return 1 + 2 * (score + 1)
+    return 5 - 2 * (score + 1)
 
 def build_matrices(df, likert_df, languages, stance_col_fmt, choice_agree_is_low=True, choice_variant=""):
     stance_mat = np.vstack([df[stance_col_fmt.format(l=lang)].values for lang in languages])
@@ -102,6 +102,7 @@ def plot_heatmaps(stance_mat, choice_mat, languages, q_labels,
     fig.savefig(outfile, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"Saved {outfile}")
+
 def bootstrap_ci(x, y, stat_fn, n_boot=2000, ci=95, seed=0):
     rng = np.random.default_rng(seed)
     n = len(x)
@@ -169,9 +170,9 @@ def run_stance_vs_choice(df, languages):
 
 def run_cross_language_agreement(df, languages):
     print("\n" + "=" * 60)
-    print("2. Cross-language stance agreement (should be high)")
+    print("2. Cross-language choice agreement (should be high)")
     print("=" * 60)
-    stance_cols = [f"stance_{lang}_mean" for lang in languages if f"stance_{lang}_mean" in df]
+    stance_cols = [f"choice_{lang}_mean" for lang in languages if f"choice_{lang}_mean" in df]
     print(df[stance_cols].corr(method="spearman").round(3))
 
 
@@ -180,7 +181,7 @@ def run_prompt_stability(df, languages):
     print("3. Prompt-variant stability (mean pairwise rho within language)")
     print("=" * 60)
     for lang in languages:
-        vcols = [c for c in df.columns if c.startswith(f"stance_{lang}_v")]
+        vcols = [c for c in df.columns if c.startswith(f"choice_{lang}_v")]
         if len(vcols) < 2:
             continue
         mat = df[vcols].corr(method="spearman").values
@@ -254,8 +255,8 @@ def main():
     attach_choice_means(df, likert_df, languages)
 
     run_stance_vs_choice(df, languages)
-    run_cross_language_agreement(df, languages)
-    run_prompt_stability(df, languages)
+    run_cross_language_agreement(likert_df, languages)
+    run_prompt_stability(likert_df, languages)
     run_negation_analysis(df, scored_neg, languages)
 
     q_labels = build_q_labels(df, args.statement_col)

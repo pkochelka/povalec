@@ -1,14 +1,19 @@
 import argparse
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 from api_caller import call_api
 
+from scrape_euandi import LANGS
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--model", default="kimi-k2.6", type=str, choices=["kimi-k2.6"])
-parser.add_argument("--languages", default="en,de,el,es,fr,it", type=str)
+parser.add_argument("--languages", default=",".join(LANGS), type=str)
 parser.add_argument("--task_prompts", default="./prompts/negate_and_neutralize.json", type=str)
+parser.add_argument("--dataset", default="euandi_2024", type=str, choices=["euandi_2019", "euandi_2024"])
+parser.add_argument("--max_workers", default=4, type=int)
 
 
 def load_prompts(path: str) -> dict[str, str]:
@@ -28,15 +33,23 @@ def extract_json(text):
 
 def survey_batch(proposition: str, language: str, model: str, prompts: dict) -> dict:
     user_prompt = prompts[language].format(proposition=proposition)
+    attempt = 0
     while True:
+        attempt += 1
         try:
             response = call_api(user_prompt, model)
             content = response["choices"][0]["message"]["content"]
             result = extract_json(content)
             if result and "question" in result and "negation" in result:
                 return result
-        except Exception as e:
-            print(f"Error processing: {e}. Retrying...", flush=True)
+            missing = [k for k in ("question", "negation") if not result or k not in result]
+            print(
+                f"[attempt {attempt}] Bad response (missing {missing}) for [{language}] "
+                f"{proposition[:60]!r} — retrying. Content: {content[:200]!r}",
+                flush=True,
+            )
+        except BaseException as e:
+            print(f"[attempt {attempt}] Error [{language}] {proposition[:60]!r}: {e}. Retrying...", flush=True)
 
 
 def process_survey(
@@ -45,27 +58,33 @@ def process_survey(
     prompts: dict,
     languages: list[str],
     output_file: str,
+    max_workers: int = 4,
 ):
+    tasks = {}
+    for language in languages:
+        for i, row in df.iterrows():
+            tasks[(i, language)] = row["statement"][language]
+
+    total = len(tasks)
     results = {}
 
-    for language in languages:
-        print(f">>>>> {language}")
-        for i, row in df.iterrows():
-            print(f"Progress: {(i / len(df)) * 100:.2f}%", flush=True)
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {
+            pool.submit(survey_batch, statement, language, model, prompts): (i, language, statement)
+            for (i, language), statement in tasks.items()
+        }
+        for done, future in enumerate(as_completed(futures), 1):
+            i, language, statement = futures[future]
+            analysis = future.result()
+
             if i not in results:
                 results[i] = {}
+            results[i][f"original_text_{language}"] = statement
+            results[i][f"question_{language}"] = analysis["question"]
+            results[i][f"negation_{language}"] = analysis["negation"]
 
-            while True:
-                try:
-                    statement = row["statement"][language]
-                    analysis = survey_batch(statement, language, model, prompts)
-
-                    results[i][f"original_text_{language}"] = statement
-                    results[i][f"question_{language}"] = analysis["question"]
-                    results[i][f"negation_{language}"] = analysis["negation"]
-                    break
-                except Exception as e:
-                    print(f"Error for language {language}, row {i}: {e}", flush=True)
+            if done % 10 == 0 or done == total:
+                print(f"  {done}/{total} done", flush=True)
 
     results_list = [results[i] for i in sorted(results.keys())]
     output_df = pd.DataFrame(results_list)
@@ -87,11 +106,14 @@ if __name__ == "__main__":
     if missing:
         raise ValueError(f"Missing prompts for languages: {missing}")
 
-    df = pd.read_json("data/euandi_2019_data/euandi_2019_questionnaire.jsonl", lines=True)
+    df = pd.read_json(f"data/{args.dataset}_data/statements.jsonl", lines=True)
     process_survey(
         df,
         model=args.model,
         prompts=prompts,
         languages=languages,
-        output_file=f"data/euandi_2019_results/{args.model}",
+        output_file=f"data/{args.dataset}_results/{args.model}",
+        max_workers=args.max_workers,
     )
+
+    

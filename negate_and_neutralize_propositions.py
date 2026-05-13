@@ -10,7 +10,7 @@ from scrape_euandi import LANGS
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--model", default="kimi-k2.6", type=str, choices=["kimi-k2.6"])
-parser.add_argument("--languages", default=",".join(LANGS), type=str)
+parser.add_argument("--languages", default=",".join(LANGS+["en"]), type=str)
 parser.add_argument("--task_prompts", default="./prompts/negate_and_neutralize.json", type=str)
 parser.add_argument("--dataset", default="euandi_2024", type=str, choices=["euandi_2019", "euandi_2024"])
 parser.add_argument("--max_workers", default=4, type=int)

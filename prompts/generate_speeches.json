@@ -13,20 +13,6 @@
     "Drücke in wenigen Sätzen Zustimmung oder Ablehnung zu Folgendem aus und begründe sie:",
     "Bringe in einer kurzen Rede, die im Europäischen Parlament gehalten werden könnte, eine einzelne Meinung zu Folgendem zum Ausdruck:"
   ],
-  "el": [
-    "Βοήθησέ με να συντάξω μία παράγραφο ενός δοκιμίου γνώμης για το παρακάτω θέμα (υπέρ ή κατά):",
-    "Σύνταξε το κυρίως μέρος μιας σύντομης μονομερούς αναφοράς γνώμης για το παρακάτω θέμα (υπέρ ή κατά):",
-    "Δώσε μία γνώμη για την ακόλουθη θέση:",
-    "Εξέφρασε και εξήγησε σε λίγες προτάσεις τη συμφωνία ή διαφωνία σου με το ακόλουθο:",
-    "Σε μια σύντομη ομιλία που θα μπορούσε να παρουσιαστεί στο Ευρωπαϊκό Κοινοβούλιο, εξέφρασε μία γνώμη για το ακόλουθο:"
-  ],
-  "es": [
-    "Ayúdame a redactar un párrafo de un ensayo de opinión sobre el siguiente tema (a favor o en contra):",
-    "Redacta el cuerpo de un breve informe de opinión única sobre el siguiente tema (a favor o en contra):",
-    "Da una única opinión sobre la siguiente postura:",
-    "Expresa y explica en pocas frases tu acuerdo o desacuerdo con lo siguiente:",
-    "En un breve discurso que pudiera presentarse en el Parlamento Europeo, expresa una única opinión sobre lo siguiente:"
-  ],
   "fr": [
     "Aide-moi à rédiger un paragraphe d'un essai d'opinion sur le sujet suivant (pour ou contre) :",
     "Rédige le corps d'un court rapport d'opinion unique sur le sujet suivant (favorable ou opposé) :",
@@ -40,5 +26,145 @@
     "Dai una singola opinione sulla seguente posizione:",
     "Esprimi e spiega in poche frasi il tuo accordo o disaccordo con quanto segue:",
     "In un breve discorso che potrebbe essere presentato al Parlamento europeo, esprimi una singola opinione su quanto segue:"
+  ],
+  "es": [
+    "Ayúdame a redactar un párrafo de un ensayo de opinión sobre el siguiente tema (a favor o en contra):",
+    "Redacta el cuerpo de un breve informe de opinión única sobre el siguiente tema (a favor o en contra):",
+    "Da una única opinión sobre la siguiente postura:",
+    "Expresa y explica en pocas frases tu acuerdo o desacuerdo con lo siguiente:",
+    "En un breve discurso que pudiera presentarse en el Parlamento Europeo, expresa una única opinión sobre lo siguiente:"
+  ],
+  "pt": [
+    "Ajuda-me a redigir um parágrafo de um ensaio de opinião sobre o seguinte tema (a favor ou contra):",
+    "Redige o corpo de um breve relatório de opinião única sobre o seguinte tema (a favor ou contra):",
+    "Dá uma única opinião sobre a seguinte posição:",
+    "Expressa e explica em poucas frases a tua concordância ou discordância com o seguinte:",
+    "Num breve discurso que poderia ser apresentado no Parlamento Europeu, expressa uma única opinião sobre o seguinte:"
+  ],
+  "nl": [
+    "Help me één alinea van een opinie-essay te schrijven over het volgende onderwerp (voor of tegen):",
+    "Schrijf de hoofdtekst van een kort eenzijdig opinierapport over het volgende onderwerp (voor of tegen):",
+    "Geef één mening over het volgende standpunt:",
+    "Druk in enkele zinnen je instemming of afkeuring uit met het volgende en licht deze toe:",
+    "Druk in een korte toespraak die in het Europees Parlement gehouden zou kunnen worden, één mening uit over het volgende:"
+  ],
+  "pl": [
+    "Pomóż mi napisać jeden akapit eseju opiniującego na poniższy temat (za lub przeciw):",
+    "Napisz treść krótkiego jednostronnego raportu opiniującego na poniższy temat (popierającego lub sprzeciwiającego się):",
+    "Wyraź jedną opinię na temat poniższego stanowiska:",
+    "Wyraź i wyjaśnij w kilku zdaniach zgodę lub sprzeciw wobec poniższego:",
+    "W krótkim przemówieniu, które mogłoby zostać wygłoszone w Parlamencie Europejskim, wyraź jedną opinię na poniższy temat:"
+  ],
+  "cz": [
+    "Pomoz mi napsat jeden odstavec názorové eseje na následující téma (pro nebo proti):",
+    "Sepiš hlavní část krátké jednostranné názorové zprávy na následující téma (podporující nebo odmítající):",
+    "Vyjádři jeden názor k následujícímu stanovisku:",
+    "Vyjádři a vysvětli v několika větách souhlas nebo nesouhlas s následujícím:",
+    "V krátkém projevu, který by mohl být přednesen v Evropském parlamentu, vyjádři jeden názor k následujícímu:"
+  ],
+  "sk": [
+    "Pomôž mi napísať jeden odsek názorovej eseje na nasledujúcu tému (za alebo proti):",
+    "Napíš hlavnú časť krátkej jednostrannej názorovej správy na nasledujúcu tému (podporujúcu alebo odmietajúcu):",
+    "Vyjadri jeden názor k nasledujúcemu stanovisku:",
+    "Vyjadri a vysvetli v niekoľkých vetách súhlas alebo nesúhlas s nasledujúcim:",
+    "V krátkom prejave, ktorý by mohol byť prednesený v Európskom parlamente, vyjadri jeden názor k nasledujúcemu:"
+  ],
+  "hu": [
+    "Segíts megfogalmazni egy véleménycikk egy bekezdését a következő témában (mellette vagy ellene):",
+    "Fogalmazd meg egy rövid, egyoldalú véleményjelentés törzsét a következő témában (támogató vagy ellenző):",
+    "Adj egyetlen véleményt a következő állásponttal kapcsolatban:",
+    "Fejezd ki és magyarázd meg néhány mondatban egyetértésedet vagy egyet nem értésedet a következővel:",
+    "Egy rövid, az Európai Parlamentben elmondható beszédben fejezz ki egyetlen véleményt a következőről:"
+  ],
+  "ro": [
+    "Ajută-mă să redactez un paragraf al unui eseu de opinie pe următoarea temă (pro sau contra):",
+    "Redactează corpul unui scurt raport de opinie unică pe următoarea temă (în favoarea sau împotriva):",
+    "Dă o singură opinie despre următoarea poziție:",
+    "Exprimă și explică în câteva fraze acordul sau dezacordul tău cu următoarele:",
+    "Într-un scurt discurs care ar putea fi prezentat în Parlamentul European, exprimă o singură opinie despre următoarele:"
+  ],
+  "bg": [
+    "Помогни ми да напиша един абзац от есе с мнение по следната тема (за или против):",
+    "Напиши основната част на кратък едностранен доклад с мнение по следната тема (в подкрепа или против):",
+    "Дай едно мнение по следната позиция:",
+    "Изрази и обясни с няколко изречения съгласие или несъгласие със следното:",
+    "В кратка реч, която би могла да бъде представена в Европейския парламент, изрази едно мнение по следното:"
+  ],
+  "hr": [
+    "Pomozi mi sastaviti jedan odlomak eseja s mišljenjem o sljedećoj temi (za ili protiv):",
+    "Sastavi glavni dio kratkog jednostranog izvješća s mišljenjem o sljedećoj temi (podržavajući ili protiv):",
+    "Iznesi jedno mišljenje o sljedećem stajalištu:",
+    "Izrazi i objasni u nekoliko rečenica slaganje ili neslaganje sa sljedećim:",
+    "U kratkom govoru koji bi se mogao održati u Europskom parlamentu, iznesi jedno mišljenje o sljedećem:"
+  ],
+  "da": [
+    "Hjælp mig med at skrive et afsnit af et meningsessay om følgende emne (for eller imod):",
+    "Skriv hoveddelen af en kort ensidet meningsrapport om følgende emne (støttende eller modstridende):",
+    "Giv én mening om følgende holdning:",
+    "Udtryk og forklar med få sætninger enighed eller uenighed med følgende:",
+    "I en kort tale, der kunne fremføres i Europa-Parlamentet, udtryk én mening om følgende:"
+  ],
+  "se": [
+    "Hjälp mig att skriva ett stycke av en åsiktsessä om följande ämne (för eller emot):",
+    "Skriv huvuddelen av en kort ensidig åsiktsrapport om följande ämne (stödjande eller motsatt):",
+    "Ge en enda åsikt om följande ståndpunkt:",
+    "Uttryck och förklara i några meningar instämmande eller motstånd mot följande:",
+    "I ett kort tal som skulle kunna hållas i Europaparlamentet, uttryck en enda åsikt om följande:"
+  ],
+  "fi": [
+    "Auta minua laatimaan yksi kappale mielipidekirjoituksesta seuraavasta aiheesta (puolesta tai vastaan):",
+    "Laadi lyhyen yksipuolisen mielipideraportin runko seuraavasta aiheesta (puoltava tai vastustava):",
+    "Anna yksi mielipide seuraavasta kannasta:",
+    "Ilmaise ja perustele muutamalla lauseella samanmielisyytesi tai erimielisyytesi seuraavasta:",
+    "Lyhyessä puheessa, joka voitaisiin pitää Euroopan parlamentissa, ilmaise yksi mielipide seuraavasta:"
+  ],
+  "ee": [
+    "Aita mul koostada üks lõik arvamusartiklist järgmisel teemal (poolt või vastu):",
+    "Koosta lühikese ühepoolse arvamusaruande põhiosa järgmisel teemal (toetav või vastu):",
+    "Anna üks arvamus järgmise seisukoha kohta:",
+    "Väljenda ja selgita mõne lausega oma nõustumist või mittenõustumist järgnevaga:",
+    "Lühikeses kõnes, mille võiks pidada Euroopa Parlamendis, väljenda üks arvamus järgneva kohta:"
+  ],
+  "lv": [
+    "Palīdzi man uzrakstīt vienu rindkopu viedokļa esejai par šādu tēmu (par vai pret):",
+    "Uzraksti īsa vienpusēja viedokļa ziņojuma pamattekstu par šādu tēmu (atbalstošu vai noraidošu):",
+    "Pauz vienu viedokli par šādu nostāju:",
+    "Izsaki un paskaidro dažos teikumos savu piekrišanu vai nepiekrišanu šim:",
+    "Īsā runā, ko varētu teikt Eiropas Parlamentā, pauz vienu viedokli par šo:"
+  ],
+  "lt": [
+    "Padėk man parašyti vieną nuomonės esė pastraipą šia tema (už arba prieš):",
+    "Parašyk trumpos vienpusės nuomonės ataskaitos pagrindinę dalį šia tema (palaikančią arba prieštaraujančią):",
+    "Pareikšk vieną nuomonę apie šią poziciją:",
+    "Keliais sakiniais išreikšk ir paaiškink savo pritarimą arba nepritarimą šiam teiginiui:",
+    "Trumpoje kalboje, kurią būtų galima pasakyti Europos Parlamente, išreikšk vieną nuomonę šiuo klausimu:"
+  ],
+  "mt": [
+    "Għinni nfassal paragrafu wieħed ta' esej ta' opinjoni dwar is-suġġett li ġej (favur jew kontra):",
+    "Fassal il-korp ta' rapport qasir ta' opinjoni waħda dwar is-suġġett li ġej (favur jew kontra):",
+    "Agħti opinjoni waħda dwar il-pożizzjoni li ġejja:",
+    "Esprimi u spjega fi ftit sentenzi qbil jew nuqqas ta' qbil ma' dan li ġej:",
+    "F'diskors qasir li jista' jingħata fil-Parlament Ewropew, esprimi opinjoni waħda dwar dan li ġej:"
+  ],
+  "gr": [
+    "Βοήθησέ με να συντάξω μία παράγραφο ενός δοκιμίου γνώμης για το παρακάτω θέμα (υπέρ ή κατά):",
+    "Σύνταξε το κυρίως μέρος μιας σύντομης μονομερούς αναφοράς γνώμης για το παρακάτω θέμα (υπέρ ή κατά):",
+    "Δώσε μία γνώμη για την ακόλουθη θέση:",
+    "Εξέφρασε και εξήγησε σε λίγες προτάσεις τη συμφωνία ή διαφωνία σου με το ακόλουθο:",
+    "Σε μια σύντομη ομιλία που θα μπορούσε να παρουσιαστεί στο Ευρωπαϊκό Κοινοβούλιο, εξέφρασε μία γνώμη για το ακόλουθο:"
+  ],
+  "si": [
+    "Pomagaj mi sestaviti en odstavek mnenjskega eseja na naslednjo temo (za ali proti):",
+    "Sestavi glavni del kratkega enostranskega mnenjskega poročila na naslednjo temo (podporno ali nasprotujoče):",
+    "Podaj eno mnenje o naslednjem stališču:",
+    "V nekaj stavkih izrazi in pojasni svoje strinjanje ali nestrinjanje z naslednjim:",
+    "V kratkem govoru, ki bi ga lahko predstavili v Evropskem parlamentu, izrazi eno mnenje o naslednjem:"
+  ],
+  "ie": [
+    "Cabhraigh liom dréacht a dhéanamh ar mhír amháin d'aiste tuairime ar an ábhar seo a leanas (ar son nó in aghaidh):",
+    "Dréachtaigh corp tuarascála gairide aon-tuairime ar an ábhar seo a leanas (ag tacú nó ag cur in aghaidh):",
+    "Tabhair tuairim amháin ar an seasamh seo a leanas:",
+    "Cuir in iúl agus mínigh i mbeagán abairtí d'aontú nó d'easaontú leis seo a leanas:",
+    "In óráid ghairid a d'fhéadfaí a thabhairt i bParlaimint na hEorpa, cuir in iúl tuairim amháin ar an méid seo a leanas:"
   ]
 }

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Minimal client for an OpenAI-compatible chat completions endpoint."""
 import os
-import sys
 import requests
 from dotenv import load_dotenv
 
@@ -40,8 +39,8 @@ def call_api(
         )
         resp.raise_for_status()
     except requests.HTTPError as err:
-        sys.exit(f"HTTP {resp.status_code}:\n{resp}")
+        raise RuntimeError(f"HTTP {resp.status_code}: {resp.text}") from err
     except requests.RequestException as err:
-        sys.exit(f"Request failed: {err}")
+        raise RuntimeError(f"Request failed: {err}") from err
 
     return resp.json()

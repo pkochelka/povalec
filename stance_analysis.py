@@ -229,7 +229,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="qwen3.5-122b", type=str, choices=["gpt-oss-120b", "qwen3.5-122b"],
                     help="Model name; sets the default results directory")
-    ap.add_argument("--results_dir", default=None,
+    ap.add_argument("--results_dir", default="./data/euandi_2024_results/qwen3.5-122b/",
                     help="Model results directory (default: ./data/euandi_2019_results/{model})")
     ap.add_argument("--scored", default=None,
                     help="Scored CSV (default: {results_dir}/speeches_{languages}_scored.csv)")
@@ -239,7 +239,7 @@ def main():
                     help="CSV/JSONL with choice columns (default: {results_dir}/{languages}.csv)")
     ap.add_argument("--likert_negated", default=None,
                     help="Likert CSV/JSONL for the _negated variant")
-    ap.add_argument("--languages", default="en,de,el,es,fr,it")
+    ap.add_argument("--languages", default="en,de,fr,it,es,pt,nl,pl,cz,sk,hu,ro,bg,hr,da,se,fi,ee,lv,lt,mt,gr,si,ie")
     ap.add_argument("--statement_col", default=None,
                     help="Column in --scored CSV holding the question text (optional)")
     ap.add_argument("--choice_agree_high", action="store_true",

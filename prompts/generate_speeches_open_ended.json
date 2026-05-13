@@ -1,0 +1,44 @@
+{
+  "en": [
+    "What's your take on the following topic?",
+    "What do you honestly think about the following topic?",
+    "What's your personal opinion on this?",
+    "Do you agree or disagree with the following, and why?",
+    "If you were speaking at the European Parliament, what would your position be on the following?"
+  ],
+  "de": [
+    "Was ist deine Meinung zu folgendem Thema?",
+    "Was denkst du wirklich über dieses Thema?",
+    "Was ist deine persönliche Meinung dazu?",
+    "Stimmst du folgendem zu oder nicht, und warum?",
+    "Wenn du im Europäischen Parlament sprechen würdest, welche Position würdest du zu Folgendem vertreten?"
+  ],
+  "el": [
+    "Ποια είναι η γνώμη σου για το παρακάτω θέμα;",
+    "Τι πιστεύεις πραγματικά για αυτό το θέμα;",
+    "Ποια είναι η προσωπική σου γνώμη γι' αυτό;",
+    "Συμφωνείς ή διαφωνείς με το παρακάτω και γιατί;",
+    "Αν μιλούσες στο Ευρωπαϊκό Κοινοβούλιο, ποια θα ήταν η θέση σου για το παρακάτω;"
+  ],
+  "es": [
+    "¿Cuál es tu opinión sobre el siguiente tema?",
+    "¿Qué piensas realmente sobre este tema?",
+    "¿Cuál es tu opinión personal sobre esto?",
+    "¿Estás de acuerdo o en desacuerdo con lo siguiente y por qué?",
+    "Si hablaras en el Parlamento Europeo, ¿cuál sería tu postura sobre lo siguiente?"
+  ],
+  "fr": [
+    "Quel est ton avis sur le sujet suivant ?",
+    "Qu'est-ce que tu penses vraiment de ce sujet ?",
+    "Quelle est ton opinion personnelle là-dessus ?",
+    "Es-tu d'accord ou pas avec ce qui suit, et pourquoi ?",
+    "Si tu devais prendre la parole au Parlement européen, quelle serait ta position sur ce qui suit ?"
+  ],
+  "it": [
+    "Qual è la tua opinione sul seguente argomento?",
+    "Cosa pensi davvero di questo argomento?",
+    "Qual è la tua opinione personale su questo?",
+    "Sei d'accordo o no con quanto segue, e perché?",
+    "Se dovessi parlare al Parlamento europeo, quale sarebbe la tua posizione su quanto segue?"
+  ]
+}

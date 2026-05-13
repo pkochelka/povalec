@@ -3,40 +3,51 @@ from bs4 import BeautifulSoup
 import json
 import time
 
-LANGS = ["en","de","fr","it","es","pt","nl","pl","cz","sk",
-         "hu","ro","bg","hr","da","se","fi","ee","lv","lt",
-         "mt","gr","si","ie"]
+LANGS = [
+    "at", "be", "bg", "hr", "cy", "cz", "dk", "ee", "fi", "fr",
+    "de", "gr", "hu", "ie", "it", "lv", "lt", "lu", "mt", "nl",
+    "pl", "pt", "ro", "sk", "si", "es", "se"
+]
 
-by_lang = {}
-
-for lang in LANGS:
-    url = f"https://euandi.eu/{lang}/survey/european-elections/statements.html?country_id=1"
-    
+def scrape_statements(lang, country_id=15):
+    url = f"https://euandi.eu/{lang}/survey/european-elections/statements.html?country_id={country_id}"
     for attempt in range(3):
         try:
             html = httpx.get(url, timeout=30.0).text
             break
         except httpx.ReadTimeout:
-            print(f"{lang}: timeout (attempt {attempt+1}/3), retrying...")
             time.sleep(2)
     else:
-        print(f"{lang}: failed after 3 attempts, skipping")
-        by_lang[lang] = []
-        continue
+        return {}
 
     soup = BeautifulSoup(html, "html.parser")
-    by_lang[lang] = [h2.get_text(strip=True) for h2 in soup.select("h2")]
-    print(f"{lang}: {len(by_lang[lang])} statements")
+    result = {}
+    for div in soup.select("div.survey-question"):
+        idel = div.get("idel")
+        h2 = div.select_one("h2")
+        if idel and h2:
+            result[idel] = h2.get_text(strip=True)
+    return result
 
-en_statements = by_lang.get("en", [])
+def scrape_statements_en(country_name="Ireland", country_id=15):
+    stmts = scrape_statements("en", country_id)
+    return {idel: text.replace(country_name, "European Union") for idel, text in stmts.items()}
 
-with open("data/euandi_2024_data/statements.jsonl", "w", encoding="utf-8") as f:
-    for i, en_stmt in enumerate(en_statements):
-        record = {
-            "statement": {
-                lang: by_lang[lang][i]
-                for lang in LANGS
-                if i < len(by_lang.get(lang, []))
+if __name__ == "__main__":
+    by_lang = {lang: scrape_statements(lang) for lang in LANGS}
+    en_stmts = scrape_statements_en()
+
+    all_ids = sorted(set(idel for stmts in by_lang.values() for idel in stmts),
+                     key=lambda x: int(x))
+
+
+    with open("data/euandi_2024_data/statements.jsonl", "w", encoding="utf-8") as f:
+        for idel in all_ids:
+            record = {
+                "statement": {
+                    "en": en_stmts.get(idel, ""),
+                    **{lang: by_lang[lang][idel] for lang in LANGS if idel in by_lang.get(lang, {})}
+                }
             }
-        }
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            print(f"{idel}: {record['statement'].get('en', '')}")

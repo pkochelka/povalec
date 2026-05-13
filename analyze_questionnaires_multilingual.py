@@ -11,10 +11,10 @@ def analyze_survey_results(input_file: str, languages: list[str], num_option_var
     summary = pd.DataFrame({"statement": df[f"original_text_en{VARIANT}"]})
     for lang in languages:
         choice_cols = [f"choice_{lang}{VARIANT}_v{v}" for v in range(num_option_variants)]
-        summary[f"mean_choice_{lang}{VARIANT}"] = df[choice_cols].mean(axis=1)
+        summary[f"{lang}"] = df[choice_cols].mean(axis=1)
 
     overall = {"statement": "OVERALL"}
-    overall.update({f"mean_choice_{lang}{VARIANT}": summary[f"mean_choice_{lang}{VARIANT}"].mean() for lang in languages})
+    overall.update({f"{lang}": summary[f"{lang}"].mean() for lang in languages})
     summary = pd.concat([summary, pd.DataFrame([overall])], ignore_index=True)
 
     print(summary.to_string())
@@ -22,11 +22,13 @@ def analyze_survey_results(input_file: str, languages: list[str], num_option_var
 
 MODEL_NAME = "gpt-oss-120b"
 VARIANT="_negated"
+DATASET = "euandi_2024"
+LANGUAGES = "en,de,fr,it,es,pt,nl,pl,cz,sk,hu,ro,bg,hr,da,se,fi,ee,lv,lt,mt,gr,si,ie"
 
 summary = analyze_survey_results(
-    input_file=f"data/euandi_2019_results/{MODEL_NAME}_en,de,gr,es,fr,it{VARIANT}.csv",
-    languages=["en", "de", "gr", "es", "fr", "it"],
+    input_file=f"data/{DATASET}_results/{MODEL_NAME}/{LANGUAGES}{VARIANT}.csv",
+    languages=LANGUAGES.split(","),
     num_option_variants=8,
 )
 
-summary.to_csv(f"data/euandi_2019_results/{MODEL_NAME}{VARIANT}.csv", sep=";", index=False, encoding="utf-8-sig")
+summary.to_csv(f"data/{DATASET}_results/{MODEL_NAME}/summary{VARIANT}.csv", sep=";", index=False, encoding="utf-8-sig")

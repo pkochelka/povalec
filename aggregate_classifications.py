@@ -13,14 +13,9 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from collections import Counter
+from utils import load_dataframe
 
 LABELS = ["PPE", "S&D", "ALDE", "Greens/EFA", "ID"]
-
-
-def load_dataframe(path):
-    if path.endswith(".jsonl"):
-        return pd.read_json(path, lines=True)
-    return pd.read_csv(path, sep=";", encoding="utf-8-sig")
 
 
 def _safe(label):

@@ -1,34 +1,16 @@
 import argparse
 import json
-import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 from api_caller import call_api
 
 from scrape_euandi import LANGS
-
-parser = argparse.ArgumentParser()
-parser.add_argument("--model", default="kimi-k2.6", type=str, choices=["kimi-k2.6"])
-parser.add_argument("--languages", default=",".join(LANGS+["en"]), type=str)
-parser.add_argument("--task_prompts", default="./prompts/negate_and_neutralize.json", type=str)
-parser.add_argument("--dataset", default="euandi_2024", type=str, choices=["euandi_2019", "euandi_2024"])
-parser.add_argument("--max_workers", default=4, type=int)
-
+from utils import extract_json
 
 def load_prompts(path: str) -> dict[str, str]:
     with open(path, encoding="utf-8") as f:
         return json.load(f)
-
-
-def extract_json(text):
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group())
-        except json.JSONDecodeError:
-            return None
-    return None
 
 
 def survey_batch(proposition: str, language: str, model: str, prompts: dict) -> dict:
@@ -98,6 +80,12 @@ def process_survey(
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", default="kimi-k2.6", type=str, choices=["kimi-k2.6"])
+    parser.add_argument("--languages", default=",".join(LANGS+["en"]), type=str)
+    parser.add_argument("--task_prompts", default="./prompts/negate_and_neutralize.json", type=str)
+    parser.add_argument("--dataset", default="euandi_2024", type=str, choices=["euandi_2019", "euandi_2024"])
+    parser.add_argument("--max_workers", default=4, type=int)
     args = parser.parse_args()
     languages = args.languages.split(",")
 

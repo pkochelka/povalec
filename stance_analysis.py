@@ -11,6 +11,7 @@ import pandas as pd
 import numpy as np
 from scipy.stats import spearmanr
 import matplotlib.pyplot as plt
+from utils import load_dataframe
 
 
 def stance_to_likert(score):
@@ -135,12 +136,6 @@ def attach_choice_means(df, likert_df, languages):
         all_cols.extend(vcols)
     if all_cols:
         df["choice_mean"] = likert_df[all_cols].mean(axis=1).values
-
-
-def load_dataframe(path):
-    if path.endswith(".jsonl"):
-        return pd.read_json(path, lines=True)
-    return pd.read_csv(path, sep=";", encoding="utf-8-sig")
 
 
 def resolve_paths(args):

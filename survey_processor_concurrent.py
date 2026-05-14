@@ -1,36 +1,17 @@
 import os
 import json
-import re
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 
 import pandas as pd
 from api_caller import call_api
-
-parser = argparse.ArgumentParser()
-parser.add_argument("--model", default="qwen3.5-122b", type=str)
-parser.add_argument("--variant", default="_question", type=str, choices=["", "_question", "_negated"])
-parser.add_argument("--max_workers", default=4, type=int)
-parser.add_argument("--languages", default="en,de,el,es,fr,it", type=str)
-parser.add_argument("--task_prompts", default="./prompts/survey_processor_concurrent.json", type=str)
-parser.add_argument("--dataset", default="euandi_2019", type=str, choices=["euandi_2019", "euandi_2024"])
-
+from utils import extract_json, save_checkpoint
 
 def load_prompts(path: str) -> tuple[dict[str, str], dict[str, list[str]]]:
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
     return data["prompts"], data["option_lists"]
-
-
-def extract_json(text):
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group())
-        except json.JSONDecodeError:
-            return None
-    return None
 
 
 def call_survey(statement, model, options, language, prompts, max_retries=5):
@@ -56,11 +37,6 @@ def call_survey(statement, model, options, language, prompts, max_retries=5):
     return {"choice": None, "reason": reason}
 
 
-def save_checkpoint(path: str, results: dict):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump({str(k): v for k, v in results.items()}, f, ensure_ascii=False)
-
-
 def process_survey(
     df: pd.DataFrame,
     model: str,
@@ -69,12 +45,12 @@ def process_survey(
     option_lists: dict[str, list[str]],
     languages: list[str],
     dataset: str = "euandi_2019",
+    model_dir: str = None,
     max_workers: int = 8,
 ):
-    model_dir = "gpt-oss-120b"
+    model_dir = model_dir or model
     os.makedirs(f"./data/{dataset}_results/{model_dir}", exist_ok=True)
-    output_file = f"./data/{dataset}_results/{model_dir}/"
-    output_path = f"{output_file}{','.join(languages)}{variant}.csv"
+    output_path = f"./data/{dataset}_results/{model_dir}/{','.join(languages)}{variant}.csv"
     checkpoint_path = output_path + ".ckpt.json"
 
     if os.path.exists(output_path):
@@ -138,6 +114,14 @@ def process_survey(
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", default="qwen3.5-122b", type=str)
+    parser.add_argument("--model_dir", default=None, type=str)
+    parser.add_argument("--variant", default="_question", type=str, choices=["", "_question", "_negated"])
+    parser.add_argument("--max_workers", default=4, type=int)
+    parser.add_argument("--languages", default="en,de,el,es,fr,it", type=str)
+    parser.add_argument("--task_prompts", default="./prompts/survey_processor_concurrent.json", type=str)
+    parser.add_argument("--dataset", default="euandi_2019", type=str, choices=["euandi_2019", "euandi_2024"])
     args = parser.parse_args()
     languages = args.languages.split(",")
 
@@ -158,5 +142,6 @@ if __name__ == "__main__":
         option_lists=option_lists,
         languages=languages,
         dataset=args.dataset,
+        model_dir=args.model_dir or args.model,
         max_workers=args.max_workers,
     )

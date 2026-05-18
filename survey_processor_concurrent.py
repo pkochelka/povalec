@@ -14,12 +14,12 @@ def load_prompts(path: str) -> tuple[dict[str, str], dict[str, list[str]]]:
     return data["prompts"], data["option_lists"]
 
 
-def call_survey(statement, model, options, language, prompts, max_retries=5):
+def call_survey(statement, model, options, language, prompts, max_retries=5, second_provider=False):
     prompt = prompts[language].format(question=statement, options=options)
     last_content = None
     for attempt in range(max_retries):
         try:
-            response = call_api(prompt, model)
+            response = call_api(prompt, model, second_provider=second_provider)
             content = response["choices"][0]["message"]["content"]
             if content is None:
                 finish_reason = response["choices"][0].get("finish_reason")
@@ -47,6 +47,7 @@ def process_survey(
     dataset: str = "euandi_2019",
     model_dir: str = None,
     max_workers: int = 8,
+    second_provider: bool = False,
 ):
     model_dir = model_dir or model
     os.makedirs(f"./data/{dataset}_results/{model_dir}", exist_ok=True)
@@ -85,7 +86,7 @@ def process_survey(
         for (i, language, j), (statement, options, lang_variant) in tasks.items():
             if i in results and f"choice_{lang_variant}_v{j}" in results[i]:
                 continue
-            future = pool.submit(call_survey, statement, model, options, language, prompts)
+            future = pool.submit(call_survey, statement, model, options, language, prompts, second_provider=second_provider)
             futures[future] = (i, language, j, lang_variant, statement)
 
         for completed, future in enumerate(as_completed(futures), already_done + 1):
@@ -118,10 +119,11 @@ if __name__ == "__main__":
     parser.add_argument("--model", default="qwen3.5-122b", type=str)
     parser.add_argument("--model_dir", default=None, type=str)
     parser.add_argument("--variant", default="_question", type=str, choices=["", "_question", "_negated"])
-    parser.add_argument("--max_workers", default=4, type=int)
+    parser.add_argument("--max_workers", default=3, type=int)
     parser.add_argument("--languages", default="en,de,el,es,fr,it", type=str)
     parser.add_argument("--task_prompts", default="./prompts/survey_processor_concurrent.json", type=str)
-    parser.add_argument("--dataset", default="euandi_2019", type=str, choices=["euandi_2019", "euandi_2024"])
+    parser.add_argument("--dataset", default="euandi_2024", type=str, choices=["euandi_2019", "euandi_2024"])
+    parser.add_argument("--second_provider", action="store_true")
     args = parser.parse_args()
     languages = args.languages.split(",")
 
@@ -144,4 +146,5 @@ if __name__ == "__main__":
         dataset=args.dataset,
         model_dir=args.model_dir or args.model,
         max_workers=args.max_workers,
+        second_provider=args.second_provider,
     )

@@ -15,11 +15,11 @@ def load_task_lists(path: str) -> dict[str, list[str]]:
         return json.load(f)
 
 
-def call_speech(statement: str, task: str, model: str, max_retries: int = 5) -> str | None:
+def call_speech(statement: str, task: str, model: str, max_retries: int = 5, second_provider: bool = False) -> str | None:
     prompt = f"Task: {task}\n\"{statement}\"\n"
     for attempt in range(max_retries):
         try:
-            response = call_api(prompt, model)
+            response = call_api(prompt, model, second_provider=second_provider)
             content = response["choices"][0]["message"]["content"]
             if content:
                 return content
@@ -40,6 +40,7 @@ def generate_speeches(
     dataset: str = "euandi_2019",
     model_dir: str = None,
     max_workers: int = 8,
+    second_provider: bool = False,
 ):
     dir_name = model_dir if model_dir is not None else model
     os.makedirs(f"./data/{dataset}_results/{dir_name}", exist_ok=True)
@@ -78,7 +79,7 @@ def generate_speeches(
         for (i, language, j), (statement, task, lang_variant) in tasks.items():
             if i in results and f"answer_{lang_variant}_v{j}" in results[i]:
                 continue
-            future = pool.submit(call_speech, statement, task, model)
+            future = pool.submit(call_speech, statement, task, model, second_provider=second_provider)
             futures[future] = (i, j, lang_variant, statement, task)
 
         for completed, future in enumerate(as_completed(futures), already_done + 1):
@@ -113,7 +114,8 @@ if __name__ == "__main__":
     parser.add_argument("--max_workers", default=3, type=int)
     parser.add_argument("--languages", default=",".join(LANGS+["en"]), type=str)
     parser.add_argument("--task_prompts", default="./prompts/generate_speeches.json", type=str)
-    parser.add_argument("--dataset", default="euandi_2019", type=str, choices=["euandi_2019", "euandi_2024"])
+    parser.add_argument("--dataset", default="euandi_2024", type=str, choices=["euandi_2019", "euandi_2024"])
+    parser.add_argument("--second_provider", action="store_true")
     args = parser.parse_args()
     languages = args.languages.split(",")
 
@@ -137,4 +139,5 @@ if __name__ == "__main__":
         dataset=args.dataset,
         model_dir=args.model_dir or args.model,
         max_workers=args.max_workers,
+        second_provider=args.second_provider,
     )

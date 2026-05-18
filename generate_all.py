@@ -1,44 +1,56 @@
 import subprocess
 import sys
 import time
+import threading
 
 from scrape_euandi import LANGS
 
-MODELS = ["gpt-oss-120b", "qwen3.5-122b"]
 VARIANTS = ["", "_question", "_negated"]
-LANGUAGES = ",".join(LANGS)
+LANGUAGES = ",".join(LANGS+["en"])
 MAX_RETRIES = 3
-DATASETS = [#"euandi_2019", 
+DATASETS = [#"euandi_2019",
     "euandi_2024"]
 
-SCRIPTS = [
-    #("speech_generator.py", lambda model, variant, dataset: [
-    #    sys.executable, "speech_generator.py",
-    #    "--model", model, "--variant", variant, "--dataset", dataset,
-    #]),
-    ("survey_processor_concurrent.py", lambda model, variant, dataset: [
-        sys.executable, "survey_processor_concurrent.py",
-        "--model", model, "--variant", variant, "--dataset", dataset,
-        "--languages", LANGUAGES,
-    ]),
+MODELS = [
+    {"model": "qwen3.5-122b",              "model_dir": "qwen3.5-122b",  "second_provider": False},
+    {"model": "gpt-oss-120b", "model_dir": "gpt-oss-120b", "second_provider": False},
 ]
 
-for dataset in DATASETS:
-    for model in MODELS:
+def build_cmd(script, model, model_dir, variant, dataset, second_provider):
+    cmd = [sys.executable, script,
+           "--model", model, "--model_dir", model_dir,
+           "--variant", variant, "--dataset", dataset]
+    if script == "survey_processor_concurrent.py":
+        cmd += ["--languages", LANGUAGES]
+    if second_provider:
+        cmd.append("--second_provider")
+    return cmd
+
+SCRIPTS = ["speech_generator.py", "survey_processor_concurrent.py"]
+
+def run_model(cfg):
+    model, model_dir, second_provider = cfg["model"], cfg["model_dir"], cfg["second_provider"]
+    for dataset in DATASETS:
         for variant in VARIANTS:
-            for script_name, build_cmd in SCRIPTS:
-                label = f"{script_name}: model={model}, variant='{variant}', dataset='{dataset}'"
-                print(f"Running: {label}")
+            for script in SCRIPTS:
+                label = f"{script}: model={model}, variant='{variant}', dataset='{dataset}'"
+                print(f"Running: {label}", flush=True)
 
                 for attempt in range(1, MAX_RETRIES + 1):
-                    result = subprocess.run(build_cmd(model, variant, dataset))
+                    result = subprocess.run(build_cmd(script, model, model_dir, variant, dataset, second_provider))
 
                     if result.returncode == 0:
-                        print(f"✓ Succeeded: {label}")
+                        print(f"✓ Succeeded: {label}", flush=True)
                         break
                     else:
-                        print(f"✗ Attempt {attempt}/{MAX_RETRIES} failed: {label}")
+                        print(f"✗ Attempt {attempt}/{MAX_RETRIES} failed: {label}", flush=True)
                         if attempt < MAX_RETRIES:
                             time.sleep(2)
                 else:
-                    print(f"✗ All retries exhausted for: {label}")
+                    print(f"✗ All retries exhausted for: {label}", flush=True)
+
+threads = [threading.Thread(target=run_model, args=(cfg,), name=cfg["model_dir"]) for cfg in MODELS]
+for t in threads:
+    t.start()
+for t in threads:
+    t.join()

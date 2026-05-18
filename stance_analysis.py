@@ -139,7 +139,7 @@ def attach_choice_means(df, likert_df, languages):
 
 
 def resolve_paths(args):
-    results_dir = args.results_dir or f"./data/euandi_2019_results/{args.model}"
+    results_dir = args.results_dir or f"./data/euandi_2024_results/{args.model}"
     langs = args.languages
     scored     = args.scored     or f"{results_dir}/speeches_{langs}_scored.csv"
     likert     = args.likert     or f"{results_dir}/{langs}.csv"

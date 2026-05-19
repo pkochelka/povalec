@@ -15,7 +15,7 @@ from scipy.stats import pearsonr
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from utils import LIKERT_MAX, flip_likert, likert_to_stance
+from utils import LIKERT_MAX, LIKERT_MIDPOINT, flip_likert, likert_to_stance
 
 
 RED_WHITE_GREEN = mcolors.LinearSegmentedColormap.from_list(
@@ -38,7 +38,12 @@ def load_variant_answers(csv_path: Path, variant_suffix: str) -> dict[str, np.nd
     answers_by_lang: dict[str, np.ndarray] = {}
     for lang, version_cols in lang_to_version_cols.items():
         sorted_cols = [version_cols[v] for v in sorted(version_cols)]
-        answers = df[sorted_cols].apply(pd.to_numeric, errors="coerce").to_numpy(dtype=float)
+        answers = (
+            df[sorted_cols]
+            .apply(pd.to_numeric, errors="coerce")
+            .fillna(LIKERT_MIDPOINT)
+            .to_numpy(dtype=float)
+        )
         if variant_suffix == "_negated":
             answers = flip_likert(answers)
         answers_by_lang[lang] = answers
@@ -47,12 +52,11 @@ def load_variant_answers(csv_path: Path, variant_suffix: str) -> dict[str, np.nd
 
 
 def find_variant_csv(model_dir: Path, variant_suffix: str) -> Path | None:
-    candidates = [
-        p for p in model_dir.glob("*.csv")
-        if p.parent == model_dir and p.stem.endswith(variant_suffix if variant_suffix else "")
-        and not (variant_suffix == "" and (p.stem.endswith("_negated") or p.stem.endswith("_question")))
-    ]
-    return max(candidates, key=lambda p: len(p.name)) if candidates else None
+    stem_pattern = re.compile(r"^[a-z]{2}(?:,[a-z]{2})*" + re.escape(variant_suffix) + r"$")
+    for p in model_dir.glob("*.csv"):
+        if stem_pattern.match(p.stem):
+            return p
+    return None
 
 
 def fraction_of_most_frequent_answer(responses: np.ndarray) -> float:
@@ -68,8 +72,16 @@ def mean_pairwise_pearson_r(variant_arrays: list[np.ndarray], question_index: in
     pair_correlations = []
     for vec_a, vec_b in combinations(variant_vectors, 2):
         mask = ~(np.isnan(vec_a) | np.isnan(vec_b))
-        if mask.sum() >= 2 and vec_a[mask].std() > 0 and vec_b[mask].std() > 0:
-            r, _ = pearsonr(vec_a[mask], vec_b[mask])
+        if mask.sum() < 2:
+            continue
+        a, b = vec_a[mask], vec_b[mask]
+        a_const, b_const = a.std() == 0, b.std() == 0
+        if a_const and b_const:
+            pair_correlations.append(1.0 if a[0] == b[0] else -1.0)
+        elif a_const or b_const:
+            pair_correlations.append(0.0)
+        else:
+            r, _ = pearsonr(a, b)
             pair_correlations.append(r)
     return np.mean(pair_correlations) if pair_correlations else np.nan
 

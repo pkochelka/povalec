@@ -1,125 +1,156 @@
-"""
-NLI-based stance scoring for generated speeches.
-
-For each (statement, speech) pair, compute a continuous stance score in [-1, 1]:
-    score = P(entailment) - P(contradiction)
-where the NLI model judges whether the speech entails agreement with the statement.
-
-Score interpretation (maps to Likert 1-5):
-    +1.0 = strong agreement (Likert 5)
-     0.0 = neutral/mixed    (Likert 3)
-    -1.0 = strong disagreement (Likert 1)
-"""
 import argparse
 import json
 import os
-import pandas as pd
+import sys
+
 import numpy as np
+import pandas as pd
 import torch
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from tqdm import tqdm
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--model", default="MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7", type=str)
-parser.add_argument("--task_prompts", default="./prompts/nli_hypotheses.json", type=str)
-parser.add_argument("--input", default="./data/euandi_2019_results/qwen3.5-122b/speeches_en,de,el,es,fr,it_negated.csv")
-parser.add_argument("--variant", default="_negated", choices=["", "_question", "_negated"])
-parser.add_argument("--languages", default="en,de,el,es,fr,it")
-parser.add_argument("--batch_size", default=16, type=int)
-parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from utils import ALL_LANGS_STR
+
+DEFAULT_NLI_MODEL = "MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7"
+ENTAILMENT_LOGIT_INDEX = 0
+CONTRADICTION_LOGIT_INDEX = 2
+MAX_TOKEN_LENGTH = 512
 
 
-def load_prompts(path: str) -> dict[str, str]:
+def load_hypothesis_templates(path):
     with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 
-def load_model(model_name: str, device: str):
+def load_nli_model(model_name, device):
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForSequenceClassification.from_pretrained(model_name).to(device)
     model.eval()
-    # Label order for this model: [entailment, neutral, contradiction]
     return tokenizer, model
 
 
 @torch.no_grad()
-def score_batch(premises, hypotheses, tokenizer, model, device, max_length=512):
-    """Return array of (entailment - contradiction) scores."""
+def entailment_minus_contradiction(speeches, hypotheses, tokenizer, model, device):
     inputs = tokenizer(
-        premises, hypotheses,
+        speeches, hypotheses,
         return_tensors="pt", truncation=True, padding=True,
-        max_length=max_length,
+        max_length=MAX_TOKEN_LENGTH,
     ).to(device)
-    logits = model(**inputs).logits
-    probs = torch.softmax(logits, dim=-1).cpu().numpy()
-    # Columns: 0=entailment, 1=neutral, 2=contradiction
-    return probs[:, 0] - probs[:, 2]
+    label_probabilities = torch.softmax(model(**inputs).logits, dim=-1).cpu().numpy()
+    entailment_probability = label_probabilities[:, ENTAILMENT_LOGIT_INDEX]
+    contradiction_probability = label_probabilities[:, CONTRADICTION_LOGIT_INDEX]
+    return entailment_probability - contradiction_probability
 
 
-def _build_pairs(df, lang_variant, template):
+def speech_variant_indices(df, lang_variant):
+    answer_column_prefix = f"answer_{lang_variant}_v"
+    return sorted({
+        int(column[len(answer_column_prefix):])
+        for column in df.columns
+        if column.startswith(answer_column_prefix)
+        and column[len(answer_column_prefix):].isdigit()
+    })
+
+
+def collect_speech_hypothesis_pairs(df, lang_variant, hypothesis_template):
+    statement_column = f"original_text_{lang_variant}"
+    variant_indices = speech_variant_indices(df, lang_variant)
     pairs = []
-    stmt_col = f"original_text_{lang_variant}"
-    for i, row in df.iterrows():
-        hypothesis = template.format(row[stmt_col])
-        for j in range(5):
-            speech = row.get(f"answer_{lang_variant}_v{j}")
+    for row_index, row in df.iterrows():
+        statement = row[statement_column]
+        if not isinstance(statement, str) or not statement.strip():
+            continue
+        hypothesis = hypothesis_template.format(statement)
+        for variant_index in variant_indices:
+            speech = row.get(f"answer_{lang_variant}_v{variant_index}")
             if isinstance(speech, str) and speech.strip():
-                pairs.append((i, j, speech, hypothesis))
-    return pairs
+                pairs.append((row_index, variant_index, speech, hypothesis))
+    return pairs, variant_indices
 
 
-def _run_scores(pairs, tokenizer, model, device, batch_size, lang_variant):
+def score_pairs_in_batches(pairs, tokenizer, model, device, batch_size, description):
     scores = np.zeros(len(pairs))
-    for start in tqdm(range(0, len(pairs), batch_size), desc=f"scoring {lang_variant}"):
+    for start in tqdm(range(0, len(pairs), batch_size), desc=description):
         chunk = pairs[start:start + batch_size]
-        scores[start:start + len(chunk)] = score_batch(
-            [p[2] for p in chunk], [p[3] for p in chunk], tokenizer, model, device
+        chunk_speeches = [speech for _, _, speech, _ in chunk]
+        chunk_hypotheses = [hypothesis for _, _, _, hypothesis in chunk]
+        scores[start:start + len(chunk)] = entailment_minus_contradiction(
+            chunk_speeches, chunk_hypotheses, tokenizer, model, device,
         )
     return scores
 
 
-def _write_scores(df, pairs, scores, lang_variant):
-    for k, (i, j, _, _) in enumerate(pairs):
-        df.at[i, f"stance_{lang_variant}_v{j}"] = scores[k]
-    variant_cols = [f"stance_{lang_variant}_v{j}" for j in range(5)]
-    df[f"stance_{lang_variant}_mean"] = df[variant_cols].mean(axis=1)
+def write_stance_columns(df, pairs, scores, lang_variant, variant_indices):
+    for (row_index, variant_index, _, _), score in zip(pairs, scores):
+        df.at[row_index, f"stance_{lang_variant}_v{variant_index}"] = score
+    per_variant_stance_columns = [f"stance_{lang_variant}_v{i}" for i in variant_indices]
+    df[f"stance_{lang_variant}_mean"] = df[per_variant_stance_columns].mean(axis=1)
 
 
-def score_dataframe(df, languages, variant, hypothesis_templates, tokenizer, model, device, batch_size=16):
-    """
-    Expects the wide CSV produced by your generation script, with columns:
-        original_text_{lang}{variant}
-        answer_{lang}{variant}_v{j}   for j in 0..4
-    Adds columns: stance_{lang}{variant}_v{j}  and  stance_{lang}{variant}_mean
-    """
+def score_speech_stances(df, languages, variant, hypothesis_templates, tokenizer, model, device, batch_size):
     for language in languages:
         lang_variant = f"{language}{variant}"
-        pairs = _build_pairs(df, lang_variant, hypothesis_templates[language])
+        if f"original_text_{lang_variant}" not in df.columns:
+            print(f"[{lang_variant}] no statement column, skipping.")
+            continue
+        if language not in hypothesis_templates:
+            print(f"[{lang_variant}] no hypothesis template for '{language}', skipping.")
+            continue
+        pairs, variant_indices = collect_speech_hypothesis_pairs(
+            df, lang_variant, hypothesis_templates[language],
+        )
         if not pairs:
             print(f"[{lang_variant}] no speeches found, skipping.")
             continue
-        scores = _run_scores(pairs, tokenizer, model, device, batch_size, lang_variant)
-        _write_scores(df, pairs, scores, lang_variant)
+        scores = score_pairs_in_batches(
+            pairs, tokenizer, model, device, batch_size,
+            description=f"scoring {lang_variant}",
+        )
+        write_stance_columns(df, pairs, scores, lang_variant, variant_indices)
     return df
 
 
-if __name__ == "__main__":
-    args = parser.parse_args()
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--nli_model", default=DEFAULT_NLI_MODEL)
+    parser.add_argument("--hypothesis_templates", default="./prompts/nli_hypotheses.json")
+    parser.add_argument("--llm", default="qwen3.5-122b")
+    parser.add_argument("--dataset", default="euandi_2024", choices=["euandi_2019", "euandi_2024"])
+    parser.add_argument("--input", default=None)
+    parser.add_argument("--variant", default="_negated", choices=["", "_question", "_negated"])
+    parser.add_argument("--languages", default=ALL_LANGS_STR)
+    parser.add_argument("--batch_size", default=16, type=int)
+    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    return parser.parse_args()
+
+
+def resolve_input_path(args, languages):
+    if args.input:
+        return args.input
+    return f"./data/{args.dataset}_results/{args.llm}/speeches_{','.join(languages)}{args.variant}.csv"
+
+
+def main():
+    args = parse_args()
     languages = args.languages.split(",")
+    input_path = resolve_input_path(args, languages)
 
-    hypothesis_templates = load_prompts(args.task_prompts)
-    missing = [lang for lang in languages if lang not in hypothesis_templates]
-    if missing:
-        raise ValueError(f"Missing hypothesis templates for languages: {missing}")
+    hypothesis_templates = load_hypothesis_templates(args.hypothesis_templates)
+    df = pd.read_csv(input_path, sep=";", encoding="utf-8-sig")
+    tokenizer, model = load_nli_model(args.nli_model, args.device)
 
-    df = pd.read_csv(args.input, sep=";", encoding="utf-8-sig")
-    tokenizer, model = load_model(args.model, args.device)
-    df = score_dataframe(
-        df, languages, args.variant, hypothesis_templates, tokenizer, model, args.device,
-        batch_size=args.batch_size,
+    df = score_speech_stances(
+        df, languages, args.variant, hypothesis_templates,
+        tokenizer, model, args.device, args.batch_size,
     )
 
-    stem, ext = os.path.splitext(args.input)
+    stem, ext = os.path.splitext(input_path)
     output_path = f"{stem}_scored{ext}"
     df.to_csv(output_path, sep=";", index=False, encoding="utf-8-sig")
     print(f"Wrote {output_path}")
+
+
+if __name__ == "__main__":
+    main()

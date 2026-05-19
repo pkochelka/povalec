@@ -8,7 +8,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pandas as pd
-from utils import call_api, extract_json, save_checkpoint
+from utils import ALL_LANGS_STR, call_api, extract_json, save_checkpoint
 
 def load_prompts(path: str) -> tuple[dict[str, str], dict[str, list[str]]]:
     with open(path, encoding="utf-8") as f:
@@ -121,8 +121,8 @@ if __name__ == "__main__":
     parser.add_argument("--model", default="qwen3.5-122b", type=str)
     parser.add_argument("--model_dir", default=None, type=str)
     parser.add_argument("--variant", default="_question", type=str, choices=["", "_question", "_negated"])
-    parser.add_argument("--max_workers", default=4, type=int)
-    parser.add_argument("--languages", default="en,de,el,es,fr,it", type=str)
+    parser.add_argument("--max_workers", default=10, type=int)
+    parser.add_argument("--languages", default=ALL_LANGS_STR, type=str)
     parser.add_argument("--task_prompts", default="./prompts/survey_processor_concurrent.json", type=str)
     parser.add_argument("--dataset", default="euandi_2024", type=str, choices=["euandi_2019", "euandi_2024"])
     parser.add_argument("--second_provider", action="store_true")

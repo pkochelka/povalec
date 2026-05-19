@@ -1,13 +1,14 @@
-import httpx
-from bs4 import BeautifulSoup
+import os
+import sys
 import json
 import time
 
-LANGS = [
-    "at", "be", "bg", "hr", "cy", "cz", "dk", "ee", "fi", "fr",
-    "de", "gr", "hu", "ie", "it", "lv", "lt", "lu", "mt", "nl",
-    "pl", "pt", "ro", "sk", "si", "es", "se"
-]
+import httpx
+from bs4 import BeautifulSoup
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from utils import LANGS
 
 def scrape_statements(lang, country_id=15):
     url = f"https://euandi.eu/{lang}/survey/european-elections/statements.html?country_id={country_id}"

@@ -7,9 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pandas as pd
-from utils import call_api, extract_json
-
-from scrape_euandi import LANGS
+from utils import ALL_LANGS_STR, call_api, extract_json
 
 def load_prompts(path: str) -> dict[str, str]:
     with open(path, encoding="utf-8") as f:
@@ -85,7 +83,7 @@ def process_survey(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="kimi-k2.6", type=str, choices=["kimi-k2.6"])
-    parser.add_argument("--languages", default=",".join(LANGS+["en"]), type=str)
+    parser.add_argument("--languages", default=ALL_LANGS_STR, type=str)
     parser.add_argument("--task_prompts", default="./prompts/negate_and_neutralize.json", type=str)
     parser.add_argument("--dataset", default="euandi_2024", type=str, choices=["euandi_2019", "euandi_2024"])
     parser.add_argument("--max_workers", default=4, type=int)

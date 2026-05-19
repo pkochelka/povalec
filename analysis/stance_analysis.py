@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils import likert_to_stance, load_dataframe
+from utils import ALL_LANGS_STR, likert_to_stance, load_dataframe
 
 
 def build_matrices(df, likert_df, languages, stance_col_fmt, choice_agree_is_low=True, choice_variant=""):
@@ -234,7 +234,7 @@ def main():
                     help="CSV/JSONL with choice columns (default: {results_dir}/{languages}.csv)")
     ap.add_argument("--likert_negated", default=None,
                     help="Likert CSV/JSONL for the _negated variant")
-    ap.add_argument("--languages", default="en,de,fr,it,es,pt,nl,pl,cz,sk,hu,ro,bg,hr,da,se,fi,ee,lv,lt,mt,gr,si,ie")
+    ap.add_argument("--languages", default=ALL_LANGS_STR)
     ap.add_argument("--statement_col", default=None,
                     help="Column in --scored CSV holding the question text (optional)")
     ap.add_argument("--choice_agree_high", action="store_true",

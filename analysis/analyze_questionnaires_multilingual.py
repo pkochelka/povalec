@@ -1,5 +1,7 @@
 import pandas as pd
 
+from utils import ALL_LANGS_STR
+
 def analyze_survey_results(input_file: str, languages: list[str], variant: str, num_option_variants: int = 8):
     df = pd.read_csv(input_file, sep=";", encoding="utf-8-sig")
 
@@ -24,7 +26,7 @@ if __name__ == "__main__":
     MODEL_NAME = "gpt-oss-120b"
     VARIANT = "_negated"
     DATASET = "euandi_2024"
-    LANGUAGES = "en,de,fr,it,es,pt,nl,pl,cz,sk,hu,ro,bg,hr,da,se,fi,ee,lv,lt,mt,gr,si,ie"
+    LANGUAGES = ALL_LANGS_STR
 
     summary = analyze_survey_results(
         input_file=f"data/{DATASET}_results/{MODEL_NAME}/{LANGUAGES}{VARIANT}.csv",

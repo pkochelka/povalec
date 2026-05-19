@@ -7,7 +7,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils import flip_likert, likert_to_stance
+from utils import ALL_LANGS_STR, flip_likert, likert_to_stance
 
 PARTY_POSITIONS_PATH = "data/euandi_2024_data/euandi_2024_parties.jsonl"
 NUM_RESPONSE_VARIANTS = 8
@@ -122,7 +122,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_dir", default="qwen3.5-122b", type=str)
     parser.add_argument("--variant", default="", type=str, choices=["", "_question", "_negated"])
-    parser.add_argument("--languages", default="at,be,bg,hr,cy,cz,dk,ee,fi,fr,de,gr,hu,ie,it,lv,lt,lu,mt,nl,pl,pt,ro,sk,si,es,se,en", type=str)
+    parser.add_argument("--languages", default=ALL_LANGS_STR, type=str)
     parser.add_argument("--dataset", default="euandi_2024", type=str, choices=["euandi_2019", "euandi_2024"])
     args = parser.parse_args()
     languages_joined = ",".join(args.languages.split(","))

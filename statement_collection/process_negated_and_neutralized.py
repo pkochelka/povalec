@@ -1,9 +1,13 @@
 import argparse
+import json
+import os
+import sys
 
 import pandas as pd
-import json
 
-from scrape_euandi import LANGS
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from utils import ALL_LANGS_STR
 
 def row_to_json(row):
     statement = {}
@@ -19,7 +23,7 @@ def row_to_json(row):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", default="euandi_2024", type=str, choices=["euandi_2019", "euandi_2024"])
-    parser.add_argument("--languages", default=",".join(LANGS+["en"]), type=str)
+    parser.add_argument("--languages", default=ALL_LANGS_STR, type=str)
     parser.add_argument("--model", default="kimi-k2.6", type=str, choices=["kimi-k2.6"])
     args = parser.parse_args()
     input_file=f"data/{args.dataset}_results/{args.model}_{args.languages}.csv"

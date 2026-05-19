@@ -1,5 +1,7 @@
 import argparse
+import os
 import re
+import sys
 from itertools import combinations
 from pathlib import Path
 
@@ -11,23 +13,14 @@ import numpy as np
 import pandas as pd
 from scipy.stats import pearsonr
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-LIKERT_MIN = 1
-LIKERT_MAX = 5
-LIKERT_MIDPOINT = (LIKERT_MIN + LIKERT_MAX) / 2
-LIKERT_HALF_RANGE = (LIKERT_MAX - LIKERT_MIN) / 2
+from utils import LIKERT_MAX, flip_likert, likert_to_stance
+
 
 RED_WHITE_GREEN = mcolors.LinearSegmentedColormap.from_list(
     "red_white_green", ["red", "white", "green"]
 )
-
-
-def negate_scores(scores: np.ndarray) -> np.ndarray:
-    return LIKERT_MIN + LIKERT_MAX - scores
-
-
-def normalize_to_minus1_plus1(scores: np.ndarray) -> np.ndarray:
-    return (LIKERT_MIDPOINT - scores) / LIKERT_HALF_RANGE
 
 
 def load_variant_answers(csv_path: Path, variant_suffix: str) -> dict[str, np.ndarray]:
@@ -47,7 +40,7 @@ def load_variant_answers(csv_path: Path, variant_suffix: str) -> dict[str, np.nd
         sorted_cols = [version_cols[v] for v in sorted(version_cols)]
         answers = df[sorted_cols].apply(pd.to_numeric, errors="coerce").to_numpy(dtype=float)
         if variant_suffix == "_negated":
-            answers = negate_scores(answers)
+            answers = flip_likert(answers)
         answers_by_lang[lang] = answers
 
     return answers_by_lang
@@ -100,7 +93,7 @@ def compute_consistency_matrices(
     for j, lang in enumerate(all_languages):
         available_variants = [v[lang] for v in answers_per_variant if lang in v]
         all_responses = np.concatenate(available_variants, axis=1)
-        all_responses_normalized = normalize_to_minus1_plus1(all_responses)
+        all_responses_normalized = likert_to_stance(all_responses)
 
         for i in range(n_questions):
             raw_row = all_responses[i]

@@ -15,12 +15,8 @@ import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils import load_dataframe
+from utils import likert_to_stance, load_dataframe
 
-
-def stance_to_likert(score):
-    """Map [-1, 1] stance score to [1, 5] Likert scale (linear, for plotting only)."""
-    return 5 - 2 * (score + 1)
 
 def build_matrices(df, likert_df, languages, stance_col_fmt, choice_agree_is_low=True, choice_variant=""):
     stance_mat = np.vstack([df[stance_col_fmt.format(l=lang)].values for lang in languages])
@@ -28,7 +24,7 @@ def build_matrices(df, likert_df, languages, stance_col_fmt, choice_agree_is_low
     for lang in languages:
         vcols = [c for c in likert_df.columns if c.startswith(f"choice_{lang}{choice_variant}_v")]
         mean_choice = likert_df[vcols].mean(axis=1).values
-        aligned = (3 - mean_choice) / 2 if choice_agree_is_low else (mean_choice - 3) / 2
+        aligned = likert_to_stance(mean_choice) if choice_agree_is_low else -likert_to_stance(mean_choice)
         rows.append(aligned)
     choice_mat = np.vstack(rows)
     return stance_mat, choice_mat

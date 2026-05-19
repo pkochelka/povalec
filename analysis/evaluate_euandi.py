@@ -1,94 +1,136 @@
-import pandas as pd
+import argparse
 import json
-import numpy as np
-#from scrape_euandi import LANGS
+import os
+import sys
 
-PARTY_POSITIONS_PATH   = "data/euandi_2024_data/euandi_2024_parties.jsonl"
-LLM_RESPONSES_PATH = "data/euandi_2024_results/qwen3.5-122b/summary.csv"
-LANGS = "en,de,fr,it,es,pt,nl,pl,cz,sk,hu,ro,bg,hr,da,se,fi,ee,lv,lt,mt,gr,si,ie".split(",")
+import pandas as pd
 
-# ── Inverse of stance_to_likert ───────────────────────────────────────────────
-def likert_to_stance(likert: float) -> float:
-    """Map [1, 5] Likert mean back to [-1, 1] normalized score."""
-    return (3 - likert) / 2
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# ── Load LLM responses ────────────────────────────────────────────────────────
-llm_df = pd.read_csv(LLM_RESPONSES_PATH, sep=";")
-llm_df["statement"] = llm_df["statement"].str.strip()
+from utils import flip_likert, likert_to_stance
 
-# Convert all language columns from Likert [1-5] → stance [-1, 1]
-for lang in LANGS:
-    llm_df[f"{lang}_stance"] = llm_df[lang].apply(likert_to_stance)
+PARTY_POSITIONS_PATH = "data/euandi_2024_data/euandi_2024_parties.jsonl"
+NUM_RESPONSE_VARIANTS = 8
 
-# ── Load party responses ──────────────────────────────────────────────────────
-records = []
-with open(PARTY_POSITIONS_PATH) as f:
-    for line in f:
-        obj = json.loads(line)
-        party_meta = {k: v for k, v in obj.items() if k != "responses"}
-        for resp in obj.get("responses", []):
-            records.append({**party_meta, **resp})
-
-party_df = pd.DataFrame(records)
-party_df = party_df[party_df["country_iso"] != "eu"]
-
-party_to_group_map = {
-    "EPP":  "PPE",        # European People's Party → Parti Populaire Européen (EP group name)
-    "ECR":  "ECR",        # same name in both contexts
-    "PES":  "S&D",        # Party of European Socialists → Socialists & Democrats (EP group)
-    "ALDE": "ALDE",       # same name in both contexts
-    "EGP":  "Greens/EFA", # European Green Party → Greens–European Free Alliance (EP group)
-    "ID":   "ID",         # same name in both contexts
-    "PEL":  "GUE/NGL",   # Party of the European Left → GUE/NGL (EP group)
+EP_GROUP_BY_PARTY = {
+    # EU-level party federations
+    "EPP":  "PPE",       "ECR":  "ECR",
+    "PES":  "S&D",       "ALDE": "ALDE",
+    "EGP":  "Greens/EFA","ID":   "ID",
+    "PEL":  "GUE/NGL",
+    # Germany
+    "CDU":   "PPE",      "SPD":   "S&D",
+    "Grüne": "Greens/EFA","FDP":  "ALDE",
+    "AfD":   "ID",       "Linke": "GUE/NGL",
+    # France
+    "RE":   "ALDE",      "RN":   "ID",
+    "PS":   "S&D",       "LFI":  "GUE/NGL",
+    "EELV": "Greens/EFA","LR":   "PPE",
+    # Italy
+    "FDI":  "ECR",       "Lega": "ID",
+    "FI":   "PPE",       "PD":   "S&D",
+    "M5S":  "GUE/NGL",   "AVS":  "Greens/EFA",
+    "AR":   "ALDE",
+    # Greece
+    "ND":     "PPE",     "PASOK":  "S&D",
+    "SYRIZA": "S&D",     "EL":     "ECR",
+    # KKE and Niki are non-attached — omitted
+    # Spain
+    "PP":      "PPE",    "PSOE":    "S&D",
+    "Vox":     "ECR",    "Sumar":   "GUE/NGL",
+    "Podemos": "GUE/NGL",
 }
 
-party_df["EU Party"] = party_df["short_name"].map(party_to_group_map)
-party_df["statement"] = party_df["statement"].str.strip()
 
-# ── Match statements ──────────────────────────────────────────────────────────
-# Exact match; flag misses for inspection
-llm_statements   = set(llm_df["statement"])
-party_statements = set(party_df["statement"])
-unmatched = llm_statements.symmetric_difference(party_statements)
-print(unmatched)
-if unmatched:
-    print(f"⚠️  {len(unmatched)} unmatched statements:")
-    for s in unmatched:
-        print(f"  · {s}")
+def detect_languages(df: pd.DataFrame) -> list[str]:
+    return [
+        col[len("choice_"):-len("_v0")]
+        for col in df.columns
+        if col.startswith("choice_") and col.endswith("_v0")
+    ]
 
-# ── Compute proximity per party × language ────────────────────────────────────
-# EuAndI methodology: agreement = 1 - |party_stance - llm_stance| / 2
-# (dividing by 2 normalises the max possible distance to 1)
 
-merged = party_df.merge(
-    llm_df[["statement"] + [f"{l}_stance" for l in LANGS]],
-    on="statement",
-    how="inner"
-)
+def mean_likert_per_statement(df: pd.DataFrame, languages: list[str]) -> pd.DataFrame:
+    result = pd.DataFrame({"statement_idx": range(len(df))})
+    for lang in languages:
+        choice_cols = [f"choice_{lang}_v{v}" for v in range(NUM_RESPONSE_VARIANTS)]
+        result[lang] = df[choice_cols].apply(pd.to_numeric, errors="coerce").fillna(3).mean(axis=1)
+    return result
 
-party_id_cols = ["EU Party", "country_iso"]  # adjust to your schema
 
-results = []
-for lang in LANGS:
-    col = f"{lang}_stance"
-    tmp = merged[party_id_cols + ["statement", "normalized_answer", col]].copy()
-    tmp["lang"]      = lang
-    tmp["llm_stance"]    = tmp[col]
-    tmp["party_stance"]  = tmp["normalized_answer"]
-    tmp["agreement"]     = 1 - (tmp["party_stance"] - tmp["llm_stance"]).abs() / 2
-    results.append(tmp[party_id_cols + ["statement", "lang",
-                                         "party_stance", "llm_stance", "agreement"]])
+def load_party_positions(path: str) -> pd.DataFrame:
+    records = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            obj = json.loads(line)
+            party_meta = {k: v for k, v in obj.items() if k != "responses"}
+            for resp in obj.get("responses", []):
+                records.append({**party_meta, **resp})
+    df = pd.DataFrame(records)
+    df = df[df["country_iso"] != "eu"].copy()
+    df["statement_idx"] = df["statement_idx"].astype(int)
+    df["statement"] = df["statement"].str.strip()
+    df["ep_group"] = df["short_name"].map(EP_GROUP_BY_PARTY)
+    return df
 
-eval_df = pd.concat(results, ignore_index=True)
 
-# ── Aggregate: mean agreement per party × language ────────────────────────────
-summary = (
-    eval_df
-    .groupby(party_id_cols + ["lang"])["agreement"]
-    .mean()
-    .reset_index()
-    .rename(columns={"agreement": "mean_agreement"})
-    .sort_values(["lang", "mean_agreement"], ascending=[True, False])
-)
+def compute_mean_agreement_per_ep_group_and_language(
+    merged: pd.DataFrame, languages: list[str]
+) -> pd.DataFrame:
+    per_language_rows = []
+    for lang in languages:
+        rows = merged[["ep_group", "statement", "normalized_answer", f"{lang}_stance"]].copy()
+        rows = rows.rename(columns={
+            f"{lang}_stance": "llm_stance",
+            "normalized_answer": "party_stance",
+        })
+        rows["language"] = lang
+        rows["agreement"] = 1 - (rows["party_stance"] - rows["llm_stance"]).abs() / 2
+        per_language_rows.append(rows[["ep_group", "statement", "language", "party_stance", "llm_stance", "agreement"]])
 
-print(summary)
+    per_statement_df = pd.concat(per_language_rows, ignore_index=True)
+    return (
+        per_statement_df
+        .groupby(["ep_group", "language"])["agreement"]
+        .mean()
+        .reset_index()
+        .rename(columns={"agreement": "mean_agreement"})
+        .sort_values(["language", "mean_agreement"], ascending=[True, False])
+    )
+
+
+def evaluate(llm_responses_path: str, party_positions_path: str, negated: bool = False) -> pd.DataFrame:
+    raw_llm_df = pd.read_csv(llm_responses_path, sep=";", encoding="utf-8-sig")
+    languages = detect_languages(raw_llm_df)
+
+    llm_df = mean_likert_per_statement(raw_llm_df, languages)
+    if negated:
+        for lang in languages:
+            llm_df[lang] = flip_likert(llm_df[lang])
+    for lang in languages:
+        llm_df[f"{lang}_stance"] = likert_to_stance(llm_df[lang])
+
+    party_df = load_party_positions(party_positions_path)
+
+    stance_cols = [f"{lang}_stance" for lang in languages]
+    merged = party_df.merge(llm_df[["statement_idx"] + stance_cols], on="statement_idx", how="inner")
+
+    return compute_mean_agreement_per_ep_group_and_language(merged, languages)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model_dir", default="qwen3.5-122b", type=str)
+    parser.add_argument("--variant", default="", type=str, choices=["", "_question", "_negated"])
+    parser.add_argument("--languages", default="at,be,bg,hr,cy,cz,dk,ee,fi,fr,de,gr,hu,ie,it,lv,lt,lu,mt,nl,pl,pt,ro,sk,si,es,se,en", type=str)
+    parser.add_argument("--dataset", default="euandi_2024", type=str, choices=["euandi_2019", "euandi_2024"])
+    args = parser.parse_args()
+    languages_joined = ",".join(args.languages.split(","))
+
+    llm_responses_path = f"data/{args.dataset}_results/{args.model_dir}/{languages_joined}{args.variant}.csv"
+    output_path = f"data/{args.dataset}_results/{args.model_dir}/vaa{args.variant}_{languages_joined}.csv"
+
+    summary = evaluate(llm_responses_path, PARTY_POSITIONS_PATH, negated=args.variant == "_negated")
+    summary.to_csv(output_path, index=False)
+    print(f"Saved to {output_path}")
+    print(summary)

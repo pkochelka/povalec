@@ -1,14 +1,16 @@
 import json
 import os
+import sys
 import argparse
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import pandas as pd
 
-from api_caller import call_api
-from scrape_euandi import LANGS
-from utils import save_checkpoint
+from utils import call_api, save_checkpoint
+from statement_collection.scrape_euandi import LANGS
 
 def load_task_lists(path: str) -> dict[str, list[str]]:
     with open(path, "r", encoding="utf-8") as f:
@@ -111,7 +113,7 @@ if __name__ == "__main__":
     parser.add_argument("--model", default="qwen3.5-122b", type=str)#, choices=["gpt-oss-120b", "qwen3.5-122b"])
     parser.add_argument("--model_dir", default=None, type=str)
     parser.add_argument("--variant", default="_negated", type=str, choices=["", "_question", "_negated"])
-    parser.add_argument("--max_workers", default=3, type=int)
+    parser.add_argument("--max_workers", default=4, type=int)
     parser.add_argument("--languages", default=",".join(LANGS+["en"]), type=str)
     parser.add_argument("--task_prompts", default="./prompts/generate_speeches.json", type=str)
     parser.add_argument("--dataset", default="euandi_2024", type=str, choices=["euandi_2019", "euandi_2024"])

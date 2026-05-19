@@ -1,9 +1,12 @@
 import subprocess
 import sys
+import os
 import time
 import threading
 
-from scrape_euandi import LANGS
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from statement_collection.scrape_euandi import LANGS
 
 VARIANTS = ["", "_question", "_negated"]
 LANGUAGES = ",".join(LANGS+["en"])
@@ -12,12 +15,16 @@ DATASETS = [#"euandi_2019",
     "euandi_2024"]
 
 MODELS = [
-    {"model": "qwen3.5-122b",              "model_dir": "qwen3.5-122b",  "second_provider": False},
-    {"model": "gpt-oss-120b", "model_dir": "gpt-oss-120b", "second_provider": False},
+    {"model": "google/gemma-4-31b-it",      "model_dir":"gemma-4-31b-it", "second_provider": False},
+    {"model": "deepseek/deepseek-v4-pro",      "model_dir":"deepseek-v4-pro", "second_provider": False},
+#    {"model": "qwen3.5-122b",              "model_dir": "qwen3.5-122b",  "second_provider": False},
+#    {"model": "gpt-oss-120b", "model_dir": "gpt-oss-120b", "second_provider": False},
 ]
 
+_DIR = os.path.dirname(os.path.abspath(__file__))
+
 def build_cmd(script, model, model_dir, variant, dataset, second_provider):
-    cmd = [sys.executable, script,
+    cmd = [sys.executable, os.path.join(_DIR, script),
            "--model", model, "--model_dir", model_dir,
            "--variant", variant, "--dataset", dataset]
     if script == "survey_processor_concurrent.py":
@@ -40,7 +47,7 @@ def run_model(cfg):
                     result = subprocess.run(build_cmd(script, model, model_dir, variant, dataset, second_provider))
 
                     if result.returncode == 0:
-                        print(f"✓ Succeeded: {label}", flush=True)
+                        print(f"✓  Succeeded: {label}", flush=True)
                         break
                     else:
                         print(f"✗ Attempt {attempt}/{MAX_RETRIES} failed: {label}", flush=True)

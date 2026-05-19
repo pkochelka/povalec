@@ -7,10 +7,14 @@ with columns choice_{lang}_v{j} (one per prompt variant per language).
 """
 import argparse
 import os
+import sys
 import pandas as pd
 import numpy as np
 from scipy.stats import spearmanr
 import matplotlib.pyplot as plt
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from utils import load_dataframe
 
 

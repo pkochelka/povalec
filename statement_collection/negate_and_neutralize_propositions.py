@@ -1,12 +1,15 @@
 import argparse
 import json
+import os
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import pandas as pd
-from api_caller import call_api
+from utils import call_api, extract_json
 
 from scrape_euandi import LANGS
-from utils import extract_json
 
 def load_prompts(path: str) -> dict[str, str]:
     with open(path, encoding="utf-8") as f:

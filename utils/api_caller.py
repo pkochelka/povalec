@@ -2,6 +2,7 @@
 """Minimal client for an OpenAI-compatible chat completions endpoint."""
 import os
 import requests
+from requests.adapters import HTTPAdapter
 from dotenv import load_dotenv
 
 load_dotenv(".env.local")
@@ -14,6 +15,9 @@ _AUTH_TOKEN2 = os.getenv("AUTH_TOKEN2")
 
 REQUEST_TIMEOUT = 540
 
+_POOL_SIZE = int(os.getenv("HTTP_POOL_SIZE", "200"))
+
+
 def _make_headers(auth_token: str | None) -> dict:
     headers = {"Content-Type": "application/json"}
     if auth_token:
@@ -21,6 +25,16 @@ def _make_headers(auth_token: str | None) -> dict:
     return headers
 
 _HEADERS = _make_headers(AUTH_TOKEN)
+
+
+def _make_session() -> requests.Session:
+    session = requests.Session()
+    adapter = HTTPAdapter(pool_connections=_POOL_SIZE, pool_maxsize=_POOL_SIZE)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
+
+_SESSION = _make_session()
 
 def call_api(
     user_message: str,
@@ -48,7 +62,7 @@ def call_api(
     }
 
     try:
-        resp = requests.post(
+        resp = _SESSION.post(
             f"{base_url}/chat/completions",
             headers=headers,
             json=payload,

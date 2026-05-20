@@ -11,6 +11,8 @@ from utils import ALL_LANGS_STR
 VARIANTS = ["", "_question", "_negated"]
 LANGUAGES = ALL_LANGS_STR
 MAX_RETRIES = 3
+MAX_WORKERS = 64
+MAX_WORKERS_SECOND_PROVIDER = 3
 DATASETS = [#"euandi_2019",
     "euandi_2024"]
 
@@ -19,6 +21,7 @@ MODELS = [
     {"model": "deepseek/deepseek-v4-pro",      "model_dir":"deepseek-v4-pro", "second_provider": False},
 #    {"model": "qwen3.5-122b",              "model_dir": "qwen3.5-122b",  "second_provider": False},
     {"model": "gpt-oss-120b", "model_dir": "gpt-oss-120b", "second_provider": True},
+    {"model": "kimi-k2.6", "model_dir": "kimi-k2.6", "second_provider": True},
 ]
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
@@ -31,7 +34,9 @@ def build_cmd(script, model, model_dir, variant, dataset, second_provider):
         cmd += ["--languages", LANGUAGES]
     if second_provider:
         cmd.append("--second_provider")
-        cmd += ["--max_workers", "4"]
+        cmd += ["--max_workers", str(MAX_WORKERS_SECOND_PROVIDER)]
+    else:
+        cmd += ["--max_workers", str(MAX_WORKERS)]
     return cmd
 
 SCRIPTS = ["speech_generator.py", "survey_processor_concurrent.py"]

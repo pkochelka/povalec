@@ -19,6 +19,9 @@ DATASETS = [#"euandi_2019",
 MODELS = [
     {"model": "google/gemma-4-31b-it",      "model_dir":"gemma-4-31b-it", "second_provider": False},
     {"model": "deepseek/deepseek-v4-pro",      "model_dir":"deepseek-v4-pro", "second_provider": False},
+    {"model": "mistralai/mistral-small-2603",      "model_dir":"mistral-small-2603", "second_provider": False},
+    {"model": "x-ai/grok-4.3",      "model_dir":"grok-4.3", "second_provider": False},
+
 #    {"model": "qwen3.5-122b",              "model_dir": "qwen3.5-122b",  "second_provider": False},
     {"model": "gpt-oss-120b", "model_dir": "gpt-oss-120b", "second_provider": True},
     {"model": "kimi-k2.6", "model_dir": "kimi-k2.6", "second_provider": True},

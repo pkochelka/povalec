@@ -278,6 +278,30 @@ def process_model(model_dir: Path) -> None:
         ymin=0.2, ymax=1.0,
     )
 
+    save_boxplot_by_language(
+        correlation_mat, languages,
+        title=f"{model_dir.name} – Mean pairwise Pearson r per language (distribution over questions)",
+        ylabel="Mean pairwise Pearson r",
+        out_path=out_dir / "boxplot_correlation_by_language.png",
+        ymin=-1.0, ymax=1.0,
+    )
+
+    save_boxplot_by_question(
+        correlation_mat,
+        title=f"{model_dir.name} – Mean pairwise Pearson r per question (distribution over languages)",
+        ylabel="Mean pairwise Pearson r",
+        out_path=out_dir / "boxplot_correlation_by_question.png",
+        ymin=-1.0, ymax=1.0,
+    )
+
+    save_boxplot_by_question(
+        mean_mat,
+        title=f"{model_dir.name} – Mean answer per question (distribution over languages)",
+        ylabel="Mean answer (−1 disagree → +1 agree)",
+        out_path=out_dir / "boxplot_mean_by_question.png",
+        ymin=-1.0, ymax=1.0,
+    )
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(

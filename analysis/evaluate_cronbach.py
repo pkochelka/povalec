@@ -8,7 +8,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils import ALL_LANGS_STR, LIKERT_MIDPOINT, flip_likert
-from evaluate_euandi import detect_languages, mean_likert_per_statement
+from evaluate_euandi import detect_likert_languages, likert_means_per_statement
 
 AXES = ["Ukraine", "Ecology", "Immigration", "Values", "Economy", "Europe", "Left-Right"]
 SUPPORTS = 1
@@ -44,9 +44,9 @@ def cronbach_alpha(items: pd.DataFrame) -> float:
 
 def evaluate(llm_responses_path: str, questionnaire_path: str) -> pd.DataFrame:
     raw_llm_df = pd.read_csv(llm_responses_path, sep=";", encoding="utf-8-sig")
-    languages = detect_languages(raw_llm_df)
+    languages = detect_likert_languages(raw_llm_df)
 
-    mean_likert = mean_likert_per_statement(raw_llm_df, languages)
+    mean_likert = likert_means_per_statement(raw_llm_df, languages)
     directions = load_axis_directions(questionnaire_path)
 
     rows = [

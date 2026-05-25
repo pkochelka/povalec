@@ -121,16 +121,18 @@ def project_onto_dimensions(stances, questionnaire, dims):
     signs = questionnaire[dims].reset_index(names="row_idx")
     merged = stances.merge(signs, on="row_idx", how="left")
     for d in dims:
-        merged[d] = merged["stance"] * merged[d]
+        merged[d] = merged["stance"] * merged[d].replace(0, np.nan)
     return merged
 
 
-def per_run_positions(projected, dims):
+def aggregate_positions(projected, dims, granularity):
+    if granularity == "none":
+        return projected[["framing", "source", *dims]].copy()
     return projected.groupby(RUN_KEYS)[dims].mean().reset_index()
 
 
-def per_response_positions(projected, dims):
-    long = projected.melt(id_vars=["framing", "source"], value_vars=dims,
+def melt_positions(positions, dims):
+    long = positions.melt(id_vars=["framing", "source"], value_vars=dims,
                           var_name="dimension", value_name="position")
     return long[long["position"].notna()]
 
@@ -166,10 +168,13 @@ def plot_compass(runs, x_dim, y_dim, one_sided, title, out_path):
 
     all_points = runs[[x_dim, y_dim]].dropna().to_numpy()
     if len(all_points) >= 5:
-        density = gaussian_kde(all_points.T)
-        gx, gy = np.mgrid[-1:1:120j, -1:1:120j]
-        grid = density(np.vstack([gx.ravel(), gy.ravel()])).reshape(gx.shape)
-        ax.contourf(gx, gy, grid, levels=12, cmap="Greys", alpha=0.35)
+        try:
+            density = gaussian_kde(all_points.T)
+            gx, gy = np.mgrid[-1:1:120j, -1:1:120j]
+            grid = density(np.vstack([gx.ravel(), gy.ravel()])).reshape(gx.shape)
+            ax.contourf(gx, gy, grid, levels=12, cmap="Greys", alpha=0.35)
+        except np.linalg.LinAlgError:
+            pass
 
     sources = [s for s in SOURCE_POINT_MARKER if s in set(runs["source"])]
     for framing, color in FRAMING_COLOR.items():
@@ -289,6 +294,9 @@ def plot_models_compass(runs_by_model, x_dim, y_dim, one_sided, title, out_path)
     print(f"  Saved {out_path}")
 
 
+VIOLIN_GRANULARITIES = {"run": "per-run", "none": "per-answer"}
+
+
 def process_model(model_dir, questionnaire, dims, one_sided, x_dim, y_dim):
     print(f"\nProcessing: {model_dir.name}")
     stances = pd.concat(
@@ -300,18 +308,19 @@ def process_model(model_dir, questionnaire, dims, one_sided, x_dim, y_dim):
         return None
 
     projected = project_onto_dimensions(stances, questionnaire, dims)
-    runs = per_run_positions(projected, dims)
-    responses = per_response_positions(projected, dims)
+    run_positions = aggregate_positions(projected, dims, "run")
 
     out_dir = model_dir / "plots"
     out_dir.mkdir(exist_ok=True)
-    plot_compass(runs, x_dim, y_dim, one_sided,
+    plot_compass(run_positions, x_dim, y_dim, one_sided,
                  f"{model_dir.name} – political compass ({x_dim} × {y_dim}, per-run)",
                  out_dir / "political_compass.png")
-    plot_violins(responses, dims, one_sided,
-                 f"{model_dir.name} – per-dimension stance distribution (per-response)",
-                 out_dir / "dimension_violins.png")
-    return runs
+    for granularity, label in VIOLIN_GRANULARITIES.items():
+        responses = melt_positions(aggregate_positions(projected, dims, granularity), dims)
+        plot_violins(responses, dims, one_sided,
+                     f"{model_dir.name} – per-dimension stance distribution ({label})",
+                     out_dir / f"dimension_violins_{granularity}.png")
+    return run_positions
 
 
 def main():

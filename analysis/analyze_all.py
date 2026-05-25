@@ -14,12 +14,13 @@ DATASETS = [#"euandi_2019",
     "euandi_2024"]
 
 MODEL_DIRS = [
-    "gemma-4-31b-it",
-    "deepseek-v4-pro",
-    "qwen3.5-122b",
-    "gpt-oss-120b",
-    "grok-4.3",
-    "mistral-small-2603"
+    #"gemma-4-31b-it",
+    #"deepseek-v4-pro",
+    #"qwen3.5-122b",
+    #"gpt-oss-120b",
+    #"grok-4.3",
+    #"mistral-small-2603",
+    "kimi-k2.6"
 ]
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
@@ -30,29 +31,37 @@ def _results_dir(dataset, model_dir):
 
 
 PER_VARIANT_SCRIPTS = [
-    ("nli_stance_scoring.py", _DIR, "--llm",
+    ("nli_stance_scoring.py", _DIR, "--llm", [],
      lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"speeches_{LANGUAGES}{variant}_scored.csv")),
-    ("evaluate_euandi.py", _DIR, "--model_dir",
+    ("evaluate_cronbach_speeches.py", _DIR, "--model_dir", [],
+     lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"cronbach_speeches{variant}_{LANGUAGES}.csv")),
+    ("evaluate_euandi.py", _DIR, "--model_dir", [],
      lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"vaa{variant}_{LANGUAGES}.csv")),
-    ("evaluate_cronbach.py", _DIR, "--model_dir",
+    ("evaluate_euandi.py", _DIR, "--model_dir", ["--source", "speeches"],
+     lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"vaa_speeches{variant}_{LANGUAGES}.csv")),
+    ("evaluate_cronbach.py", _DIR, "--model_dir", [],
      lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"cronbach{variant}_{LANGUAGES}.csv")),
 ]
 
 PER_DATASET_PLOTTING_SCRIPTS = [
-    ("plot_vaa_per_language.py",      _PLOTTING_DIR),
-    ("plot_vaa_variants_grouped.py",  _PLOTTING_DIR),
-    ("plot_consistency.py",           _PLOTTING_DIR),
-    ("plot_cronbach.py",              _PLOTTING_DIR),
+    #("plot_vaa_per_language.py",      _PLOTTING_DIR),
+    #("plot_vaa_variants_grouped.py",  _PLOTTING_DIR),
+    #("plot_vaa_speeches.py",          _PLOTTING_DIR),
+    #("plot_consistency.py",           _PLOTTING_DIR),
+    #("plot_cronbach.py",              _PLOTTING_DIR),
+    #("plot_speeches.py",              _PLOTTING_DIR),
+    ("plot_political_bias.py",        _PLOTTING_DIR),
 ]
 
 
-def build_per_variant_cmd(script, script_dir, model_arg_name, model_dir, variant, dataset):
+def build_per_variant_cmd(script, script_dir, model_arg_name, extra_args, model_dir, variant, dataset):
     return [
         sys.executable, os.path.join(script_dir, script),
         model_arg_name, model_dir,
         "--variant", variant,
         "--dataset", dataset,
         "--languages", LANGUAGES,
+        *extra_args,
     ]
 
 
@@ -79,13 +88,13 @@ def run_per_variant_scripts():
     for dataset in DATASETS:
         for model_dir in MODEL_DIRS:
             for variant in VARIANTS:
-                for script, script_dir, model_arg_name, output_path in PER_VARIANT_SCRIPTS:
-                    label = f"{script}: model={model_dir}, variant='{variant}', dataset='{dataset}'"
+                for script, script_dir, model_arg_name, extra_args, output_path in PER_VARIANT_SCRIPTS:
+                    label = f"{script} {' '.join(extra_args)}: model={model_dir}, variant='{variant}', dataset='{dataset}'"
                     if os.path.exists(output_path(dataset, model_dir, variant)):
                         print(f"Skipping (output exists): {label}", flush=True)
                         continue
                     print(f"Running: {label}", flush=True)
-                    cmd = build_per_variant_cmd(script, script_dir, model_arg_name, model_dir, variant, dataset)
+                    cmd = build_per_variant_cmd(script, script_dir, model_arg_name, extra_args, model_dir, variant, dataset)
                     run_with_retries(cmd, label)
 
 

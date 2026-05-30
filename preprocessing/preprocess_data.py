@@ -5,10 +5,12 @@ from utils import write_parquet_chunked
 
 pd.options.future.infer_string = False
 
-MULTIPARL_CSV     = Path("data/EuroParl Custom/multi-europarl-lang_id.csv")
-MULTIPARL_PARQUET = Path("data/EuroParl Custom/preprocessed.parquet")
-PARLEE_CSV        = Path("data/ParlEE/ParlEE_EP_plenary_speeches.csv")
-PARLEE_PARQUET    = Path("data/EuroParl Custom/preprocessed_parlee.parquet")
+MULTIPARL_CSV       = Path("data/EuroParl Custom/multi-europarl-lang_id.csv")
+MULTIPARL_PARQUET   = Path("data/EuroParl Custom/preprocessed.parquet")
+PARLEE_CSV          = Path("data/ParlEE/ParlEE_EP_plenary_speeches.csv")
+PARLEE_PARQUET      = Path("data/EuroParl Custom/preprocessed_parlee.parquet")
+EU_DEBATES_JSONL    = Path("data/EU Debates/train.jsonl")
+EU_DEBATES_PARQUET  = Path("data/EuroParl Custom/preprocessed_eu_debates.parquet")
 
 LANG_COLS = ["fr", "it", "da", "sv", "el", "pt", "en", "lv", "es", "nl",
              "fi", "de", "hu", "pl", "et", "sl", "sk", "lt", "mt", "cs",
@@ -127,6 +129,41 @@ def preprocess_parlee():
     print(f"  Saved to {PARLEE_PARQUET}\n")
 
 
+def preprocess_eu_debates():
+    print("=== EU Debates ===")
+    df = pd.read_json(EU_DEBATES_JSONL, lines=True)
+    print(f"  Loaded {len(df):,} rows")
+
+    df = df[~df["speaker_party"].isin(["NI", "N/A"])]
+    print(f"  {len(df):,} rows after dropping NI and N/A (non-inscrits)")
+
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df["text"] = df["text"].str.strip()
+    df = df[df["text"] != ""]
+    df = df.dropna(subset=["date", "text"])
+
+    df_out = df.rename(columns={
+        "speaker_party": "EU Party",
+        "intervention_language": "language",
+        "speaker_name": "speaker",
+    })[["date", "EU Party", "text", "language", "speaker"]]
+    print(f"  {len(df_out):,} rows in output")
+
+    parlee_texts = set(pd.read_parquet(PARLEE_PARQUET, columns=["text"])["text"])
+    eu_texts = set(df_out["text"])
+    intersection = eu_texts & parlee_texts
+    print(f"  EU Debates unique texts: {len(eu_texts):,}")
+    print(f"  ParlEE unique texts:     {len(parlee_texts):,}")
+    print(f"  Text intersection size:  {len(intersection):,}")
+
+    print(f"  Party distribution:\n{df_out['EU Party'].value_counts().to_string()}")
+    print(f"  Language distribution:\n{df_out['language'].value_counts().to_string()}")
+
+    write_parquet_chunked(df_out, EU_DEBATES_PARQUET)
+    print(f"  Saved to {EU_DEBATES_PARQUET}\n")
+
+
 if __name__ == "__main__":
-    preprocess_multiparl()
     preprocess_parlee()
+    preprocess_multiparl()
+    preprocess_eu_debates()

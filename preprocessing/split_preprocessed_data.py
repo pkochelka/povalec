@@ -5,9 +5,10 @@ from utils import write_parquet_chunked
 
 pd.options.future.infer_string = False
 
-MULTIPARL_PARQUET = Path("data/EuroParl Custom/preprocessed.parquet")
-PARLEE_PARQUET    = Path("data/EuroParl Custom/preprocessed_parlee.parquet")
-OUTPUT_DIR        = Path("data/EuroParl Custom")
+MULTIPARL_PARQUET  = Path("data/EuroParl Custom/preprocessed.parquet")
+PARLEE_PARQUET     = Path("data/EuroParl Custom/preprocessed_parlee.parquet")
+EU_DEBATES_PARQUET = Path("data/EuroParl Custom/preprocessed_eu_debates.parquet")
+OUTPUT_DIR         = Path("data/EuroParl Custom")
 
 MIN_TEXT_LEN     = 50
 MIN_LANG_SAMPLES = 10_000
@@ -17,6 +18,7 @@ RANDOM_STATE     = 42
 df = pd.concat([
     pd.read_parquet(MULTIPARL_PARQUET),
     pd.read_parquet(PARLEE_PARQUET),
+    pd.read_parquet(EU_DEBATES_PARQUET),
 ], ignore_index=True)
 print(f"Combined: {len(df):,} rows")
 
@@ -37,13 +39,13 @@ print(f"Strata: {df['stratum_key'].nunique()} (merged {len(rare_strata)} rare co
 df["group"] = df["speaker"].astype(str) + "_" + df["date"].astype(str)
 print(f"Unique speech groups: {df['group'].nunique():,}")
 
-# 80% train / 20% temp  — groups never cross splits
+# 80% train / 20% temp, groups never cross splits
 sgkf = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)
 train_idx, temp_idx = next(sgkf.split(df, df["stratum_key"], groups=df["group"]))
 train = df.iloc[train_idx]
 temp  = df.iloc[temp_idx]
 
-# 50/50 split of temp → dev (10%) and test (10%)
+# 50/50 split of temp into dev (10%) and test (10%)
 sgkf2 = StratifiedGroupKFold(n_splits=2, shuffle=True, random_state=RANDOM_STATE)
 dev_idx, test_idx = next(sgkf2.split(temp, temp["stratum_key"], groups=temp["group"]))
 dev  = temp.iloc[dev_idx]

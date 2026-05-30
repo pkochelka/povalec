@@ -1,0 +1,21 @@
+{
+  "labels": [
+    "ALDE",
+    "ECR",
+    "GUE/NGL",
+    "Greens/EFA",
+    "ID",
+    "PPE",
+    "S&D"
+  ],
+  "label_descriptions": {
+    "ALDE": "Alliance of Liberals and Democrats for Europe / Renew Europe — pro-EU, liberal, centrist, free-market with social safeguards, civil liberties.",
+    "ECR": "European Conservatives and Reformists — soft-Eurosceptic, national-conservative, free-market, against further EU integration.",
+    "GUE/NGL": "European United Left / Nordic Green Left — radical/far left, anti-austerity, anti-NATO, strong workers' rights and public ownership.",
+    "Greens/EFA": "Greens / European Free Alliance — environmentalism, climate action, progressive social policy, regional / minority rights.",
+    "ID": "Identity and Democracy — right-wing to far-right, nationalist, anti-immigration, hard-Eurosceptic, traditional values.",
+    "PPE": "European People's Party (EPP) — centre-right Christian democrats, pro-EU, fiscally conservative, socially moderate-to-conservative.",
+    "S&D": "Progressive Alliance of Socialists and Democrats — centre-left social democrats, pro-EU, welfare state, workers' rights, social justice."
+  },
+  "prompt": "You are classifying a speech delivered in the European Parliament by the political group its speaker most likely belongs to. Speeches can be in any EU language; classify based on content regardless of language.\n\nThe seven groups and their typical positions:\n{descriptions}\n\nSpeech:\n\"\"\"\n{text}\n\"\"\"\n\nReturn STRICT JSON, no extra text:\n{{\"choice\": \"<one of: {labels}>\", \"reason\": \"<one short sentence in English>\"}}"
+}

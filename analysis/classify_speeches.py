@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 import argparse
+import json
 import os
 import re
 import sys
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -14,8 +16,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils import ALL_LANGS_STR
 
-DEFAULT_MODEL_PATH = "./mmBERT-base-trainer_strat/checkpoint-80478"
-MAX_TOKEN_LENGTH = 512
+DEFAULT_ENSEMBLE_DIR = "./mmBERT-base-logitadj-ensemble"
+EPSILON = 1e-12
 REFUSED_REASON_PREFIXES = ("REFUSED",)
 FAILED_REASON_VALUES = {"FAILED"}
 
@@ -30,28 +32,57 @@ SOURCE_OUTPUT_FILENAME = {
 }
 
 
+@dataclass
+class Ensemble:
+    tokenizer: AutoTokenizer
+    models: list
+    labels: list
+    biases: np.ndarray
+    max_len: int
+
+
 def slugify_party_label(label):
     return re.sub(r"[^0-9A-Za-z]+", "_", label).strip("_")
 
 
-def load_classifier(model_path, device):
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
-    model = AutoModelForSequenceClassification.from_pretrained(model_path).to(device)
-    model.eval()
-    id_to_label = {int(i): label for i, label in model.config.id2label.items()}
-    labels_in_class_order = [id_to_label[i] for i in range(len(id_to_label))]
-    return tokenizer, model, labels_in_class_order
+def load_ensemble(ensemble_dir, device):
+    with open(os.path.join(ensemble_dir, "ensemble.json"), encoding="utf-8") as f:
+        manifest = json.load(f)
+
+    label2id = manifest["label2id"]
+    labels = sorted(label2id, key=label2id.get)
+    tokenizer = AutoTokenizer.from_pretrained(
+        os.path.join(ensemble_dir, manifest["seed_model_dirs"][0])
+    )
+
+    models = []
+    for seed_dir in manifest["seed_model_dirs"]:
+        model = AutoModelForSequenceClassification.from_pretrained(
+            os.path.join(ensemble_dir, seed_dir)
+        ).to(device)
+        model.eval()
+        models.append(model)
+
+    return Ensemble(
+        tokenizer=tokenizer,
+        models=models,
+        labels=labels,
+        biases=np.array(manifest["biases"], dtype=np.float32),
+        max_len=manifest["max_len"],
+    )
 
 
 @torch.no_grad()
-def predict_class_probabilities(texts, tokenizer, model, device):
-    inputs = tokenizer(
+def predict_class_probabilities(texts, ensemble, device):
+    inputs = ensemble.tokenizer(
         texts,
         return_tensors="pt", truncation=True, padding=True,
-        max_length=MAX_TOKEN_LENGTH,
+        max_length=ensemble.max_len,
     ).to(device)
-    logits = model(**inputs).logits
-    return torch.softmax(logits, dim=-1).cpu().numpy()
+    per_model_probabilities = [
+        torch.softmax(model(**inputs).logits, dim=-1) for model in ensemble.models
+    ]
+    return torch.stack(per_model_probabilities).mean(dim=0).cpu().numpy()
 
 
 def is_classifiable_text(value, source):
@@ -90,13 +121,13 @@ def collect_texts_to_classify(df, lang_variant, source):
     return texts_to_classify, variant_indices
 
 
-def classify_in_batches(texts_to_classify, tokenizer, model, device, batch_size, progress_description):
-    class_probabilities = np.zeros((len(texts_to_classify), model.config.num_labels), dtype=np.float32)
+def classify_in_batches(texts_to_classify, ensemble, device, batch_size, progress_description):
+    class_probabilities = np.zeros((len(texts_to_classify), len(ensemble.labels)), dtype=np.float32)
     for batch_start in tqdm(range(0, len(texts_to_classify), batch_size), desc=progress_description):
         batch = texts_to_classify[batch_start:batch_start + batch_size]
         batch_texts = [text for _, _, text in batch]
         class_probabilities[batch_start:batch_start + len(batch)] = predict_class_probabilities(
-            batch_texts, tokenizer, model, device,
+            batch_texts, ensemble, device,
         )
     return class_probabilities
 
@@ -112,11 +143,10 @@ def ensure_prediction_columns_exist(df, lang_variant, variant_indices, label_slu
                 df[probability_column] = np.nan
 
 
-def write_predictions(df, texts_to_classify, class_probabilities, lang_variant, labels_in_class_order):
-    label_slugs = [slugify_party_label(label) for label in labels_in_class_order]
-    predicted_label_per_text = [
-        labels_in_class_order[i] for i in class_probabilities.argmax(axis=1)
-    ]
+def write_predictions(df, texts_to_classify, class_probabilities, lang_variant, ensemble):
+    label_slugs = [slugify_party_label(label) for label in ensemble.labels]
+    adjusted_scores = np.log(class_probabilities + EPSILON) + ensemble.biases
+    predicted_label_per_text = [ensemble.labels[i] for i in adjusted_scores.argmax(axis=1)]
     variant_indices = sorted({variant_index for _, variant_index, _ in texts_to_classify})
     ensure_prediction_columns_exist(df, lang_variant, variant_indices, label_slugs)
 
@@ -128,8 +158,7 @@ def write_predictions(df, texts_to_classify, class_probabilities, lang_variant, 
             df.at[row_index, f"party_prob_{slug}_{lang_variant}_v{variant_index}"] = float(probability)
 
 
-def classify_all_languages(df, languages, variant, source, tokenizer, model, labels_in_class_order,
-                           device, batch_size):
+def classify_all_languages(df, languages, variant, source, ensemble, device, batch_size):
     for language in languages:
         lang_variant = f"{language}{variant}"
         texts_to_classify, _ = collect_texts_to_classify(df, lang_variant, source)
@@ -137,10 +166,10 @@ def classify_all_languages(df, languages, variant, source, tokenizer, model, lab
             print(f"[{lang_variant}] no usable {source} texts, skipping.")
             continue
         class_probabilities = classify_in_batches(
-            texts_to_classify, tokenizer, model, device, batch_size,
+            texts_to_classify, ensemble, device, batch_size,
             progress_description=f"classifying {source} {lang_variant}",
         )
-        write_predictions(df, texts_to_classify, class_probabilities, lang_variant, labels_in_class_order)
+        write_predictions(df, texts_to_classify, class_probabilities, lang_variant, ensemble)
     return df
 
 
@@ -161,7 +190,7 @@ def resolve_input_and_output_paths(args, languages, source):
     return input_path, output_path
 
 
-def classify_source(args, languages, source, tokenizer, model, labels_in_class_order):
+def classify_source(args, languages, source, ensemble):
     input_path, output_path = resolve_input_and_output_paths(args, languages, source)
     if not os.path.exists(input_path):
         print(f"[{source}] input not found, skipping: {input_path}")
@@ -173,9 +202,7 @@ def classify_source(args, languages, source, tokenizer, model, labels_in_class_o
     print(f"[{source}] reading {input_path}")
     df = pd.read_csv(input_path, sep=";", encoding="utf-8-sig")
     df = classify_all_languages(
-        df, languages, args.variant, source,
-        tokenizer, model, labels_in_class_order,
-        args.device, args.batch_size,
+        df, languages, args.variant, source, ensemble, args.device, args.batch_size,
     )
     df.to_csv(output_path, sep=";", index=False, encoding="utf-8-sig")
     print(f"[{source}] wrote {output_path}")
@@ -183,7 +210,7 @@ def classify_source(args, languages, source, tokenizer, model, labels_in_class_o
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_path", default=DEFAULT_MODEL_PATH)
+    parser.add_argument("--ensemble_dir", default=DEFAULT_ENSEMBLE_DIR)
     parser.add_argument("--llm", default="qwen3.5-122b")
     parser.add_argument("--dataset", default="euandi_2024", choices=["euandi_2019", "euandi_2024"])
     parser.add_argument("--source", default="both", choices=["both", "speeches", "reasons"])
@@ -202,12 +229,12 @@ def main():
     languages = args.languages.split(",")
     sources_to_classify = ["speeches", "reasons"] if args.source == "both" else [args.source]
 
-    print(f"--- Loading classifier from: {args.model_path} ---")
-    tokenizer, model, labels_in_class_order = load_classifier(args.model_path, args.device)
-    print(f"Labels (index order): {labels_in_class_order}")
+    print(f"--- Loading ensemble from: {args.ensemble_dir} ---")
+    ensemble = load_ensemble(args.ensemble_dir, args.device)
+    print(f"Loaded {len(ensemble.models)} models | labels (index order): {ensemble.labels}")
 
     for source in sources_to_classify:
-        classify_source(args, languages, source, tokenizer, model, labels_in_class_order)
+        classify_source(args, languages, source, ensemble)
 
 
 if __name__ == "__main__":

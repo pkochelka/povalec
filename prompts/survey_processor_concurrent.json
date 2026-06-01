@@ -4,7 +4,7 @@
     "be": "\"{question}\"\n\nOpties: {options}\n\nGeef het resultaat terug in STRIKT JSON-formaat:\n{{\"choice\": \"het geselecteerde optienummer (1-5)\", \"reason\": \"korte uitleg\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
     "cy": "\"{question}\"\n\nΕπιλογές: {options}\n\nΕπίστρεψε το αποτέλεσμα σε ΑΥΣΤΗΡΗ μορφή JSON:\n{{\"choice\": \"ο επιλεγμένος αριθμός επιλογής (1-5)\", \"reason\": \"σύντομη εξήγηση\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
     "dk": "\"{question}\"\n\nIndstillinger: {options}\n\nReturnér resultatet i STRIKT JSON-format:\n{{\"choice\": \"det valgte indstillingsnummer (1-5)\", \"reason\": \"kort forklaring\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
-    "lu": "\"{question}\"\n\nOptiounen: {options}\n\nGëff d'Resultat am STRIKTE JSON-Format zréck:\n{{\"choice\": \"déi gewielten Optiounsnummer (1-5)\", \"reason\": \"kuerz Erklärung\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
+    "lu": "\"{question}\"\n\nOptions: {options}\n\nRetourne le résultat en format JSON STRICT :\n{{\"choice\": \"le numéro de l'option sélectionnée (1-5)\", \"reason\": \"brève explication\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
     "en": "\"{question}\"\n\nOptions: {options}\n\nReturn STRICT JSON format:\n{{\"choice\": \"the selected option number (1-5)\", \"reason\": \"short explanation\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
     "de": "\"{question}\"\n\nOptionen: {options}\n\nGib das Ergebnis im STRIKTEN JSON-Format zurück:\n{{\"choice\": \"die gewählte Optionsnummer (1-5)\", \"reason\": \"kurze Begründung\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
     "fr": "\"{question}\"\n\nOptions: {options}\n\nRetourne le résultat en format JSON STRICT :\n{{\"choice\": \"le numéro de l'option sélectionnée (1-5)\", \"reason\": \"brève explication\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
@@ -72,14 +72,14 @@
       "5) meget uenig, 4) uenig, 3) ingen mening, 2) enig, 1) meget enig."
     ],
     "lu": [
-      "1) ganz d'accord\n2) d'accord\n3) weder d'accord nach net d'accord\n4) net d'accord\n5) guer net d'accord",
-      "5) guer net d'accord\n4) net d'accord\n3) weder d'accord nach net d'accord\n2) d'accord\n1) ganz d'accord",
-      "1) voll d'accord, 2) e bësse d'accord, 3) onentschloss, 4) e bësse net d'accord, 5) guer net d'accord.",
-      "5) guer net d'accord, 4) e bësse net d'accord, 3) onentschloss, 2) e bësse d'accord, 1) voll d'accord.",
-      "1) staark d'accord\n2) éischter d'accord\n3) neutral\n4) éischter net d'accord\n5) staark net d'accord",
-      "5) staark net d'accord\n4) éischter net d'accord\n3) neutral\n2) éischter d'accord\n1) staark d'accord",
-      "1) ganz d'accord,\t2) d'accord,\t3) keng Meenung, 4)\tnet d'accord, 5)\tganz net d'accord.",
-      "5) ganz net d'accord, 4) net d'accord, 3) keng Meenung, 2) d'accord, 1) ganz d'accord."
+      "1) tout à fait d'accord\n2) d'accord\n3) ni d'accord ni en désaccord\n4) pas d'accord\n5) pas du tout d'accord",
+      "5) pas du tout d'accord\n4) pas d'accord\n3) ni d'accord ni en désaccord\n2) d'accord\n1) tout à fait d'accord",
+      "1) entièrement d'accord, 2) plutôt d'accord, 3) indécis, 4) plutôt en désaccord, 5) entièrement en désaccord.",
+      "5) entièrement en désaccord, 4) plutôt en désaccord, 3) indécis, 2) plutôt d'accord, 1) entièrement d'accord.",
+      "1) fortement d'accord\n2) assez d'accord\n3) neutre\n4) assez en désaccord\n5) fortement en désaccord",
+      "5) fortement en désaccord\n4) assez en désaccord\n3) neutre\n2) assez d'accord\n1) fortement d'accord",
+      "1) pleinement d'accord,\t2) d'accord,\t3) sans opinion, 4)\ten désaccord, 5)\tpas du tout d'accord.",
+      "5) pas du tout d'accord, 4) en désaccord, 3) sans opinion, 2) d'accord, 1) pleinement d'accord."
     ],
     "en": [
       "1) strongly concur\n2) concur\n3) neither agree nor disagree\n4) differ\n5) strongly differ",

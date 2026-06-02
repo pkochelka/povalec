@@ -5,7 +5,8 @@ import argparse
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _ROOT)
 
 import pandas as pd
 
@@ -44,8 +45,9 @@ def generate_speeches(
     second_provider: bool = False,
 ):
     dir_name = model_dir if model_dir is not None else model
-    os.makedirs(f"./data/{dataset}_results/{dir_name}", exist_ok=True)
-    output_path = f"./data/{dataset}_results/{dir_name}/speeches_{','.join(languages)}{variant}.csv"
+    out_dir = os.path.join(_ROOT, "data", f"{dataset}_results", dir_name)
+    os.makedirs(out_dir, exist_ok=True)
+    output_path = os.path.join(out_dir, f"speeches_{','.join(languages)}{variant}.csv")
     checkpoint_path = output_path + ".ckpt.json"
 
     if os.path.exists(output_path):
@@ -114,7 +116,7 @@ if __name__ == "__main__":
     parser.add_argument("--variant", default="_negated", type=str, choices=["", "_question", "_negated"])
     parser.add_argument("--max_workers", default=4, type=int)
     parser.add_argument("--languages", default=ALL_LANGS_STR, type=str)
-    parser.add_argument("--task_prompts", default="./prompts/generate_speeches.json", type=str)
+    parser.add_argument("--task_prompts", default=os.path.join(_ROOT, "prompts", "generate_speeches.json"), type=str)
     parser.add_argument("--dataset", default="euandi_2024", type=str, choices=["euandi_2019", "euandi_2024"])
     parser.add_argument("--second_provider", action="store_true")
     args = parser.parse_args()
@@ -125,10 +127,9 @@ if __name__ == "__main__":
     if missing:
         raise ValueError(f"Missing task prompts for languages: {missing}")
 
-    input_file = (
-        f"data/{args.dataset}_data/statements.jsonl"
-        if args.variant == ""
-        else f"data/{args.dataset}_data/statements_negated_neutral.jsonl"
+    input_file = os.path.join(
+        _ROOT, "data", f"{args.dataset}_data",
+        "statements.jsonl" if args.variant == "" else "statements_negated_neutral.jsonl",
     )
     df = pd.read_json(input_file, lines=True)
     generate_speeches(

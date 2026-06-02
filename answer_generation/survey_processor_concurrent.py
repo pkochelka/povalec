@@ -5,7 +5,8 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _ROOT)
 
 import pandas as pd
 from utils import ALL_LANGS_STR, call_api, extract_json, save_checkpoint
@@ -52,8 +53,9 @@ def process_survey(
     second_provider: bool = False,
 ):
     model_dir = model_dir or model
-    os.makedirs(f"./data/{dataset}_results/{model_dir}", exist_ok=True)
-    output_path = f"./data/{dataset}_results/{model_dir}/{','.join(languages)}{variant}.csv"
+    out_dir = os.path.join(_ROOT, "data", f"{dataset}_results", model_dir)
+    os.makedirs(out_dir, exist_ok=True)
+    output_path = os.path.join(out_dir, f"{','.join(languages)}{variant}.csv")
     checkpoint_path = output_path + ".ckpt.json"
 
     if os.path.exists(output_path):
@@ -123,7 +125,7 @@ if __name__ == "__main__":
     parser.add_argument("--variant", default="_question", type=str, choices=["", "_question", "_negated"])
     parser.add_argument("--max_workers", default=10, type=int)
     parser.add_argument("--languages", default=ALL_LANGS_STR, type=str)
-    parser.add_argument("--task_prompts", default="./prompts/survey_processor_concurrent.json", type=str)
+    parser.add_argument("--task_prompts", default=os.path.join(_ROOT, "prompts", "survey_processor_concurrent.json"), type=str)
     parser.add_argument("--dataset", default="euandi_2024", type=str, choices=["euandi_2019", "euandi_2024"])
     parser.add_argument("--second_provider", action="store_true")
     args = parser.parse_args()
@@ -135,7 +137,7 @@ if __name__ == "__main__":
         raise ValueError(f"Missing prompts or option lists for languages: {missing}")
 
     df = pd.read_json(
-        f"data/{args.dataset}_data/statements_negated_neutral.jsonl",
+        os.path.join(_ROOT, "data", f"{args.dataset}_data", "statements_negated_neutral.jsonl"),
         lines=True,
     )
     process_survey(

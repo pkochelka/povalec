@@ -12,19 +12,24 @@ VARIANTS = ["", "_question", "_negated"]
 LANGUAGES = ALL_LANGS_STR
 MAX_RETRIES = 3
 MAX_WORKERS = 64
-MAX_WORKERS_SECOND_PROVIDER = 3
+MAX_WORKERS_SECOND_PROVIDER = 4
 DATASETS = [#"euandi_2019",
     "euandi_2024"]
 
 MODELS = [
-    {"model": "google/gemma-4-31b-it",      "model_dir":"gemma-4-31b-it", "second_provider": False},
-    {"model": "deepseek/deepseek-v4-pro",      "model_dir":"deepseek-v4-pro", "second_provider": False},
-    {"model": "mistralai/mistral-small-2603",      "model_dir":"mistral-small-2603", "second_provider": False},
-    {"model": "x-ai/grok-4.3",      "model_dir":"grok-4.3", "second_provider": False},
+    {"model": "gemma4:26b-a4b-it-q8_0",      "model_dir":"gemma-4-31b-it", "second_provider": False},
+    #{"model": "google/gemma-4-31b-it",      "model_dir":"gemma-4-31b-it", "second_provider": False},
+    #{"model": "deepseek/deepseek-v4-pro",      "model_dir":"deepseek-v4-pro", "second_provider": False},
+    #{"model": "mistralai/mistral-small-2603",      "model_dir":"mistral-small-2603", "second_provider": False},
+    #{"model": "x-ai/grok-4.3",      "model_dir":"grok-4.3", "second_provider": False},
 
 #    {"model": "qwen3.5-122b",              "model_dir": "qwen3.5-122b",  "second_provider": False},
-    {"model": "gpt-oss-120b", "model_dir": "gpt-oss-120b", "second_provider": True},
-    {"model": "kimi-k2.6", "model_dir": "kimi-k2.6", "second_provider": True},
+    #{"model": "gpt-oss-120b", "model_dir": "gpt-oss-120b", "second_provider": True},
+    #{"model": "mistral-medium-3.5", "model_dir": "mistral-medium-3.5", "second_provider": True},
+    #{"model": "kimi-k2.6", "model_dir": "kimi-k2.6", "second_provider": True},
+    #{"model": "deepseek-v4-pro-thinking", "model_dir": "deepseek-v4-pro", "second_provider": True},
+    {"model": "glm-5", "model_dir": "glm-5", "second_provider": True},
+    #{"model": "LLM6-2xRTX5000.gemma3:12b-it-qat", "model_dir": "gemma-3-12b", "second_provider": False}
 ]
 
 _DIR = os.path.dirname(os.path.abspath(__file__))

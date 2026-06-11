@@ -70,10 +70,13 @@ class ClassifierConfig:
 
 def subsample(df, limit, seed):
     if limit is None or limit >= len(df):
-        return df
-    rng = np.random.default_rng(seed)
-    sampled = np.sort(rng.choice(len(df), limit, replace=False))
-    return df.iloc[sampled].reset_index(drop=True)
+        return df.sample(frac=1, random_state=seed).reset_index(drop=True)
+    fraction = limit / len(df)
+    parts = [
+        group.sample(max(1, round(len(group) * fraction)), random_state=seed)
+        for _, group in df.groupby(["language", PARTY_COLUMN])
+    ]
+    return pd.concat(parts).sample(frac=1, random_state=seed).reset_index(drop=True)
 
 
 def build_prompt(config, text):

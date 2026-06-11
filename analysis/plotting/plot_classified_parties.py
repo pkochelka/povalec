@@ -7,7 +7,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy.stats import pearsonr, spearmanr
+from scipy.stats import spearmanr
 
 VARIANT_SUFFIX_TO_LABEL = {"": "base", "_negated": "negated", "_question": "question"}
 VARIANT_LABEL_ORDER = ["base", "negated", "question"]
@@ -367,21 +367,19 @@ def load_vaa_mean_agreement_per_party(vaa_csv_path):
     return df.groupby("ep_group")["mean_agreement"].mean()
 
 
-def correlate_party_vectors(series_a, series_b):
+def spearman_rho_between_party_vectors(series_a, series_b):
     parties = sorted(set(series_a.index) & set(series_b.index))
     if len(parties) < 2:
-        return float("nan"), float("nan")
+        return float("nan")
     vector_a = series_a.reindex(parties).to_numpy(dtype=float)
     vector_b = series_b.reindex(parties).to_numpy(dtype=float)
     mask = ~(np.isnan(vector_a) | np.isnan(vector_b))
     if mask.sum() < 2:
-        return float("nan"), float("nan")
+        return float("nan")
     vector_a, vector_b = vector_a[mask], vector_b[mask]
     if vector_a.std() == 0 or vector_b.std() == 0:
-        return float("nan"), float("nan")
-    pearson_r = float(pearsonr(vector_a, vector_b)[0])
-    spearman_rho = float(spearmanr(vector_a, vector_b)[0])
-    return pearson_r, spearman_rho
+        return float("nan")
+    return float(spearmanr(vector_a, vector_b)[0])
 
 
 def top_party(series):
@@ -393,12 +391,8 @@ def top_party(series):
 
 def build_vaa_comparison_row(model_name, source, variant_label, classifier_mean_prob,
                              classifier_argmax_share, vaa_mean_agreement):
-    pearson_mean_prob, spearman_mean_prob = correlate_party_vectors(
-        classifier_mean_prob, vaa_mean_agreement,
-    )
-    pearson_argmax, spearman_argmax = correlate_party_vectors(
-        classifier_argmax_share, vaa_mean_agreement,
-    )
+    spearman_mean_prob = spearman_rho_between_party_vectors(classifier_mean_prob, vaa_mean_agreement)
+    spearman_argmax = spearman_rho_between_party_vectors(classifier_argmax_share, vaa_mean_agreement)
     classifier_mean_prob_top, classifier_mean_prob_top_value = top_party(classifier_mean_prob)
     classifier_argmax_top, classifier_argmax_top_value = top_party(classifier_argmax_share)
     vaa_top, vaa_top_value = top_party(vaa_mean_agreement)
@@ -406,9 +400,7 @@ def build_vaa_comparison_row(model_name, source, variant_label, classifier_mean_
         "model": model_name,
         "source": source,
         "variant": variant_label,
-        "pearson_r_mean_prob_vs_vaa": pearson_mean_prob,
         "spearman_rho_mean_prob_vs_vaa": spearman_mean_prob,
-        "pearson_r_argmax_share_vs_vaa": pearson_argmax,
         "spearman_rho_argmax_share_vs_vaa": spearman_argmax,
         "classifier_mean_prob_top": classifier_mean_prob_top,
         "classifier_mean_prob_top_value": classifier_mean_prob_top_value,
@@ -424,7 +416,7 @@ def build_vaa_comparison_row(model_name, source, variant_label, classifier_mean_
 
 
 def plot_classifier_vs_vaa_scatter(classifier_mean_prob, vaa_mean_agreement,
-                                   pearson_r, spearman_rho, title, output_path):
+                                   spearman_rho, title, output_path):
     parties = sorted(set(classifier_mean_prob.index) & set(vaa_mean_agreement.index))
     if len(parties) < 2:
         return
@@ -438,13 +430,10 @@ def plot_classifier_vs_vaa_scatter(classifier_mean_prob, vaa_mean_agreement,
         ax.annotate(party, (vaa_value, classifier_value), xytext=(6, 4),
                     textcoords="offset points", fontsize=8)
 
-    ax.set_xlim(0.0, 1.0)
-    ax.set_ylim(0.0, max(0.3, float(np.nanmax(classifier_values)) + 0.08))
     ax.set_xlabel("VAA mean agreement (averaged over languages)")
     ax.set_ylabel("Classifier mean probability (averaged over texts)")
     ax.grid(linestyle="--", alpha=0.4)
-    ax.set_title(f"{title}\nPearson r = {pearson_r:.3f}   Spearman ρ = {spearman_rho:.3f}",
-                 fontsize=11, pad=8)
+    ax.set_title(f"{title}\nSpearman ρ = {spearman_rho:.3f}", fontsize=11, pad=8)
     save_figure(fig, output_path)
 
 
@@ -484,64 +473,183 @@ def plots_dir_for(model_dir):
     return plots_dir
 
 
-def process_model(model_dir):
-    print(f"\nProcessing: {model_dir.name}")
-    classified_csvs = discover_classified_csvs(model_dir)
-    if not classified_csvs:
-        print("  No *_classified.csv files found, skipping.")
-        return {}, []
+def plot_classifier_distributions_for_one_csv(model_name, source, variant_label,
+                                              classifier_mean_prob, classifier_argmax_share,
+                                              long_df, plots_dir):
+    plot_party_distribution_bar(
+        classifier_mean_prob, classifier_argmax_share,
+        f"{model_name} – {source} ({variant_label}): party distribution",
+        plots_dir / f"classified_{source}_{variant_label}_party_distribution.png",
+    )
+    plot_language_party_heatmap(
+        mean_probability_per_language_and_party(long_df),
+        f"{model_name} – {source} ({variant_label}): mean party probability per language",
+        plots_dir / f"classified_{source}_{variant_label}_language_party_heatmap.png",
+    )
 
-    plots_dir = plots_dir_for(model_dir)
-    vaa_csvs = discover_vaa_csvs(model_dir)
-    long_by_source_variant = {}
+
+def compare_classifier_to_vaa(model_name, source, variant_label,
+                              classifier_mean_prob, classifier_argmax_share,
+                              vaa_csv_path, plots_dir):
+    if vaa_csv_path is None:
+        print(f"  [{source}/{variant_label}] no matching VAA CSV "
+              f"({VAA_SOURCE_FOR_CLASSIFIER_SOURCE[source]}), skipping VAA correlation.")
+        return None
+
+    vaa_mean_agreement = load_vaa_mean_agreement_per_party(vaa_csv_path)
+    if vaa_mean_agreement.empty or vaa_mean_agreement.isna().all():
+        print(f"  [{source}/{variant_label}] VAA CSV {vaa_csv_path.name} produced no usable rows.")
+        return None
+
+    comparison_row = build_vaa_comparison_row(
+        model_name, source, variant_label,
+        classifier_mean_prob, classifier_argmax_share, vaa_mean_agreement,
+    )
+    plot_classifier_vs_vaa_scatter(
+        classifier_mean_prob, vaa_mean_agreement,
+        comparison_row["spearman_rho_mean_prob_vs_vaa"],
+        f"{model_name} – {source} ({variant_label}): classifier mean probability vs VAA mean agreement",
+        plots_dir / f"classified_vs_vaa_{source}_{variant_label}_scatter.png",
+    )
+    return comparison_row
+
+
+def language_party_matrix_from_classifier(long_by_source_variant):
+    if not long_by_source_variant:
+        return pd.DataFrame()
+    combined = pd.concat(long_by_source_variant.values(), ignore_index=True)
+    if combined.empty:
+        return pd.DataFrame()
+    return (
+        combined.groupby(["language", "party"])["probability"]
+        .mean()
+        .unstack("party")
+    )
+
+
+def language_party_matrix_from_vaa(vaa_csvs):
+    frames = []
+    for path in vaa_csvs.values():
+        df = pd.read_csv(path)
+        if not {"language", "ep_group", "mean_agreement"}.issubset(df.columns):
+            continue
+        normalized = (
+            df["language"]
+            .str.replace("_question", "", regex=False)
+            .str.replace("_negated", "", regex=False)
+        )
+        frames.append(pd.DataFrame({
+            "language": normalized,
+            "ep_group": df["ep_group"],
+            "mean_agreement": df["mean_agreement"],
+        }))
+    if not frames:
+        return pd.DataFrame()
+    combined = pd.concat(frames, ignore_index=True)
+    return (
+        combined.groupby(["language", "ep_group"])["mean_agreement"]
+        .mean()
+        .unstack("ep_group")
+    )
+
+
+def plot_per_language_boxplot_panel(ax, matrix, parties, ylabel, title):
+    languages = sorted(matrix.index.tolist())
+    matrix = matrix.reindex(index=languages, columns=parties)
+    x_positions = np.arange(len(parties))
+
+    per_party_values = []
+    languages_with_data = set()
+    for party in parties:
+        column = matrix[party].to_numpy(dtype=float)
+        per_party_values.append(column[~np.isnan(column)])
+        for language, value in zip(languages, column):
+            if not np.isnan(value):
+                languages_with_data.add(language)
+
+    box = ax.boxplot(
+        per_party_values, positions=x_positions, widths=0.6,
+        patch_artist=True, showfliers=True,
+        medianprops=dict(color="black", linewidth=1.5),
+        whiskerprops=dict(color="black", linewidth=0.8),
+        capprops=dict(color="black", linewidth=0.8),
+        flierprops=dict(marker="o", markersize=4, markerfacecolor="grey",
+                        markeredgecolor="none", alpha=0.6),
+    )
+    for patch, party in zip(box["boxes"], parties):
+        patch.set_facecolor(color_for_party(party))
+        patch.set_alpha(0.75)
+        patch.set_edgecolor("black")
+        patch.set_linewidth(0.6)
+
+    ax.set_xticks(x_positions, parties, rotation=20, ha="right", fontsize=9)
+    ax.set_ylabel(ylabel)
+    ax.set_title(f"{title} ({len(languages_with_data)} languages)", fontsize=10)
+    ax.grid(axis="y", linestyle="--", alpha=0.3)
+
+
+def plot_pooled_per_language_overview(model_name, long_by_source_variant, vaa_csvs, plots_dir):
+    classifier_matrix = language_party_matrix_from_classifier(long_by_source_variant)
+    vaa_matrix = language_party_matrix_from_vaa(vaa_csvs)
+    if classifier_matrix.empty and vaa_matrix.empty:
+        return
+
+    parties = ordered_parties_present(set(classifier_matrix.columns) | set(vaa_matrix.columns))
+    if not parties or (classifier_matrix.empty and vaa_matrix.empty):
+        return
+
+    fig, (ax_vaa, ax_clf) = plt.subplots(
+        1, 2, figsize=(max(14, len(parties) * 2.0), 6.0)
+    )
+    plot_per_language_boxplot_panel(
+        ax_vaa, vaa_matrix, parties,
+        ylabel="VAA mean agreement",
+        title="VAA mean agreement per language",
+    )
+    plot_per_language_boxplot_panel(
+        ax_clf, classifier_matrix, parties,
+        ylabel="Classifier mean probability",
+        title="Classifier mean probability per language",
+    )
+    fig.suptitle(
+        f"{model_name}: crosslingual variance per party "
+        f"(pooled over sources & variants)",
+        fontsize=11,
+    )
+    save_figure(fig, plots_dir / "classified_vs_vaa_per_language.png")
+
+
+def plot_pooled_classifier_vs_vaa(model_name, long_by_source_variant, vaa_csvs, plots_dir):
+    if not long_by_source_variant or not vaa_csvs:
+        return
+
+    classifier_series = [
+        mean_probability_per_party(long_df)
+        for long_df in long_by_source_variant.values()
+        if not long_df.empty
+    ]
+    vaa_series = [
+        series
+        for series in (load_vaa_mean_agreement_per_party(p) for p in vaa_csvs.values())
+        if not series.empty
+    ]
+    if not classifier_series or not vaa_series:
+        return
+
+    classifier_mean_prob = pd.concat(classifier_series).groupby(level=0).mean()
+    vaa_mean_agreement = pd.concat(vaa_series).groupby(level=0).mean()
+
+    spearman_rho = spearman_rho_between_party_vectors(classifier_mean_prob, vaa_mean_agreement)
+    plot_classifier_vs_vaa_scatter(
+        classifier_mean_prob, vaa_mean_agreement, spearman_rho,
+        f"{model_name} – pooled (speeches+reasons, all variants): "
+        f"classifier mean probability vs VAA mean agreement",
+        plots_dir / "classified_vs_vaa_pooled_scatter.png",
+    )
+
+
+def plot_per_source_aggregates(model_name, long_by_source_variant, plots_dir):
     mean_probability_per_source = {}
-    vaa_comparison_rows = []
-
-    for (source, variant_label), csv_path in sorted(classified_csvs.items()):
-        long_df = load_long_predictions(csv_path)
-        if long_df.empty:
-            print(f"  [{source}/{variant_label}] no predictions found in {csv_path.name}")
-            continue
-        long_by_source_variant[(source, variant_label)] = long_df
-
-        classifier_mean_prob = mean_probability_per_party(long_df)
-        classifier_argmax_share = predicted_party_share(long_df)
-
-        plot_party_distribution_bar(
-            classifier_mean_prob,
-            classifier_argmax_share,
-            f"{model_dir.name} – {source} ({variant_label}): party distribution",
-            plots_dir / f"classified_{source}_{variant_label}_party_distribution.png",
-        )
-        plot_language_party_heatmap(
-            mean_probability_per_language_and_party(long_df),
-            f"{model_dir.name} – {source} ({variant_label}): mean party probability per language",
-            plots_dir / f"classified_{source}_{variant_label}_language_party_heatmap.png",
-        )
-
-        vaa_csv_path = vaa_csvs.get((source, variant_label))
-        if vaa_csv_path is None:
-            print(f"  [{source}/{variant_label}] no matching VAA CSV "
-                  f"({VAA_SOURCE_FOR_CLASSIFIER_SOURCE[source]}), skipping VAA correlation.")
-            continue
-        vaa_mean_agreement = load_vaa_mean_agreement_per_party(vaa_csv_path)
-        if vaa_mean_agreement.empty:
-            print(f"  [{source}/{variant_label}] VAA CSV {vaa_csv_path.name} is empty.")
-            continue
-
-        comparison_row = build_vaa_comparison_row(
-            model_dir.name, source, variant_label,
-            classifier_mean_prob, classifier_argmax_share, vaa_mean_agreement,
-        )
-        vaa_comparison_rows.append(comparison_row)
-        plot_classifier_vs_vaa_scatter(
-            classifier_mean_prob, vaa_mean_agreement,
-            comparison_row["pearson_r_mean_prob_vs_vaa"],
-            comparison_row["spearman_rho_mean_prob_vs_vaa"],
-            f"{model_dir.name} – {source} ({variant_label}): classifier mean probability vs VAA mean agreement",
-            plots_dir / f"classified_vs_vaa_{source}_{variant_label}_scatter.png",
-        )
-
     for source in SOURCE_LABELS:
         mean_probability_by_variant = {
             variant_label: mean_probability_per_party(long_df)
@@ -551,7 +659,7 @@ def process_model(model_dir):
         if mean_probability_by_variant:
             plot_party_distribution_across_variants(
                 mean_probability_by_variant,
-                f"{model_dir.name} – {source}: party distribution across variants",
+                f"{model_name} – {source}: party distribution across variants",
                 plots_dir / f"classified_{source}_party_distribution_variants.png",
             )
         long_for_source = [
@@ -565,14 +673,57 @@ def process_model(model_dir):
     if len(mean_probability_per_source) >= 2:
         plot_speeches_vs_reasons(
             mean_probability_per_source,
-            f"{model_dir.name} – speeches vs reasons: party distribution (all variants)",
+            f"{model_name} – speeches vs reasons: party distribution (all variants)",
             plots_dir / "classified_speeches_vs_reasons_party_distribution.png",
         )
 
-    if vaa_comparison_rows:
-        summary_path = model_dir / "classified_vs_vaa_summary.csv"
-        pd.DataFrame(vaa_comparison_rows).to_csv(summary_path, index=False)
-        print(f"  Wrote {summary_path.relative_to(summary_path.parents[2])}")
+
+def write_vaa_summary_csv(model_dir, vaa_comparison_rows):
+    if not vaa_comparison_rows:
+        return
+    summary_path = model_dir / "classified_vs_vaa_summary.csv"
+    pd.DataFrame(vaa_comparison_rows).to_csv(summary_path, index=False)
+    print(f"  Wrote {summary_path.relative_to(summary_path.parents[2])}")
+
+
+def process_model(model_dir):
+    print(f"\nProcessing: {model_dir.name}")
+    classified_csvs = discover_classified_csvs(model_dir)
+    if not classified_csvs:
+        print("  No *_classified.csv files found, skipping.")
+        return {}, []
+
+    plots_dir = plots_dir_for(model_dir)
+    vaa_csvs = discover_vaa_csvs(model_dir)
+    long_by_source_variant = {}
+    vaa_comparison_rows = []
+
+    for (source, variant_label), csv_path in sorted(classified_csvs.items()):
+        long_df = load_long_predictions(csv_path)
+        if long_df.empty:
+            print(f"  [{source}/{variant_label}] no predictions found in {csv_path.name}")
+            continue
+        long_by_source_variant[(source, variant_label)] = long_df
+
+        classifier_mean_prob = mean_probability_per_party(long_df)
+        classifier_argmax_share = predicted_party_share(long_df)
+
+        plot_classifier_distributions_for_one_csv(
+            model_dir.name, source, variant_label,
+            classifier_mean_prob, classifier_argmax_share, long_df, plots_dir,
+        )
+        comparison_row = compare_classifier_to_vaa(
+            model_dir.name, source, variant_label,
+            classifier_mean_prob, classifier_argmax_share,
+            vaa_csvs.get((source, variant_label)), plots_dir,
+        )
+        if comparison_row is not None:
+            vaa_comparison_rows.append(comparison_row)
+
+    plot_per_source_aggregates(model_dir.name, long_by_source_variant, plots_dir)
+    plot_pooled_classifier_vs_vaa(model_dir.name, long_by_source_variant, vaa_csvs, plots_dir)
+    plot_pooled_per_language_overview(model_dir.name, long_by_source_variant, vaa_csvs, plots_dir)
+    write_vaa_summary_csv(model_dir, vaa_comparison_rows)
 
     classifier_mean_prob_per_source_variant = {
         (source, variant_label): mean_probability_per_party(long_df)
@@ -627,11 +778,6 @@ def main():
         dataset_plots_dir = results_dir / "plots"
         dataset_plots_dir.mkdir(exist_ok=True)
         plot_cross_model_comparisons(mean_probability_per_model_source_variant, dataset_plots_dir)
-        plot_cross_model_vaa_correlation_heatmap(
-            vaa_comparison_rows_across_models,
-            "pearson_r_mean_prob_vs_vaa", "Pearson r (mean prob vs VAA agreement)",
-            dataset_plots_dir / "classified_vs_vaa_pearson_models.png",
-        )
         plot_cross_model_vaa_correlation_heatmap(
             vaa_comparison_rows_across_models,
             "spearman_rho_mean_prob_vs_vaa", "Spearman ρ (mean prob vs VAA agreement)",

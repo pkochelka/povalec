@@ -20,7 +20,9 @@ MODEL_DIRS = [
     #"gpt-oss-120b",
     #"grok-4.3",
     #"mistral-small-2603",
-    "kimi-k2.6"
+    #"kimi-k2.6",
+    #"mistral-medium-3.5",
+    "glm-5"
 ]
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
@@ -41,16 +43,21 @@ PER_VARIANT_SCRIPTS = [
      lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"vaa_speeches{variant}_{LANGUAGES}.csv")),
     ("evaluate_cronbach.py", _DIR, "--model_dir", [],
      lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"cronbach{variant}_{LANGUAGES}.csv")),
+    ("classify_speeches_old.py", _DIR, "--llm", ["--source", "speeches"],
+     lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"speeches_{LANGUAGES}{variant}_classified.csv")),
+    ("classify_speeches_old.py", _DIR, "--llm", ["--source", "reasons"],
+     lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"{LANGUAGES}{variant}_classified.csv")),
 ]
 
 PER_DATASET_PLOTTING_SCRIPTS = [
-    #("plot_vaa_per_language.py",      _PLOTTING_DIR),
-    #("plot_vaa_variants_grouped.py",  _PLOTTING_DIR),
-    #("plot_vaa_speeches.py",          _PLOTTING_DIR),
-    #("plot_consistency.py",           _PLOTTING_DIR),
-    #("plot_cronbach.py",              _PLOTTING_DIR),
-    #("plot_speeches.py",              _PLOTTING_DIR),
+    ("plot_vaa_per_language.py",      _PLOTTING_DIR),
+    ("plot_vaa_variants_grouped.py",  _PLOTTING_DIR),
+    ("plot_vaa_speeches.py",          _PLOTTING_DIR),
+    ("plot_consistency.py",           _PLOTTING_DIR),
+    ("plot_cronbach.py",              _PLOTTING_DIR),
+    ("plot_speeches.py",              _PLOTTING_DIR),
     ("plot_political_bias.py",        _PLOTTING_DIR),
+    ("plot_classified_parties.py",    _PLOTTING_DIR),
 ]
 
 

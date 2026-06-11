@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
-"""Train an mmBERT EU-party classifier that is robust to class imbalance.
+"""Train a single mmBERT EU-party classifier that is robust to class imbalance.
 
-Three techniques combine to lift minority-class and per-language macro-F1:
-logit-adjusted cross-entropy during training, a multi-seed softmax ensemble,
-and post-hoc per-class bias tuning on the dev set.
+Logit-adjusted cross-entropy handles the imbalance using only training priors.
+The best epoch count is found on the dev split, then the model is retrained on
+train+dev combined for that many epochs and evaluated once on the test split.
 """
 import os
 import sys
 import json
-import shutil
 from dataclasses import dataclass
 
 import numpy as np
 import torch
 import torch.nn.functional as F
-from datasets import ClassLabel, Dataset, DatasetDict
+from datasets import ClassLabel, Dataset, DatasetDict, concatenate_datasets
 from dotenv import load_dotenv
 from sklearn.metrics import f1_score
 from transformers import (
@@ -23,7 +22,8 @@ from transformers import (
     Trainer, TrainingArguments, set_seed,
 )
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, PROJECT_ROOT)
 
 from analysis.europarl_classification import (
     MIN_LANGUAGE_SAMPLES,
@@ -37,40 +37,30 @@ from analysis.europarl_classification import (
 
 MODEL_NAME = "jhu-clsp/mmBERT-base"
 MODEL_SLUG = MODEL_NAME.split("/")[-1]
-DATA_DIR = os.path.expanduser("~/data/Europarl Custom")
-ENSEMBLE_DIR = f"{MODEL_SLUG}-logitadj-ensemble"
+DATA_DIR = os.path.join(PROJECT_ROOT, "data", "EuroParl Custom")
+OUTPUT_DIR = f"{MODEL_SLUG}-logitadj"
 MAX_LEN = 512
-SEEDS = [42, 1337, 2024]
-NUM_EPOCHS = 6
+SEED = 42
+MAX_EPOCHS = 6
 EARLY_STOPPING_PATIENCE = 2
 LOGIT_ADJUSTMENT_TAU = 1.0
 EPSILON = 1e-12
+BEST_METRIC = "f1_macro_mean_lang"
 
 
 @dataclass
 class TrainingData:
-    tokenized: DatasetDict
+    train: Dataset
+    dev: Dataset
+    trainval: Dataset
+    test: Dataset
     collator: DataCollatorWithPadding
     label2id: dict
     id2label: dict
     num_labels: int
     target_names: list
-    val_langs: np.ndarray
+    dev_langs: np.ndarray
     test_langs: np.ndarray
-    logit_adjustment: torch.Tensor
-
-
-@dataclass
-class RunSummary:
-    per_seed_f1: list
-    ensemble_f1_raw: float
-    dev_f1_raw: float
-    dev_f1_tuned: float
-    ensemble_f1_tuned: float
-    biases: np.ndarray
-    overall_report: str
-    language_summary: str
-    per_language_reports: list
 
 
 class LanguageAwareMetrics:
@@ -111,34 +101,16 @@ class LanguageAwareMetrics:
 
 
 class LogitAdjustedTrainer(Trainer):
-    def __init__(self, logit_adjustment, val_langs, test_langs, metrics_fn, **kwargs):
+    def __init__(self, logit_adjustment, **kwargs):
         super().__init__(**kwargs)
         self.logit_adjustment = logit_adjustment
-        self.val_langs = val_langs
-        self.test_langs = test_langs
-        self.metrics_fn = metrics_fn
 
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         labels = inputs.pop("labels")
         outputs = model(**inputs)
         adjusted_logits = outputs.logits + self.logit_adjustment
-        loss = F.cross_entropy(
-            adjusted_logits.view(-1, self.model.config.num_labels),
-            labels.view(-1),
-        )
+        loss = F.cross_entropy(adjusted_logits, labels)
         return (loss, outputs) if return_outputs else loss
-
-    def evaluate(self, eval_dataset=None, ignore_keys=None, metric_key_prefix="eval"):
-        self.metrics_fn.current_languages = (
-            self.test_langs if metric_key_prefix == "test" else self.val_langs
-        )
-        return super().evaluate(eval_dataset, ignore_keys, metric_key_prefix)
-
-    def predict(self, test_dataset, ignore_keys=None, metric_key_prefix="test"):
-        self.metrics_fn.current_languages = (
-            self.val_langs if metric_key_prefix == "dev" else self.test_langs
-        )
-        return super().predict(test_dataset, ignore_keys, metric_key_prefix)
 
 
 def select_device():
@@ -149,13 +121,15 @@ def select_device():
     return device
 
 
-def compute_logit_adjustment(labels, num_labels, tau, device):
-    counts = np.bincount(labels, minlength=num_labels)
+def logit_adjustment_for(dataset, num_labels, device):
+    counts = np.bincount(np.asarray(dataset["labels"]), minlength=num_labels)
     priors = counts / counts.sum()
-    return torch.tensor(tau * np.log(priors + EPSILON), dtype=torch.float, device=device)
+    return torch.tensor(
+        LOGIT_ADJUSTMENT_TAU * np.log(priors + EPSILON), dtype=torch.float, device=device,
+    )
 
 
-def prepare_training_data(data_dir, tokenizer, device):
+def prepare_training_data(data_dir, tokenizer):
     raw_splits = {name: load_split(name, data_dir) for name in ("train", "dev", "test")}
 
     label_list = sorted(raw_splits["train"][PARTY_COLUMN].unique().tolist())
@@ -166,11 +140,6 @@ def prepare_training_data(data_dir, tokenizer, device):
     splits = {name: attach_labels(df, label2id) for name, df in raw_splits.items()}
     print("Train class counts:\n", splits["train"]["labels"].value_counts().sort_index().to_dict())
     print("Train languages:\n",    splits["train"]["language"].value_counts().to_dict())
-
-    logit_adjustment = compute_logit_adjustment(
-        splits["train"]["labels"].to_numpy(), num_labels, LOGIT_ADJUSTMENT_TAU, device,
-    )
-    print(f"Logit adjustment (tau={LOGIT_ADJUSTMENT_TAU}): {logit_adjustment.cpu().numpy().round(3)}")
 
     dataset = DatasetDict({
         "train":      Dataset.from_pandas(splits["train"], preserve_index=False),
@@ -186,168 +155,136 @@ def prepare_training_data(data_dir, tokenizer, device):
     )
 
     return TrainingData(
-        tokenized=tokenized,
+        train=tokenized["train"],
+        dev=tokenized["validation"],
+        trainval=concatenate_datasets([tokenized["train"], tokenized["validation"]]),
+        test=tokenized["test"],
         collator=DataCollatorWithPadding(tokenizer=tokenizer),
         label2id=label2id,
         id2label=id2label,
         num_labels=num_labels,
         target_names=[id2label[i] for i in range(num_labels)],
-        val_langs=splits["dev"]["language"].to_numpy(),
+        dev_langs=splits["dev"]["language"].to_numpy(),
         test_langs=splits["test"]["language"].to_numpy(),
-        logit_adjustment=logit_adjustment,
     )
 
 
-def train_one_seed(seed, data, tokenizer, hf_token, device):
-    print(f"\n{'=' * 60}\n  Training seed={seed}\n{'=' * 60}")
-    set_seed(seed)
-    model = AutoModelForSequenceClassification.from_pretrained(
+def build_model(data, hf_token, device):
+    set_seed(SEED)
+    return AutoModelForSequenceClassification.from_pretrained(
         MODEL_NAME, token=hf_token,
         num_labels=data.num_labels, id2label=data.id2label, label2id=data.label2id,
     ).to(device)
 
-    training_args = TrainingArguments(
-        output_dir=f"{MODEL_SLUG}-logitadj-s{seed}",
+
+def training_arguments(output_dir, num_epochs, evaluate_each_epoch):
+    return TrainingArguments(
+        output_dir=output_dir,
         fp16=True,
-        eval_strategy="epoch",
-        save_strategy="epoch",
+        eval_strategy="epoch" if evaluate_each_epoch else "no",
+        save_strategy="epoch" if evaluate_each_epoch else "no",
         logging_steps=500,
         per_device_train_batch_size=32,
         per_device_eval_batch_size=32,
         gradient_accumulation_steps=1,
         gradient_checkpointing=True,
         dataloader_num_workers=2,
-        num_train_epochs=NUM_EPOCHS,
+        num_train_epochs=num_epochs,
         learning_rate=2e-5,
         weight_decay=0.01,
         warmup_ratio=0.06,
         lr_scheduler_type="cosine",
         max_grad_norm=1.0,
-        load_best_model_at_end=True,
-        metric_for_best_model="f1_macro_mean_lang",
+        load_best_model_at_end=evaluate_each_epoch,
+        metric_for_best_model=BEST_METRIC if evaluate_each_epoch else None,
         greater_is_better=True,
         save_total_limit=1,
         report_to="none",
         optim="adamw_torch_fused",
-        seed=seed,
+        seed=SEED,
     )
 
+
+def release(model, trainer, device):
+    del model, trainer
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+
+
+def find_best_epoch(data, tokenizer, hf_token, device):
+    print(f"\n{'=' * 60}\n  Stage 1: searching best epoch on dev\n{'=' * 60}")
+    model = build_model(data, hf_token, device)
     metrics_fn = LanguageAwareMetrics()
+    metrics_fn.current_languages = data.dev_langs
+
     trainer = LogitAdjustedTrainer(
-        logit_adjustment=data.logit_adjustment,
-        val_langs=data.val_langs,
-        test_langs=data.test_langs,
-        metrics_fn=metrics_fn,
+        logit_adjustment=logit_adjustment_for(data.train, data.num_labels, device),
         model=model,
-        args=training_args,
-        train_dataset=data.tokenized["train"],
-        eval_dataset=data.tokenized["validation"],
+        args=training_arguments(f"{MODEL_SLUG}-search", MAX_EPOCHS, evaluate_each_epoch=True),
+        train_dataset=data.train,
+        eval_dataset=data.dev,
         data_collator=data.collator,
         processing_class=tokenizer,
         compute_metrics=metrics_fn,
         callbacks=[EarlyStoppingCallback(early_stopping_patience=EARLY_STOPPING_PATIENCE)],
     )
-
     trainer.train()
-    test_predictions = trainer.predict(data.tokenized["test"])
-    dev_predictions = trainer.predict(data.tokenized["validation"], metric_key_prefix="dev")
 
-    trainer.save_model(os.path.join(ENSEMBLE_DIR, f"seed-{seed}"))
-    shutil.rmtree(training_args.output_dir, ignore_errors=True)
-    del model, trainer
-    if device.type == "cuda":
-        torch.cuda.empty_cache()
-    return test_predictions, dev_predictions
+    scored = [entry for entry in trainer.state.log_history if f"eval_{BEST_METRIC}" in entry]
+    best = max(scored, key=lambda entry: entry[f"eval_{BEST_METRIC}"])
+    best_epoch = max(1, round(best["epoch"]))
 
-
-def softmax_probabilities(predictions):
-    return torch.softmax(torch.tensor(predictions.predictions), dim=-1).numpy()
+    release(model, trainer, device)
+    print(f"Best dev {BEST_METRIC}={best[f'eval_{BEST_METRIC}']:.4f} at epoch {best_epoch}")
+    return best_epoch
 
 
-def collect_ensemble_predictions(seeds, data, tokenizer, hf_token, device):
-    test_probs_per_seed = []
-    dev_probs_per_seed = []
-    y_test = None
-    y_dev = None
-    for seed in seeds:
-        test_predictions, dev_predictions = train_one_seed(seed, data, tokenizer, hf_token, device)
-        test_probs_per_seed.append(softmax_probabilities(test_predictions))
-        dev_probs_per_seed.append(softmax_probabilities(dev_predictions))
-        y_test = test_predictions.label_ids
-        y_dev = dev_predictions.label_ids
-    return test_probs_per_seed, dev_probs_per_seed, y_test, y_dev
+def train_final(data, tokenizer, hf_token, device, num_epochs):
+    print(f"\n{'=' * 60}\n  Stage 2: training on train+dev for {num_epochs} epochs\n{'=' * 60}")
+    model = build_model(data, hf_token, device)
+
+    trainer = LogitAdjustedTrainer(
+        logit_adjustment=logit_adjustment_for(data.trainval, data.num_labels, device),
+        model=model,
+        args=training_arguments(OUTPUT_DIR, num_epochs, evaluate_each_epoch=False),
+        train_dataset=data.trainval,
+        data_collator=data.collator,
+        processing_class=tokenizer,
+    )
+    trainer.train()
+    predictions = trainer.predict(data.test)
+    trainer.save_model(OUTPUT_DIR)
+
+    release(model, trainer, device)
+    return predictions.label_ids, np.argmax(predictions.predictions, axis=-1)
 
 
-def report_per_seed(seeds, test_probs_per_seed, y_test):
-    print("\n=== PER-SEED TEST (sanity check) ===")
-    per_seed_f1 = []
-    for seed, probs in zip(seeds, test_probs_per_seed):
-        f1 = f1_score(y_test, np.argmax(probs, axis=-1), average="macro", zero_division=0)
-        print(f"  seed={seed}: f1_macro={f1:.4f}")
-        per_seed_f1.append((seed, f1))
-    return per_seed_f1
-
-
-def tune_per_class_biases(probs, labels, max_passes=20, grid_size=41, grid_range=3.0,
-                          min_improvement=1e-5):
-    log_probs = np.log(probs + EPSILON)
-    biases = np.zeros(probs.shape[1])
-    grid = np.linspace(-grid_range, grid_range, grid_size)
-
-    def macro_f1(candidate_biases):
-        predictions = np.argmax(log_probs + candidate_biases, axis=-1)
-        return f1_score(labels, predictions, average="macro", zero_division=0)
-
-    best_f1 = macro_f1(biases)
-    for _ in range(max_passes):
-        f1_before_pass = best_f1
-        for class_index in range(probs.shape[1]):
-            best_bias = biases[class_index]
-            for candidate in grid:
-                biases[class_index] = candidate
-                f1 = macro_f1(biases)
-                if f1 > best_f1:
-                    best_f1 = f1
-                    best_bias = candidate
-            biases[class_index] = best_bias
-        if best_f1 - f1_before_pass < min_improvement:
-            break
-    return biases, best_f1
-
-
-def save_ensemble(ensemble_dir, data, biases):
-    os.makedirs(ensemble_dir, exist_ok=True)
+def save_manifest(output_dir, data, num_epochs):
     manifest = {
         "model_name": MODEL_NAME,
-        "seeds": SEEDS,
-        "seed_model_dirs": [f"seed-{seed}" for seed in SEEDS],
+        "seed": SEED,
         "max_len": MAX_LEN,
+        "num_epochs": num_epochs,
         "logit_adjustment_tau": LOGIT_ADJUSTMENT_TAU,
         "label2id": data.label2id,
-        "biases": biases.tolist(),
-        "inference": "mean softmax across seed models, then argmax(log(mean_prob + 1e-12) + biases)",
+        "inference": "argmax(model logits)",
     }
-    with open(os.path.join(ensemble_dir, "ensemble.json"), "w", encoding="utf-8") as f:
+    with open(os.path.join(output_dir, "manifest.json"), "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
-    print(f"Saved ensemble to {ensemble_dir}/ ({len(SEEDS)} models + ensemble.json)")
 
 
-def write_results_file(output_tag, summary):
+def write_results_file(output_tag, num_epochs, test_f1, overall_report,
+                       language_summary, per_language_reports):
     path = f"results_{output_tag}.txt"
     with open(path, "w") as f:
         f.write(output_tag + "\n" + "-" * 40 + "\n")
-        f.write(f"Ensemble seeds: {SEEDS}\n")
+        f.write(f"Seed: {SEED}\n")
         f.write(f"Logit adjustment tau: {LOGIT_ADJUSTMENT_TAU}\n")
-        f.write("Per-seed test f1_macro: "
-                + ", ".join(f"s{seed}={f1:.4f}" for seed, f1 in summary.per_seed_f1) + "\n")
-        f.write(f"Ensemble test f1_macro (no bias): {summary.ensemble_f1_raw:.4f}\n")
-        f.write(f"Ensemble dev  f1_macro: {summary.dev_f1_raw:.4f} -> "
-                f"{summary.dev_f1_tuned:.4f} (with biases)\n")
-        f.write(f"Ensemble test f1_macro (with biases): {summary.ensemble_f1_tuned:.4f}\n")
-        f.write(f"Per-class biases: {summary.biases.round(4).tolist()}\n\n")
-        f.write("=== OVERALL ===\n" + summary.overall_report)
-        f.write(summary.language_summary)
-        f.write("\n".join(summary.per_language_reports))
+        f.write(f"Best epoch from dev search: {num_epochs}\n")
+        f.write(f"Test f1_macro: {test_f1:.4f}\n\n")
+        f.write("=== OVERALL ===\n" + overall_report)
+        f.write(language_summary)
+        f.write("\n".join(per_language_reports))
     print(f"\nSaved {path}")
 
 
@@ -357,54 +294,26 @@ def main():
     hf_token = os.getenv("HF_TOKEN")
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, token=hf_token)
-    data = prepare_training_data(DATA_DIR, tokenizer, device)
+    data = prepare_training_data(DATA_DIR, tokenizer)
 
-    test_probs_per_seed, dev_probs_per_seed, y_test, y_dev = collect_ensemble_predictions(
-        SEEDS, data, tokenizer, hf_token, device,
-    )
-    mean_test_probs = np.mean(test_probs_per_seed, axis=0)
-    mean_dev_probs = np.mean(dev_probs_per_seed, axis=0)
+    best_epoch = find_best_epoch(data, tokenizer, hf_token, device)
+    y_test, y_pred = train_final(data, tokenizer, hf_token, device, best_epoch)
 
-    per_seed_f1 = report_per_seed(SEEDS, test_probs_per_seed, y_test)
-    ensemble_f1_raw = f1_score(
-        y_test, np.argmax(mean_test_probs, axis=-1), average="macro", zero_division=0,
-    )
-    print(f"ENSEMBLE (no bias tuning): f1_macro={ensemble_f1_raw:.4f}")
-
-    dev_f1_raw = f1_score(
-        y_dev, np.argmax(mean_dev_probs, axis=-1), average="macro", zero_division=0,
-    )
-    biases, dev_f1_tuned = tune_per_class_biases(mean_dev_probs, y_dev)
-    y_pred = np.argmax(np.log(mean_test_probs + EPSILON) + biases, axis=-1)
-    ensemble_f1_tuned = f1_score(y_test, y_pred, average="macro", zero_division=0)
-
-    save_ensemble(ENSEMBLE_DIR, data, biases)
-
-    print("\n=== BIAS TUNING ===")
-    print(f"  Per-class biases: {biases.round(3).tolist()}")
-    print(f"  Dev   f1_macro:  {dev_f1_raw:.4f}  ->  {dev_f1_tuned:.4f}")
-    print(f"  Test  f1_macro:  {ensemble_f1_raw:.4f}  ->  {ensemble_f1_tuned:.4f}")
+    test_f1 = f1_score(y_test, y_pred, average="macro", zero_division=0)
+    save_manifest(OUTPUT_DIR, data, best_epoch)
 
     overall_report = classification_report_text(y_test, y_pred, data.target_names)
-    print("\n=== OVERALL (ensemble) ===\n" + overall_report)
+    print(f"\n=== OVERALL (test f1_macro={test_f1:.4f}) ===\n" + overall_report)
     language_summary, per_language_reports = per_language_f1_report(
-        y_test, y_pred, data.test_langs, data.target_names, note="ensemble",
+        y_test, y_pred, data.test_langs, data.target_names,
     )
     print(language_summary)
     print("\n".join(per_language_reports))
 
-    output_tag = f"{MODEL_SLUG}_logitadj_ens{len(SEEDS)}_ep{NUM_EPOCHS}_len{MAX_LEN}"
-    write_results_file(output_tag, RunSummary(
-        per_seed_f1=per_seed_f1,
-        ensemble_f1_raw=ensemble_f1_raw,
-        dev_f1_raw=dev_f1_raw,
-        dev_f1_tuned=dev_f1_tuned,
-        ensemble_f1_tuned=ensemble_f1_tuned,
-        biases=biases,
-        overall_report=overall_report,
-        language_summary=language_summary,
-        per_language_reports=per_language_reports,
-    ))
+    output_tag = f"{MODEL_SLUG}_logitadj_ep{best_epoch}_len{MAX_LEN}"
+    write_results_file(
+        output_tag, best_epoch, test_f1, overall_report, language_summary, per_language_reports,
+    )
 
 
 if __name__ == "__main__":

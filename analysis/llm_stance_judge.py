@@ -109,6 +109,9 @@ def main():
     parser.add_argument("--balanced", action="store_true",
                         help="Downsample over-represented NLI-stance bins to the median bin size "
                              "instead of capping the total (ignores --limit).")
+    parser.add_argument("--reuse_labels", default=None,
+                        help="Path to an existing labeled CSV; speeches whose answer_text is "
+                             "already labeled there are reused instead of re-judged.")
     parser.add_argument("--max_workers", default=4, type=int)
     args = parser.parse_args()
 
@@ -125,6 +128,16 @@ def main():
     choices = load_checkpoint()
     if choices:
         print(f"Resuming: {len(choices)}/{len(sample)} already judged", flush=True)
+    if args.reuse_labels and os.path.exists(args.reuse_labels):
+        prior = load_dataframe(args.reuse_labels)
+        prior_choice = dict(zip(prior["answer_text"],
+                                pd.to_numeric(prior["llm_choice"], errors="coerce")))
+        reused = 0
+        for index, answer_text in sample["answer_text"].items():
+            if index not in choices and pd.notna(prior_choice.get(answer_text)):
+                choices[index] = int(prior_choice[answer_text])
+                reused += 1
+        print(f"Reused {reused} existing labels from {args.reuse_labels}", flush=True)
 
     with ThreadPoolExecutor(max_workers=args.max_workers) as pool_executor:
         futures = {

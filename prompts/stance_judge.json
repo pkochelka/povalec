@@ -1,0 +1,3 @@
+{
+  "prompt": "You are an expert political analyst. Judge how much the author of the TEXT agrees with the STATEMENT, regardless of the language they are written in.\n\nSTATEMENT:\n{statement}\n\nTEXT:\n{text}\n\nRate the author's stance toward the STATEMENT on this scale:\n1 = totally agree\n2 = somewhat agree\n3 = neutral, mixed, or no clear stance\n4 = somewhat disagree\n5 = totally disagree\n\nFirst give your reasoning in one short sentence, then output STRICT JSON only, with no other text:\n{{\"reasoning\": \"<one sentence>\", \"choice\": <integer 1-5>}}"
+}

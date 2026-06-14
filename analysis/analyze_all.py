@@ -15,13 +15,13 @@ DATASETS = [#"euandi_2019",
 
 MODEL_DIRS = [
     #"gemma-4-31b-it",
-    #"deepseek-v4-pro",
-    #"qwen3.5-122b",
-    #"gpt-oss-120b",
+    "deepseek-v4-pro",
+    "qwen3.5-122b",
+    "gpt-oss-120b",
     #"grok-4.3",
     #"mistral-small-2603",
-    #"kimi-k2.6",
-    #"mistral-medium-3.5",
+    "kimi-k2.6",
+    "mistral-medium-3.5",
     "glm-5"
 ]
 
@@ -33,7 +33,7 @@ def _results_dir(dataset, model_dir):
 
 
 PER_VARIANT_SCRIPTS = [
-    ("nli_stance_scoring.py", _DIR, "--llm", [],
+    ("agreement_scoring.py", _DIR, "--llm", ["--overwrite"],
      lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"speeches_{LANGUAGES}{variant}_scored.csv")),
     ("evaluate_cronbach_speeches.py", _DIR, "--model_dir", [],
      lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"cronbach_speeches{variant}_{LANGUAGES}.csv")),
@@ -91,13 +91,17 @@ def run_with_retries(cmd, label):
     print(f"✗ All retries exhausted for: {label}", flush=True)
 
 
+def should_skip(extra_args, output_path, dataset, model_dir, variant):
+    return "--overwrite" not in extra_args and os.path.exists(output_path(dataset, model_dir, variant))
+
+
 def run_per_variant_scripts():
     for dataset in DATASETS:
         for model_dir in MODEL_DIRS:
             for variant in VARIANTS:
                 for script, script_dir, model_arg_name, extra_args, output_path in PER_VARIANT_SCRIPTS:
                     label = f"{script} {' '.join(extra_args)}: model={model_dir}, variant='{variant}', dataset='{dataset}'"
-                    if os.path.exists(output_path(dataset, model_dir, variant)):
+                    if should_skip(extra_args, output_path, dataset, model_dir, variant):
                         print(f"Skipping (output exists): {label}", flush=True)
                         continue
                     print(f"Running: {label}", flush=True)

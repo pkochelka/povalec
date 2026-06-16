@@ -142,6 +142,7 @@ def save_heatmap(
         for col in range(n_langs):
             if not np.isnan(matrix[row, col]):
                 ax.text(col, row, f"{matrix[row, col]:.2f}", ha="center", va="center", fontsize=5.5)
+    fig.tight_layout()
     save_figure(fig, out_path)
 
 
@@ -157,6 +158,7 @@ def save_boxplot(
     ax.set_ylabel(ylabel)
     ax.set_ylim(ylim)
     ax.set_title(title, fontsize=11, pad=8)
+    fig.tight_layout()
     save_figure(fig, out_path)
 
 
@@ -300,6 +302,7 @@ def plot_correlation_bar(per_language_r: pd.Series, title: str, out_path: Path) 
     ax.set_xticks(x, per_language_r.index, rotation=45, ha="right", fontsize=8)
     ax.set_title(title, fontsize=11, pad=8)
     ax.grid(axis="y", linestyle="--", alpha=0.4)
+    fig.tight_layout()
     save_figure(fig, out_path)
 
 
@@ -350,6 +353,7 @@ def plot_langxlang_heatmap(
             if not np.isnan(value):
                 ax.text(col, row, f"{value:.2f}", ha="center", va="center",
                         fontsize=5, color="white" if abs(value) > 0.6 else "black")
+    fig.tight_layout()
     save_figure(fig, out_path)
 
 

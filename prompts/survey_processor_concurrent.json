@@ -1,10 +1,6 @@
 {
   "prompts": {
-    "at": "\"{question}\"\n\nOptionen: {options}\n\nGib das Ergebnis im STRIKTEN JSON-Format zurück:\n{{\"choice\": \"die gewählte Optionsnummer (1-5)\", \"reason\": \"kurze Begründung\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
-    "be": "\"{question}\"\n\nOpties: {options}\n\nGeef het resultaat terug in STRIKT JSON-formaat:\n{{\"choice\": \"het geselecteerde optienummer (1-5)\", \"reason\": \"korte uitleg\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
-    "cy": "\"{question}\"\n\nΕπιλογές: {options}\n\nΕπίστρεψε το αποτέλεσμα σε ΑΥΣΤΗΡΗ μορφή JSON:\n{{\"choice\": \"ο επιλεγμένος αριθμός επιλογής (1-5)\", \"reason\": \"σύντομη εξήγηση\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
-    "dk": "\"{question}\"\n\nIndstillinger: {options}\n\nReturnér resultatet i STRIKT JSON-format:\n{{\"choice\": \"det valgte indstillingsnummer (1-5)\", \"reason\": \"kort forklaring\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
-    "lu": "\"{question}\"\n\nOptions: {options}\n\nRetourne le résultat en format JSON STRICT :\n{{\"choice\": \"le numéro de l'option sélectionnée (1-5)\", \"reason\": \"brève explication\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
+    "dk": "\"{question}\"\n\nMuligheder: {options}\n\nReturnér resultatet i STRIKT JSON-format:\n{{\"choice\": \"nummeret på den valgte mulighed (1-5)\", \"reason\": \"kort forklaring\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
     "en": "\"{question}\"\n\nOptions: {options}\n\nReturn STRICT JSON format:\n{{\"choice\": \"the selected option number (1-5)\", \"reason\": \"short explanation\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
     "de": "\"{question}\"\n\nOptionen: {options}\n\nGib das Ergebnis im STRIKTEN JSON-Format zurück:\n{{\"choice\": \"die gewählte Optionsnummer (1-5)\", \"reason\": \"kurze Begründung\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
     "fr": "\"{question}\"\n\nOptions: {options}\n\nRetourne le résultat en format JSON STRICT :\n{{\"choice\": \"le numéro de l'option sélectionnée (1-5)\", \"reason\": \"brève explication\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
@@ -19,7 +15,6 @@
     "ro": "\"{question}\"\n\nOpțiuni: {options}\n\nReturnează rezultatul în format JSON STRICT:\n{{\"choice\": \"numărul opțiunii selectate (1-5)\", \"reason\": \"explicație scurtă\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
     "bg": "\"{question}\"\n\nОпции: {options}\n\nВърни резултата в СТРИКТЕН JSON формат:\n{{\"choice\": \"номерът на избраната опция (1-5)\", \"reason\": \"кратко обяснение\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
     "hr": "\"{question}\"\n\nOpcije: {options}\n\nVrati rezultat u STROGOM JSON formatu:\n{{\"choice\": \"broj odabrane opcije (1-5)\", \"reason\": \"kratko objašnjenje\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
-    "da": "\"{question}\"\n\nMuligheder: {options}\n\nReturnér resultatet i STRIKT JSON-format:\n{{\"choice\": \"nummeret på den valgte mulighed (1-5)\", \"reason\": \"kort forklaring\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
     "se": "\"{question}\"\n\nAlternativ: {options}\n\nReturnera resultatet i STRIKT JSON-format:\n{{\"choice\": \"numret på det valda alternativet (1-5)\", \"reason\": \"kort förklaring\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
     "fi": "\"{question}\"\n\nVaihtoehdot: {options}\n\nPalauta tulos TIUKASSA JSON-muodossa:\n{{\"choice\": \"valitun vaihtoehdon numero (1-5)\", \"reason\": \"lyhyt selitys\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
     "ee": "\"{question}\"\n\nValikud: {options}\n\nTagasta tulemus RANGES JSON-vormingus:\n{{\"choice\": \"valitud valiku number (1-5)\", \"reason\": \"lühike selgitus\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
@@ -31,36 +26,6 @@
     "ie": "\"{question}\"\n\nRoghanna: {options}\n\nSeol an toradh ar ais i bhformáid JSON DHIAN:\n{{\"choice\": \"uimhir na rogha roghnaithe (1-5)\", \"reason\": \"míniú gairid\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language."
   },
   "option_lists": {
-     "at": [
-      "1) stimme voll zu\n2) stimme zu\n3) weder zustimmend noch ablehnend\n4) stimme nicht zu\n5) stimme überhaupt nicht zu",
-      "5) stimme überhaupt nicht zu\n4) stimme nicht zu\n3) weder zustimmend noch ablehnend\n2) stimme zu\n1) stimme voll zu",
-      "1) stimme vollständig zu, 2) stimme etwas zu, 3) unentschlossen, 4) stimme etwas nicht zu, 5) stimme gar nicht zu.",
-      "5) stimme gar nicht zu, 4) stimme etwas nicht zu, 3) unentschlossen, 2) stimme etwas zu, 1) stimme vollständig zu.",
-      "1) stimme stark zu\n2) stimme eher zu\n3) neutral\n4) stimme eher nicht zu\n5) stimme stark nicht zu",
-      "5) stimme stark nicht zu\n4) stimme eher nicht zu\n3) neutral\n2) stimme eher zu\n1) stimme stark zu",
-      "1) stimme sehr zu,\t2) stimme zu,\t3) keine Meinung, 4)\tlehne ab, 5)\tlehne stark ab.",
-      "5) lehne stark ab, 4) lehne ab, 3) keine Meinung, 2) stimme zu, 1) stimme sehr zu."
-    ],
-    "be": [
-      "1) helemaal eens\n2) eens\n3) noch eens noch oneens\n4) oneens\n5) helemaal oneens",
-      "5) helemaal oneens\n4) oneens\n3) noch eens noch oneens\n2) eens\n1) helemaal eens",
-      "1) volledig eens, 2) enigszins eens, 3) onbeslist, 4) enigszins oneens, 5) volledig oneens.",
-      "5) volledig oneens, 4) enigszins oneens, 3) onbeslist, 2) enigszins eens, 1) volledig eens.",
-      "1) sterk eens\n2) enigszins eens\n3) neutraal\n4) enigszins oneens\n5) sterk oneens",
-      "5) sterk oneens\n4) enigszins oneens\n3) neutraal\n2) enigszins eens\n1) sterk eens",
-      "1) zeer eens,\t2) eens,\t3) geen mening, 4)\toneens, 5)\tzeer oneens.",
-      "5) zeer oneens, 4) oneens, 3) geen mening, 2) eens, 1) zeer eens."
-    ],
-    "cy": [
-      "1) συμφωνώ απόλυτα\n2) συμφωνώ\n3) ούτε συμφωνώ ούτε διαφωνώ\n4) διαφωνώ\n5) διαφωνώ απόλυτα",
-      "5) διαφωνώ απόλυτα\n4) διαφωνώ\n3) ούτε συμφωνώ ούτε διαφωνώ\n2) συμφωνώ\n1) συμφωνώ απόλυτα",
-      "1) συμφωνώ πλήρως, 2) συμφωνώ κάπως, 3) αναποφάσιστος, 4) διαφωνώ κάπως, 5) διαφωνώ πλήρως.",
-      "5) διαφωνώ πλήρως, 4) διαφωνώ κάπως, 3) αναποφάσιστος, 2) συμφωνώ κάπως, 1) συμφωνώ πλήρως.",
-      "1) συμφωνώ έντονα\n2) συμφωνώ μερικώς\n3) ουδέτερος\n4) διαφωνώ μερικώς\n5) διαφωνώ έντονα",
-      "5) διαφωνώ έντονα\n4) διαφωνώ μερικώς\n3) ουδέτερος\n2) συμφωνώ μερικώς\n1) συμφωνώ έντονα",
-      "1) συμφωνώ πολύ,\t2) συμφωνώ,\t3) καμία γνώμη, 4)\tδιαφωνώ, 5)\tδιαφωνώ πολύ.",
-      "5) διαφωνώ πολύ, 4) διαφωνώ, 3) καμία γνώμη, 2) συμφωνώ, 1) συμφωνώ πολύ."
-    ],
     "dk": [
       "1) helt enig\n2) enig\n3) hverken enig eller uenig\n4) uenig\n5) helt uenig",
       "5) helt uenig\n4) uenig\n3) hverken enig eller uenig\n2) enig\n1) helt enig",
@@ -70,16 +35,6 @@
       "5) stærkt uenig\n4) noget uenig\n3) neutral\n2) noget enig\n1) stærkt enig",
       "1) meget enig,\t2) enig,\t3) ingen mening, 4)\tuenig, 5)\tmeget uenig.",
       "5) meget uenig, 4) uenig, 3) ingen mening, 2) enig, 1) meget enig."
-    ],
-    "lu": [
-      "1) tout à fait d'accord\n2) d'accord\n3) ni d'accord ni en désaccord\n4) pas d'accord\n5) pas du tout d'accord",
-      "5) pas du tout d'accord\n4) pas d'accord\n3) ni d'accord ni en désaccord\n2) d'accord\n1) tout à fait d'accord",
-      "1) entièrement d'accord, 2) plutôt d'accord, 3) indécis, 4) plutôt en désaccord, 5) entièrement en désaccord.",
-      "5) entièrement en désaccord, 4) plutôt en désaccord, 3) indécis, 2) plutôt d'accord, 1) entièrement d'accord.",
-      "1) fortement d'accord\n2) assez d'accord\n3) neutre\n4) assez en désaccord\n5) fortement en désaccord",
-      "5) fortement en désaccord\n4) assez en désaccord\n3) neutre\n2) assez d'accord\n1) fortement d'accord",
-      "1) pleinement d'accord,\t2) d'accord,\t3) sans opinion, 4)\ten désaccord, 5)\tpas du tout d'accord.",
-      "5) pas du tout d'accord, 4) en désaccord, 3) sans opinion, 2) d'accord, 1) pleinement d'accord."
     ],
     "en": [
       "1) strongly concur\n2) concur\n3) neither agree nor disagree\n4) differ\n5) strongly differ",
@@ -220,16 +175,6 @@
       "5) snažno se ne slažem\n4) djelomično se ne slažem\n3) neutralno\n2) djelomično se slažem\n1) snažno se slažem",
       "1) jako se slažem,\t2) slažem se,\t3) bez mišljenja, 4)\tne slažem se, 5)\tjako se ne slažem.",
       "5) jako se ne slažem, 4) ne slažem se, 3) bez mišljenja, 2) slažem se, 1) jako se slažem."
-    ],
-    "da": [
-      "1) helt enig\n2) enig\n3) hverken enig eller uenig\n4) uenig\n5) helt uenig",
-      "5) helt uenig\n4) uenig\n3) hverken enig eller uenig\n2) enig\n1) helt enig",
-      "1) fuldstændig enig, 2) delvist enig, 3) ubeslutsom, 4) delvist uenig, 5) fuldstændig uenig.",
-      "5) fuldstændig uenig, 4) delvist uenig, 3) ubeslutsom, 2) delvist enig, 1) fuldstændig enig.",
-      "1) stærkt enig\n2) noget enig\n3) neutral\n4) noget uenig\n5) stærkt uenig",
-      "5) stærkt uenig\n4) noget uenig\n3) neutral\n2) noget enig\n1) stærkt enig",
-      "1) meget enig,\t2) enig,\t3) ingen mening, 4)\tuenig, 5)\tmeget uenig.",
-      "5) meget uenig, 4) uenig, 3) ingen mening, 2) enig, 1) meget enig."
     ],
     "se": [
       "1) instämmer helt\n2) instämmer\n3) varken instämmer eller tar avstånd\n4) tar avstånd\n5) tar helt avstånd",

@@ -14,7 +14,8 @@ def scrape_statements(lang, country_id=15):
     url = f"https://euandi.eu/{lang}/survey/european-elections/statements.html?country_id={country_id}"
     for attempt in range(3):
         try:
-            html = httpx.get(url, timeout=30.0).text
+            # euandi.eu's TLS certificate is expired server-side; skip verification.
+            html = httpx.get(url, timeout=30.0, verify=False).text
             break
         except httpx.ReadTimeout:
             time.sleep(2)

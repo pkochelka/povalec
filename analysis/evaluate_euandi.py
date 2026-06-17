@@ -133,18 +133,26 @@ def main() -> None:
     parser.add_argument("--languages", default=ALL_LANGS_STR)
     parser.add_argument("--dataset", default="euandi_2024", choices=["euandi_2019", "euandi_2024"])
     parser.add_argument("--source", default="likert", choices=["likert", "speeches"])
+    parser.add_argument("--override", action="store_true")
     args = parser.parse_args()
 
     results_dir = f"data/{args.dataset}_results/{args.model_dir}"
     if args.source == "likert":
         input_path = f"{results_dir}/{args.languages}{args.variant}.csv"
         output_path = f"{results_dir}/vaa{args.variant}_{args.languages}.csv"
+    else:
+        input_path = f"{results_dir}/speeches_{args.languages}{args.variant}_scored.csv"
+        output_path = f"{results_dir}/vaa_speeches{args.variant}_{args.languages}.csv"
+
+    if os.path.exists(output_path) and not args.override:
+        print(f"Output exists, skipping (use --override to recompute): {output_path}")
+        return
+
+    if args.source == "likert":
         summary = evaluate_likert(
             input_path, PARTY_POSITIONS_PATH, negated=args.variant == "_negated"
         )
     else:
-        input_path = f"{results_dir}/speeches_{args.languages}{args.variant}_scored.csv"
-        output_path = f"{results_dir}/vaa_speeches{args.variant}_{args.languages}.csv"
         summary = evaluate_speeches(input_path, PARTY_POSITIONS_PATH, args.variant)
 
     summary.to_csv(output_path, index=False)

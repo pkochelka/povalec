@@ -59,12 +59,17 @@ if __name__ == "__main__":
     parser.add_argument("--variant", default="", type=str, choices=["", "_question", "_negated"])
     parser.add_argument("--languages", default=ALL_LANGS_STR, type=str)
     parser.add_argument("--dataset", default="euandi_2024", type=str, choices=["euandi_2019", "euandi_2024"])
+    parser.add_argument("--override", action="store_true")
     args = parser.parse_args()
     languages_joined = ",".join(args.languages.split(","))
 
     scored_path = f"data/{args.dataset}_results/{args.model_dir}/speeches_{languages_joined}{args.variant}_scored.csv"
     questionnaire_path = f"data/{args.dataset}_data/{args.dataset}_questionnaire.jsonl"
     output_path = f"data/{args.dataset}_results/{args.model_dir}/cronbach_speeches{args.variant}_{languages_joined}.csv"
+
+    if os.path.exists(output_path) and not args.override:
+        print(f"Output exists, skipping (use --override to recompute): {output_path}")
+        sys.exit(0)
 
     summary = evaluate(scored_path, questionnaire_path, args.variant)
     summary.to_csv(output_path, index=False)

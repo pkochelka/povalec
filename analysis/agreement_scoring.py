@@ -132,8 +132,8 @@ def parse_args():
     parser.add_argument("--languages", default=ALL_LANGS_STR)
     parser.add_argument("--batch_size", default=64, type=int)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    parser.add_argument("--overwrite", action="store_true",
-                        help="Overwrite an existing _scored file instead of writing a sibling.")
+    parser.add_argument("--override", action="store_true",
+                        help="Recompute and overwrite an existing _scored file instead of skipping.")
     return parser.parse_args()
 
 
@@ -143,18 +143,20 @@ def resolve_input_path(args, languages):
     return f"./data/{args.dataset}_results/{args.llm}/speeches_{','.join(languages)}{args.variant}.csv"
 
 
-def resolve_output_path(input_path, overwrite):
+def resolve_output_path(input_path):
     stem, ext = os.path.splitext(input_path)
-    scored_path = f"{stem}_scored{ext}"
-    if os.path.exists(scored_path) and not overwrite:
-        return f"{stem}_scored_agreement{ext}"
-    return scored_path
+    return f"{stem}_scored{ext}"
 
 
 def main():
     args = parse_args()
     languages = args.languages.split(",")
     input_path = resolve_input_path(args, languages)
+    output_path = resolve_output_path(input_path)
+
+    if os.path.exists(output_path) and not args.override:
+        print(f"Output exists, skipping (use --override to recompute): {output_path}")
+        return
 
     df = pd.read_csv(input_path, sep=";", encoding="utf-8-sig", low_memory=False)
     tokenizer, model, max_length = load_crossencoder(args.crossencoder_dir, args.device)
@@ -163,7 +165,6 @@ def main():
         df, languages, args.variant, tokenizer, model, args.device, max_length, args.batch_size,
     )
 
-    output_path = resolve_output_path(input_path, args.overwrite)
     df.to_csv(output_path, sep=";", index=False, encoding="utf-8-sig")
     print(f"Wrote {output_path}")
 

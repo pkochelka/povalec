@@ -40,6 +40,10 @@ def call_survey(statement, model, options, language, prompts, max_retries=5, sec
     return {"choice": None, "reason": reason}
 
 
+def survey_output_path(dataset, model_dir, languages, variant):
+    return os.path.join(_ROOT, "data", f"{dataset}_results", model_dir, f"{','.join(languages)}{variant}.csv")
+
+
 def process_survey(
     df: pd.DataFrame,
     model: str,
@@ -53,9 +57,8 @@ def process_survey(
     second_provider: bool = False,
 ):
     model_dir = model_dir or model
-    out_dir = os.path.join(_ROOT, "data", f"{dataset}_results", model_dir)
-    os.makedirs(out_dir, exist_ok=True)
-    output_path = os.path.join(out_dir, f"{','.join(languages)}{variant}.csv")
+    output_path = survey_output_path(dataset, model_dir, languages, variant)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     checkpoint_path = output_path + ".ckpt.json"
 
     if os.path.exists(output_path):
@@ -118,6 +121,72 @@ def process_survey(
     print("Processing complete.")
 
 
+def patch_survey(
+    df: pd.DataFrame,
+    model: str,
+    variant: str,
+    prompts: dict[str, str],
+    option_lists: dict[str, list[str]],
+    languages: list[str],
+    dataset: str = "euandi_2019",
+    model_dir: str = None,
+    max_workers: int = 8,
+    second_provider: bool = False,
+):
+    model_dir = model_dir or model
+    output_path = survey_output_path(dataset, model_dir, languages, variant)
+    if not os.path.exists(output_path):
+        print(f"Nothing to patch, output does not exist: {output_path}")
+        return
+
+    existing = pd.read_csv(
+        output_path, sep=";", encoding="utf-8-sig",
+        dtype=str, keep_default_na=False, na_filter=False,
+    )
+
+    tasks = {}
+    for language in languages:
+        lang_variant = f"{language}{variant}"
+        variant_indices = sorted(
+            int(column.rsplit("_v", 1)[1])
+            for column in existing.columns
+            if column.startswith(f"choice_{lang_variant}_v")
+        )
+        for i, row in df.iterrows():
+            if i not in existing.index:
+                continue
+            statement = row["statement"][lang_variant]
+            for j in variant_indices:
+                if j < len(option_lists[language]) and existing.at[i, f"choice_{lang_variant}_v{j}"] == "":
+                    tasks[(i, language, lang_variant, j)] = (statement, option_lists[language][j])
+
+    if not tasks:
+        print(f"No failed or refused responses to patch in {output_path}")
+        return
+
+    print(f"Patching {len(tasks)} failed/refused responses in {output_path}", flush=True)
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {
+            pool.submit(call_survey, statement, model, options, language, prompts, second_provider=second_provider): (i, lang_variant, j)
+            for (i, language, lang_variant, j), (statement, options) in tasks.items()
+        }
+        for completed, future in enumerate(as_completed(futures), 1):
+            i, lang_variant, j = futures[future]
+            result = future.result()
+            existing.at[i, f"choice_{lang_variant}_v{j}"] = "" if result["choice"] is None else str(result["choice"])
+            existing.at[i, f"reason_{lang_variant}_v{j}"] = result["reason"]
+            if completed % 100 == 0:
+                print(f"  {completed}/{len(tasks)} patched", flush=True)
+                existing.to_csv(output_path, sep=";", index=False, encoding="utf-8-sig")
+
+    existing.to_csv(output_path, sep=";", index=False, encoding="utf-8-sig")
+    still_failed = sum(
+        1 for (i, _language, lang_variant, j) in tasks
+        if existing.at[i, f"choice_{lang_variant}_v{j}"] == ""
+    )
+    print(f"Patch complete: {len(tasks) - still_failed}/{len(tasks)} filled, {still_failed} still failed/refused.", flush=True)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="qwen3.5-122b", type=str)
@@ -128,6 +197,8 @@ if __name__ == "__main__":
     parser.add_argument("--task_prompts", default=os.path.join(_ROOT, "prompts", "survey_processor_concurrent.json"), type=str)
     parser.add_argument("--dataset", default="euandi_2024", type=str, choices=["euandi_2019", "euandi_2024"])
     parser.add_argument("--second_provider", action="store_true")
+    parser.add_argument("--patch", action="store_true",
+                        help="Regenerate only the failed/refused responses in an existing output and patch them in place.")
     args = parser.parse_args()
     languages = args.languages.split(",")
 
@@ -140,7 +211,8 @@ if __name__ == "__main__":
         os.path.join(_ROOT, "data", f"{args.dataset}_data", "statements_negated_neutral.jsonl"),
         lines=True,
     )
-    process_survey(
+    runner = patch_survey if args.patch else process_survey
+    runner(
         df,
         model=args.model,
         variant=args.variant,

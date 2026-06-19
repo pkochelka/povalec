@@ -33,6 +33,10 @@ def call_speech(statement: str, task: str, model: str, max_retries: int = 5, sec
     return None
 
 
+def speeches_output_path(dataset, model_dir, languages, variant):
+    return os.path.join(_ROOT, "data", f"{dataset}_results", model_dir, f"speeches_{','.join(languages)}{variant}.csv")
+
+
 def generate_speeches(
     df: pd.DataFrame,
     model: str,
@@ -45,9 +49,8 @@ def generate_speeches(
     second_provider: bool = False,
 ):
     dir_name = model_dir if model_dir is not None else model
-    out_dir = os.path.join(_ROOT, "data", f"{dataset}_results", dir_name)
-    os.makedirs(out_dir, exist_ok=True)
-    output_path = os.path.join(out_dir, f"speeches_{','.join(languages)}{variant}.csv")
+    output_path = speeches_output_path(dataset, dir_name, languages, variant)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     checkpoint_path = output_path + ".ckpt.json"
 
     if os.path.exists(output_path):
@@ -109,6 +112,70 @@ def generate_speeches(
     print("Processing complete.")
 
 
+def patch_speeches(
+    df: pd.DataFrame,
+    model: str,
+    variant: str,
+    task_lists: dict[str, list[str]],
+    languages: list[str],
+    dataset: str = "euandi_2019",
+    model_dir: str = None,
+    max_workers: int = 8,
+    second_provider: bool = False,
+):
+    dir_name = model_dir if model_dir is not None else model
+    output_path = speeches_output_path(dataset, dir_name, languages, variant)
+    if not os.path.exists(output_path):
+        print(f"Nothing to patch, output does not exist: {output_path}")
+        return
+
+    existing = pd.read_csv(
+        output_path, sep=";", encoding="utf-8-sig",
+        dtype=str, keep_default_na=False, na_filter=False,
+    )
+
+    tasks = {}
+    for language in languages:
+        lang_variant = f"{language}{variant}"
+        variant_indices = sorted(
+            int(column.rsplit("_v", 1)[1])
+            for column in existing.columns
+            if column.startswith(f"answer_{lang_variant}_v")
+        )
+        for i, row in df.iterrows():
+            if i not in existing.index:
+                continue
+            statement = row["statement"][lang_variant]
+            for j in variant_indices:
+                if j < len(task_lists[language]) and existing.at[i, f"answer_{lang_variant}_v{j}"] == "":
+                    tasks[(i, lang_variant, j)] = (statement, task_lists[language][j])
+
+    if not tasks:
+        print(f"No failed responses to patch in {output_path}")
+        return
+
+    print(f"Patching {len(tasks)} failed responses in {output_path}", flush=True)
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {
+            pool.submit(call_speech, statement, task, model, second_provider=second_provider): (i, lang_variant, j)
+            for (i, lang_variant, j), (statement, task) in tasks.items()
+        }
+        for completed, future in enumerate(as_completed(futures), 1):
+            i, lang_variant, j = futures[future]
+            answer = future.result()
+            existing.at[i, f"answer_{lang_variant}_v{j}"] = "" if answer is None else answer
+            if completed % 100 == 0:
+                print(f"  {completed}/{len(tasks)} patched", flush=True)
+                existing.to_csv(output_path, sep=";", index=False, encoding="utf-8-sig")
+
+    existing.to_csv(output_path, sep=";", index=False, encoding="utf-8-sig")
+    still_failed = sum(
+        1 for (i, lang_variant, j) in tasks
+        if existing.at[i, f"answer_{lang_variant}_v{j}"] == ""
+    )
+    print(f"Patch complete: {len(tasks) - still_failed}/{len(tasks)} filled, {still_failed} still failed.", flush=True)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="qwen3.5-122b", type=str)#, choices=["gpt-oss-120b", "qwen3.5-122b"])
@@ -119,6 +186,8 @@ if __name__ == "__main__":
     parser.add_argument("--task_prompts", default=os.path.join(_ROOT, "prompts", "generate_speeches.json"), type=str)
     parser.add_argument("--dataset", default="euandi_2024", type=str, choices=["euandi_2019", "euandi_2024"])
     parser.add_argument("--second_provider", action="store_true")
+    parser.add_argument("--patch", action="store_true",
+                        help="Regenerate only the failed responses in an existing output and patch them in place.")
     args = parser.parse_args()
     languages = args.languages.split(",")
 

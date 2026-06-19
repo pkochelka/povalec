@@ -12,8 +12,9 @@ from tqdm import tqdm
 from transformers import AutoModel, AutoTokenizer
 
 MODEL_NAME = "microsoft/harrier-oss-v1-0.6b"
-DATA_DIR = Path("data/EuroParl Custom")
-CACHE_DIR = Path("data/embeddings/harrier")
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DATA_DIR = REPO_ROOT / "data" / "EuroParl Custom"
+CACHE_DIR = REPO_ROOT / "data" / "embeddings" / "harrier"
 PARTY_COLUMN = "EU Party"
 EMBED_DIM = 1024
 MAX_TOKENS = 1024
@@ -36,8 +37,8 @@ def chunks(items, size):
         yield items[start:start + size]
 
 
-def load_split(split):
-    df = pd.read_parquet(DATA_DIR / f"{split}.parquet")
+def load_split(split, data_dir=DATA_DIR):
+    df = pd.read_parquet(Path(data_dir) / f"{split}.parquet")
     df = df.dropna(subset=[PARTY_COLUMN, "text"]).copy()
     df["text"] = df["text"].astype(str).str.strip()
     df = df[df["text"].str.len() > 0]
@@ -189,6 +190,7 @@ def report(parties, prototypes, metrics):
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--data-dir", default=str(DATA_DIR))
     parser.add_argument("--cache", default=str(CACHE_DIR))
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
     parser.add_argument("--max-tokens", type=int, default=MAX_TOKENS)
@@ -198,8 +200,8 @@ def main():
     embedder = Harrier(batch_size=args.batch_size, max_tokens=args.max_tokens)
     cache = EmbeddingCache(args.cache)
 
-    train = load_split("train")
-    dev = load_split("dev")
+    train = load_split("train", args.data_dir)
+    dev = load_split("dev", args.data_dir)
     if args.limit is not None:
         train = train.groupby(PARTY_COLUMN, group_keys=False).head(args.limit).reset_index(drop=True)
         dev = dev.groupby(PARTY_COLUMN, group_keys=False).head(args.limit).reset_index(drop=True)

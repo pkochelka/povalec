@@ -22,6 +22,10 @@ BATCH_SIZE = 8
 FLUSH_EVERY = 50000
 SILHOUETTE_SAMPLE = 10000
 INSTRUCTION = "Represent this European Parliament speech for retrieving its political party group."
+PARTY_COLOR = {
+    "GUE/NGL": "#8b0000", "S&D": "#e8112d", "Greens/EFA": "#3eb049", "ALDE": "#f6b40e",
+    "PPE": "#3a86c8", "ECR": "#0a4ea3", "ID": "#1b1f3b",
+}
 
 
 def text_id(text):
@@ -166,12 +170,23 @@ def evaluate(cache, df, parties, prototypes):
     vmeasure = float(v_measure_score(truth, predictions))
     sample = min(SILHOUETTE_SAMPLE, len(embeddings))
     silhouette = float(silhouette_score(embeddings, truth, metric="cosine", sample_size=sample, random_state=0))
+
+    distances = 1.0 - (embeddings @ prototypes.T)
+    distance_matrix = np.zeros((len(parties), len(parties)))
+    for index in range(len(parties)):
+        mask = truth == index
+        distance_matrix[index] = distances[mask].mean(0) if mask.any() else np.nan
+
     return {
         "overall_top1": overall,
         "macro_top1": macro,
         "per_class_top1": per_class,
         "v_measure": vmeasure,
         "silhouette": silhouette,
+        "distance_to_prototype": {
+            parties[i]: {parties[j]: float(distance_matrix[i, j]) for j in range(len(parties))}
+            for i in range(len(parties))
+        },
     }
 
 
@@ -187,6 +202,69 @@ def report(parties, prototypes, metrics):
     print(f"\nV-measure : {metrics['v_measure']:.4f}")
     print(f"Silhouette: {metrics['silhouette']:.4f}  (cosine, sampled)")
 
+    print("\n=== MEAN COSINE DISTANCE: party speeches (rows) -> prototypes (cols) ===")
+    distance = metrics["distance_to_prototype"]
+    header = "".join(f"{p[:9]:>10}" for p in parties)
+    print(f"{'true \\ proto':<12}{header}")
+    for true_party in parties:
+        own = distance[true_party][true_party]
+        others = {p: d for p, d in distance[true_party].items() if p != true_party}
+        nearest_other = min(others, key=others.get)
+        row = "".join(f"{distance[true_party][p]:>10.4f}" for p in parties)
+        flag = "  <- own NOT nearest" if own > others[nearest_other] else ""
+        print(f"{true_party:<12}{row}    own={own:.4f} nearest_other={nearest_other}({others[nearest_other]:.4f}){flag}")
+
+
+def reduce_2d(method, vectors):
+    if method == "pca":
+        from sklearn.decomposition import PCA
+        return PCA(n_components=2, random_state=0).fit_transform(vectors)
+    if method == "tsne":
+        from sklearn.manifold import TSNE
+        perplexity = min(30, max(5, len(vectors) // 4))
+        return TSNE(n_components=2, metric="cosine", init="pca", perplexity=perplexity, random_state=0).fit_transform(vectors)
+    if method == "umap":
+        import umap
+        return umap.UMAP(n_components=2, metric="cosine", random_state=0).fit_transform(vectors)
+    raise ValueError(f"unknown method: {method}")
+
+
+def plot_embeddings_2d(cache, df, parties, prototypes, method, per_party, out_path):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    rng = np.random.default_rng(0)
+    rows = []
+    for party in parties:
+        party_rows = df.index[df[PARTY_COLUMN] == party].to_numpy()
+        if len(party_rows) > per_party:
+            party_rows = rng.choice(party_rows, per_party, replace=False)
+        rows.extend(party_rows.tolist())
+    sample = df.loc[rows]
+    embeddings = cache.get(sample["id"].tolist()).astype(np.float32)
+    coords = reduce_2d(method, np.vstack([embeddings, prototypes]))
+    points, proto_points = coords[: len(embeddings)], coords[len(embeddings):]
+
+    labels = sample[PARTY_COLUMN].to_numpy()
+    fig, ax = plt.subplots(figsize=(11, 9))
+    for party in parties:
+        mask = labels == party
+        ax.scatter(points[mask, 0], points[mask, 1], s=6, alpha=0.45,
+                   color=PARTY_COLOR.get(party, "#888888"), label=party, linewidths=0)
+    for index, party in enumerate(parties):
+        ax.scatter(proto_points[index, 0], proto_points[index, 1], marker="X", s=280,
+                   color=PARTY_COLOR.get(party, "#888888"), edgecolors="black", linewidths=1.5, zorder=5)
+        ax.annotate(party, proto_points[index], fontsize=9, fontweight="bold", ha="center", va="center", zorder=6)
+    ax.set_title(f"Harrier dev embeddings ({method.upper()}, n={len(embeddings)}, X = prototype)")
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.legend(markerscale=3, fontsize=8, loc="best")
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+    print(f"\nSaved 2D projection to {out_path}")
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -195,6 +273,9 @@ def main():
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
     parser.add_argument("--max-tokens", type=int, default=MAX_TOKENS)
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--plot-method", choices=["pca", "tsne", "umap"], default="tsne")
+    parser.add_argument("--plot-per-party", type=int, default=500)
+    parser.add_argument("--no-plot", action="store_true")
     args = parser.parse_args()
 
     embedder = Harrier(batch_size=args.batch_size, max_tokens=args.max_tokens)
@@ -216,6 +297,10 @@ def main():
     metrics = evaluate(cache, dev, parties, prototypes)
     (cache.dir / "dev_geometry.json").write_text(json.dumps(metrics, ensure_ascii=False, indent=2))
     report(parties, prototypes, metrics)
+
+    if not args.no_plot:
+        out_path = cache.dir / f"dev_embeddings_{args.plot_method}.png"
+        plot_embeddings_2d(cache, dev, parties, prototypes, args.plot_method, args.plot_per_party, out_path)
 
 
 if __name__ == "__main__":

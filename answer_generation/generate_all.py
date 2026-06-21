@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils import ALL_LANGS_STR
 
-VARIANTS = ["", "_question", "_negated"]
+VARIANTS = ["", "_negated"]
 LANGUAGES = ALL_LANGS_STR
 MAX_RETRIES = 5
 MAX_WORKERS = 3
@@ -18,7 +18,7 @@ DATASETS = [#"euandi_2019",
     "euandi_2024"]
 
 MODELS = [
-    {"model": "gemma4:12b",      "model_dir":"gemma-4-12b", "second_provider": False},
+    #{"model": "gemma4:12b",      "model_dir":"gemma-4-12b", "second_provider": False},
     #{"model": "gemma4:31b-it-q8_0",      "model_dir":"gemma-4-31b-it", "second_provider": False},
     #{"model": "deepseek/deepseek-v4-pro",      "model_dir":"deepseek-v4-pro", "second_provider": False},
     #{"model": "mistralai/mistral-small-2603",      "model_dir":"mistral-small-2603", "second_provider": False},
@@ -29,7 +29,7 @@ MODELS = [
     #{"model": "mistral-medium-3.5", "model_dir": "mistral-medium-3.5", "second_provider": True},
     #{"model": "kimi-k2.6", "model_dir": "kimi-k2.6", "second_provider": True},
     #{"model": "deepseek-v4-pro-thinking", "model_dir": "deepseek-v4-pro", "second_provider": True},
-    #{"model": "glm-5", "model_dir": "glm-5", "second_provider": True},
+    {"model": "glm-5.2", "model_dir": "glm-5.2", "second_provider": True},
 ]
 
 _DIR = os.path.dirname(os.path.abspath(__file__))

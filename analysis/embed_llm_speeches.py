@@ -14,6 +14,7 @@ from party_prototype_embeddings import (
     CACHE_DIR,
     REPO_ROOT,
     EmbeddingCache,
+    FeatureTransform,
     Harrier,
     ensure_embedded,
     text_id,

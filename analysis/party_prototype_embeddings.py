@@ -1,6 +1,7 @@
 import argparse
 import hashlib
 import json
+import pickle
 from pathlib import Path
 
 import numpy as np
@@ -18,7 +19,7 @@ CACHE_DIR = REPO_ROOT / "data" / "embeddings" / "harrier"
 PARTY_COLUMN = "EU Party"
 EMBED_DIM = 1024
 MAX_TOKENS = 1024
-BATCH_SIZE = 8
+BATCH_SIZE = 32
 FLUSH_EVERY = 50000
 SILHOUETTE_SAMPLE = 10000
 INSTRUCTION = "Represent this European Parliament speech for retrieving its political party group."
@@ -26,6 +27,7 @@ PARTY_COLOR = {
     "GUE/NGL": "#8b0000", "S&D": "#e8112d", "Greens/EFA": "#3eb049", "ALDE": "#f6b40e",
     "PPE": "#3a86c8", "ECR": "#0a4ea3", "ID": "#1b1f3b",
 }
+LANG_COLUMN_CANDIDATES = ["language"]
 
 
 def text_id(text):
@@ -71,10 +73,15 @@ class Harrier:
             return_tensors="pt",
         ).to(self.device)
         hidden = self.model(**tokens).last_hidden_state
-        last = tokens["attention_mask"].sum(dim=1) - 1
-        pooled = hidden[torch.arange(hidden.size(0), device=self.device), last]
+        mask = tokens["attention_mask"]
+        # Robust last-token pool: works for either padding side.
+        if int(mask[:, -1].sum()) == mask.shape[0]:          # left-padded
+            pooled = hidden[:, -1]
+        else:                                                # right-padded
+            idx = mask.sum(dim=1) - 1
+            pooled = hidden[torch.arange(hidden.size(0), device=self.device), idx]
         pooled = normalize(pooled.float(), p=2, dim=1)
-        return pooled.cpu().numpy().astype(np.float16)
+        return pooled.cpu().numpy().astype(np.float32)
 
 
 class EmbeddingCache:
@@ -92,7 +99,10 @@ class EmbeddingCache:
                 self.index[sid] = base + offset
             vectors.append(shard_vecs)
             self.n_shards += 1
-        self.vectors = np.concatenate(vectors) if vectors else np.zeros((0, EMBED_DIM), np.float16)
+        self.vectors = (
+            np.concatenate(vectors).astype(np.float32)
+            if vectors else np.zeros((0, EMBED_DIM), np.float32)
+        )
 
     def has(self, sid):
         return sid in self.index
@@ -138,27 +148,136 @@ def ensure_embedded(cache, embedder, texts):
         cache.write_shard(buffer_ids, np.concatenate(buffer_vecs))
 
 
-def build_prototypes(cache, df):
+# --------------------------------------------------------------------------- #
+# Feature transforms: fit on TRAIN only, apply identically to dev / LLM speech #
+# --------------------------------------------------------------------------- #
+class FeatureTransform:
+    """Post-hoc transform of frozen embeddings.
+
+    kind:
+      none        -> raw embeddings (re-normalized; reproduces the baseline)
+      center       -> subtract train mean, L2-normalize (kills the shared component)
+      center_pca   -> center, then remove the top `remove_pcs` principal directions
+                      ("all-but-the-top"), L2-normalize
+      lda          -> center, then project onto the (n_parties-1) Fisher discriminant
+                      axes that maximize between-party / within-party variance
+
+    Fit once on train; persist; reuse the SAME object on dev and on the LLM speeches.
+    """
+
+    def __init__(self, kind="none", remove_pcs=1):
+        self.kind = kind
+        self.remove_pcs = remove_pcs
+        self.mu = None
+        self.pcs = None
+        self.lda = None
+        self.group_means = None      # for lang_center: per-language mean vector
+        self.out_dim = EMBED_DIM
+
+    def fit(self, X, y=None, groups=None):
+        X = np.asarray(X, dtype=np.float64)
+        self.mu = X.mean(0, keepdims=True)
+        Xc = X - self.mu
+        if self.kind == "none":
+            self.out_dim = X.shape[1]
+        elif self.kind == "center":
+            self.out_dim = X.shape[1]
+        elif self.kind == "lang_center":
+            if groups is None:
+                raise ValueError("transform=lang_center requires a language column (--lang-column)")
+            groups = np.asarray(groups)
+            self.group_means = {
+                g: X[groups == g].mean(0, keepdims=True) for g in np.unique(groups)
+            }
+            self.out_dim = X.shape[1]
+        elif self.kind == "center_pca":
+            from sklearn.decomposition import PCA
+            k = max(1, self.remove_pcs)
+            self.pcs = PCA(n_components=k, random_state=0).fit(Xc).components_  # (k, d)
+            self.out_dim = X.shape[1]
+        elif self.kind == "lda":
+            from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+            if y is None:
+                raise ValueError("transform=lda requires labels")
+            n_comp = len(np.unique(y)) - 1
+            self.lda = LinearDiscriminantAnalysis(n_components=n_comp).fit(Xc, y)
+            self.out_dim = n_comp
+        else:
+            raise ValueError(f"unknown transform: {self.kind}")
+        return self
+
+    def apply(self, X, groups=None):
+        X = np.asarray(X, dtype=np.float64)
+        if self.kind == "none":
+            Z = X
+        elif self.kind == "lang_center":
+            if groups is None:
+                raise ValueError("transform=lang_center requires groups at apply time")
+            groups = np.asarray(groups)
+            Z = X.copy()
+            for g in np.unique(groups):
+                m = self.group_means.get(g, self.mu)   # unseen language -> global mean
+                Z[groups == g] -= m
+        else:
+            Z = X - self.mu
+            if self.kind == "center_pca" and self.pcs is not None:
+                Z = Z - (Z @ self.pcs.T) @ self.pcs       # strip top PCs
+            elif self.kind == "lda":
+                Z = self.lda.transform(Z)                  # -> (n, n_parties-1)
+        norms = np.linalg.norm(Z, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0
+        return (Z / norms).astype(np.float32)              # unit norm -> dot product == cosine
+
+
+def fit_transform_on_train(cache, train_df, kind, remove_pcs, fit_sample, lang_column=None, seed=0):
+    sub = train_df
+    if fit_sample and len(train_df) > fit_sample:
+        # stratified-ish subsample to keep small parties represented
+        per = max(1, fit_sample // train_df[PARTY_COLUMN].nunique())
+        sel = (
+            train_df.groupby(PARTY_COLUMN, group_keys=False)
+            .apply(lambda g: g.sample(min(len(g), per), random_state=seed))
+            .index.to_numpy()
+        )
+        sub = train_df.loc[sel]
+    X = cache.get(sub["id"].tolist())
+    labels = sub[PARTY_COLUMN].to_numpy()
+    groups = sub[lang_column].to_numpy() if (kind == "lang_center" and lang_column) else None
+    print(f"[transform] fitting '{kind}' on {len(sub):,} train rows")
+    return FeatureTransform(kind=kind, remove_pcs=remove_pcs).fit(X, labels, groups)
+
+
+def transform_split(cache, df, transform, lang_column=None):
+    out = []
+    for rows in chunks(df.index.tolist(), 8192):
+        block = df.loc[rows]
+        groups = block[lang_column].to_numpy() if (transform.kind == "lang_center" and lang_column) else None
+        out.append(transform.apply(cache.get(block["id"].tolist()), groups))
+    return np.concatenate(out)
+
+
+def build_prototypes(cache, df, transform, lang_column=None):
     parties = sorted(df[PARTY_COLUMN].unique())
-    sums = {p: np.zeros(EMBED_DIM, np.float64) for p in parties}
+    sums = {p: np.zeros(transform.out_dim, np.float64) for p in parties}
     counts = {p: 0 for p in parties}
     for rows in tqdm(list(chunks(df.index.tolist(), 8192)), desc="prototypes"):
         block = df.loc[rows]
-        vecs = cache.get(block["id"].tolist()).astype(np.float64)
+        groups = block[lang_column].to_numpy() if (transform.kind == "lang_center" and lang_column) else None
+        proj = transform.apply(cache.get(block["id"].tolist()), groups).astype(np.float64)
         labels = block[PARTY_COLUMN].to_numpy()
         for party in parties:
             mask = labels == party
             if mask.any():
-                sums[party] += vecs[mask].sum(0)
+                sums[party] += proj[mask].sum(0)
                 counts[party] += int(mask.sum())
     matrix = np.stack([sums[p] / counts[p] for p in parties])
     matrix = matrix / np.linalg.norm(matrix, axis=1, keepdims=True)
     return parties, matrix.astype(np.float32)
 
 
-def evaluate(cache, df, parties, prototypes):
+def evaluate(embeddings, df, parties, prototypes):
     party_to_idx = {p: i for i, p in enumerate(parties)}
-    embeddings = cache.get(df["id"].tolist()).astype(np.float32)
+    embeddings = embeddings.astype(np.float32)
     truth = df[PARTY_COLUMN].map(party_to_idx).to_numpy()
     predictions = (embeddings @ prototypes.T).argmax(1)
     overall = float((predictions == truth).mean())
@@ -190,8 +309,43 @@ def evaluate(cache, df, parties, prototypes):
     }
 
 
-def report(parties, prototypes, metrics):
-    print("\n=== NEAREST-PROTOTYPE GEOMETRY (dev, cosine) ===")
+def language_diagnostic(embeddings, df, parties, lang_column, sample=20000, seed=0):
+    """Is the space organized by language or by party? Cluster, then score against each."""
+    if lang_column is None or lang_column not in df.columns:
+        print("\n[lang diagnostic] no language column found -> skipped "
+              "(pass --lang-column to enable)")
+        return None
+    from sklearn.cluster import MiniBatchKMeans
+
+    rng = np.random.default_rng(seed)
+    n = len(embeddings)
+    idx = rng.choice(n, min(sample, n), replace=False)
+    X = embeddings[idx].astype(np.float32)
+    langs = df.iloc[idx][lang_column].astype(str).to_numpy()
+    party = df.iloc[idx][PARTY_COLUMN].astype(str).to_numpy()
+
+    n_lang = len(np.unique(langs))
+    n_party = len(parties)
+    km_lang = MiniBatchKMeans(n_clusters=max(2, n_lang), random_state=seed, n_init=3).fit_predict(X)
+    km_party = MiniBatchKMeans(n_clusters=max(2, n_party), random_state=seed, n_init=3).fit_predict(X)
+    v_lang = float(v_measure_score(langs, km_lang))
+    v_party = float(v_measure_score(party, km_party))
+
+    print("\n=== LANGUAGE vs PARTY STRUCTURE (transformed dev, KMeans V-measure) ===")
+    print(f"  V-measure vs LANGUAGE (k={max(2, n_lang)}): {v_lang:.4f}   over {n_lang} languages")
+    print(f"  V-measure vs PARTY    (k={max(2, n_party)}): {v_party:.4f}   over {n_party} parties")
+    if v_lang > 2 * max(v_party, 1e-6):
+        print("  -> language dominates the geometry. Build per-language prototypes, or "
+              "restrict to the language of your LLM speeches before comparing.")
+    elif v_lang > v_party:
+        print("  -> language is the stronger axis; per-language prototypes likely help.")
+    else:
+        print("  -> party is at least as strong as language; a global prototype is reasonable.")
+    return {"v_language": v_lang, "v_party": v_party, "n_languages": n_lang}
+
+
+def report(parties, prototypes, metrics, transform_tag):
+    print(f"\n=== NEAREST-PROTOTYPE GEOMETRY (dev, cosine, transform={transform_tag}) ===")
     print(f"{'party':<12}{'support_top1':>14}")
     print("-" * 26)
     for party in parties:
@@ -205,7 +359,7 @@ def report(parties, prototypes, metrics):
     print("\n=== MEAN COSINE DISTANCE: party speeches (rows) -> prototypes (cols) ===")
     distance = metrics["distance_to_prototype"]
     header = "".join(f"{p[:9]:>10}" for p in parties)
-    print(f"{'true \\ proto':<12}{header}")
+    print(f"{'true // proto':<12}{header}")
     for true_party in parties:
         own = distance[true_party][true_party]
         others = {p: d for p, d in distance[true_party].items() if p != true_party}
@@ -229,24 +383,26 @@ def reduce_2d(method, vectors):
     raise ValueError(f"unknown method: {method}")
 
 
-def plot_embeddings_2d(cache, df, parties, prototypes, method, per_party, out_path):
+def plot_embeddings_2d(embeddings, df, parties, prototypes, method, per_party, out_path, transform_tag):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     rng = np.random.default_rng(0)
+    pos = {sid: i for i, sid in enumerate(df["id"].tolist())}
     rows = []
     for party in parties:
-        party_rows = df.index[df[PARTY_COLUMN] == party].to_numpy()
-        if len(party_rows) > per_party:
-            party_rows = rng.choice(party_rows, per_party, replace=False)
-        rows.extend(party_rows.tolist())
-    sample = df.loc[rows]
-    embeddings = cache.get(sample["id"].tolist()).astype(np.float32)
-    coords = reduce_2d(method, np.vstack([embeddings, prototypes]))
-    points, proto_points = coords[: len(embeddings)], coords[len(embeddings):]
+        party_ids = df["id"][df[PARTY_COLUMN] == party].to_numpy()
+        if len(party_ids) > per_party:
+            party_ids = rng.choice(party_ids, per_party, replace=False)
+        rows.extend(party_ids.tolist())
+    sel = [pos[s] for s in rows]
+    emb = embeddings[sel]
+    labels = df.set_index("id").loc[rows, PARTY_COLUMN].to_numpy()
 
-    labels = sample[PARTY_COLUMN].to_numpy()
+    coords = reduce_2d(method, np.vstack([emb, prototypes]))
+    points, proto_points = coords[: len(emb)], coords[len(emb):]
+
     fig, ax = plt.subplots(figsize=(11, 9))
     for party in parties:
         mask = labels == party
@@ -256,7 +412,7 @@ def plot_embeddings_2d(cache, df, parties, prototypes, method, per_party, out_pa
         ax.scatter(proto_points[index, 0], proto_points[index, 1], marker="X", s=280,
                    color=PARTY_COLOR.get(party, "#888888"), edgecolors="black", linewidths=1.5, zorder=5)
         ax.annotate(party, proto_points[index], fontsize=9, fontweight="bold", ha="center", va="center", zorder=6)
-    ax.set_title(f"Harrier dev embeddings ({method.upper()}, n={len(embeddings)}, X = prototype)")
+    ax.set_title(f"Harrier dev ({method.upper()}, transform={transform_tag}, n={len(emb)}, X = prototype)")
     ax.set_xticks([])
     ax.set_yticks([])
     ax.legend(markerscale=3, fontsize=8, loc="best")
@@ -266,6 +422,15 @@ def plot_embeddings_2d(cache, df, parties, prototypes, method, per_party, out_pa
     print(f"\nSaved 2D projection to {out_path}")
 
 
+def detect_lang_column(df, explicit):
+    if explicit:
+        return explicit
+    for candidate in LANG_COLUMN_CANDIDATES:
+        if candidate in df.columns:
+            return candidate
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", default=str(DATA_DIR))
@@ -273,34 +438,68 @@ def main():
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
     parser.add_argument("--max-tokens", type=int, default=MAX_TOKENS)
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--transform", choices=["none", "center", "center_pca", "lda", "lang_center"], default="none")
+    parser.add_argument("--remove-pcs", type=int, default=1, help="PCs to strip for center_pca")
+    parser.add_argument("--transform-fit-sample", type=int, default=200000,
+                        help="cap rows used to fit the transform (0 = use all)")
+    parser.add_argument("--lang-column", default=None, help="column with language label (diagnostic / lang_center / --language)")
+    parser.add_argument("--language", default=None, help="restrict train+dev to a single language value in the lang column")
     parser.add_argument("--plot-method", choices=["pca", "tsne", "umap"], default="tsne")
     parser.add_argument("--plot-per-party", type=int, default=500)
     parser.add_argument("--no-plot", action="store_true")
     args = parser.parse_args()
 
     embedder = Harrier(batch_size=args.batch_size, max_tokens=args.max_tokens)
+    print(f"[tokenizer] padding_side = {embedder.tokenizer.padding_side}")
     cache = EmbeddingCache(args.cache)
 
-    train = load_split("train", args.data_dir)
-    dev = load_split("dev", args.data_dir)
+    train = load_split("train_post2009", args.data_dir)
+    dev = load_split("dev_post2009", args.data_dir)
     if args.limit is not None:
         train = train.groupby(PARTY_COLUMN, group_keys=False).head(args.limit).reset_index(drop=True)
         dev = dev.groupby(PARTY_COLUMN, group_keys=False).head(args.limit).reset_index(drop=True)
 
+    lang_column = detect_lang_column(dev, args.lang_column)
+    if args.language is not None:
+        if lang_column is None:
+            raise SystemExit("--language given but no language column found; pass --lang-column")
+        train = train[train[lang_column] == args.language].reset_index(drop=True)
+        dev = dev[dev[lang_column] == args.language].reset_index(drop=True)
+        print(f"[language] restricted to '{args.language}': train={len(train):,} dev={len(dev):,}")
+        if len(train) == 0 or len(dev) == 0:
+            raise SystemExit(f"no rows for language '{args.language}' (check the value in column '{lang_column}')")
+    if args.transform == "lang_center" and lang_column is None:
+        raise SystemExit("--transform lang_center needs a language column; pass --lang-column")
+
     ensure_embedded(cache, embedder, train["text"].tolist())
     ensure_embedded(cache, embedder, dev["text"].tolist())
 
-    parties, prototypes = build_prototypes(cache, train)
-    np.save(cache.dir / "prototypes.npy", prototypes)
-    (cache.dir / "prototypes_parties.json").write_text(json.dumps(parties, ensure_ascii=False, indent=2))
+    # Fit the chosen transform on TRAIN, persist it for reuse on the LLM speeches.
+    transform = fit_transform_on_train(
+        cache, train, args.transform, args.remove_pcs,
+        None if args.transform_fit_sample == 0 else args.transform_fit_sample,
+        lang_column=lang_column,
+    )
+    tag = args.transform if args.transform != "center_pca" else f"center_pca{args.remove_pcs}"
+    if args.language:
+        tag = f"{tag}_{args.language}"
+    with open(cache.dir / f"transform_{tag}.pkl", "wb") as fh:
+        pickle.dump(transform, fh)
 
-    metrics = evaluate(cache, dev, parties, prototypes)
-    (cache.dir / "dev_geometry.json").write_text(json.dumps(metrics, ensure_ascii=False, indent=2))
-    report(parties, prototypes, metrics)
+    parties, prototypes = build_prototypes(cache, train, transform, lang_column)
+    np.save(cache.dir / f"prototypes_{tag}.npy", prototypes)
+    (cache.dir / f"prototypes_parties_{tag}.json").write_text(json.dumps(parties, ensure_ascii=False, indent=2))
+
+    dev_proj = transform_split(cache, dev, transform, lang_column)
+    metrics = evaluate(dev_proj, dev, parties, prototypes)
+    (cache.dir / f"dev_geometry_{tag}.json").write_text(json.dumps(metrics, ensure_ascii=False, indent=2))
+    report(parties, prototypes, metrics, tag)
+
+    language_diagnostic(dev_proj, dev, parties, None if args.language else lang_column)
 
     if not args.no_plot:
-        out_path = cache.dir / f"dev_embeddings_{args.plot_method}.png"
-        plot_embeddings_2d(cache, dev, parties, prototypes, args.plot_method, args.plot_per_party, out_path)
+        out_path = cache.dir / f"dev_embeddings_{args.plot_method}_{tag}.png"
+        plot_embeddings_2d(dev_proj, dev, parties, prototypes, args.plot_method, args.plot_per_party, out_path, tag)
 
 
 if __name__ == "__main__":

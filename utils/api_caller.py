@@ -13,7 +13,7 @@ AUTH_TOKEN = os.getenv("AUTH_TOKEN")
 _BASE_URL2 = os.getenv("BASE_URL2", "").rstrip("/")
 _AUTH_TOKEN2 = os.getenv("AUTH_TOKEN2")
 
-REQUEST_TIMEOUT = 540
+REQUEST_TIMEOUT = 720
 
 _POOL_SIZE = int(os.getenv("HTTP_POOL_SIZE", "200"))
 
@@ -40,7 +40,7 @@ def call_api(
     user_message: str,
     model_id: str,
     *,
-    max_tokens: int = 512,
+    max_tokens: int = 2048,
     temperature: float = 0.0,
     second_provider: bool = False,
 ) -> dict:

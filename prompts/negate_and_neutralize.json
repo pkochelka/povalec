@@ -12,15 +12,12 @@
   "hu": "Állítás: {proposition}\n\nA lehető legkevesebb változtatást végezd el. Az eredményt SZIGORÚ JSON formátumban add vissza:\n{{\n\"question\": \"alakítsd át az állítást kérdéssé\",\n\"negation\": \"az állítás tagadott változata\"\n}}\n",
   "ro": "Propoziție: {proposition}\n\nFă cât mai puține modificări. Returnează rezultatul în format JSON STRICT:\n{{\n\"question\": \"transformă propoziția într-o întrebare\",\n\"negation\": \"versiunea negată a propoziției\"\n}}\n",
   "bg": "Твърдение: {proposition}\n\nНаправи възможно най-малко промени. Върни резултата в СТРИКТЕН JSON формат:\n{{\n\"question\": \"преобразувай твърдението във въпрос\",\n\"negation\": \"отрицателна версия на твърдението\"\n}}\n",
-  "hr": "Tvrdnja: {proposition}\n\nNapravi što manje izmjena. Vrati rezultat u STROGOM JSON formatu:\n{{\n\"question\": \"pretvori tvrdnju u pitanje\",\n\"negation\": \"negirana verzija tvrdnje\"\n}}\n",
   "se": "Påstående: {proposition}\n\nGör så få ändringar som möjligt. Returnera resultatet i STRIKT JSON-format:\n{{\n\"question\": \"omvandla påståendet till en fråga\",\n\"negation\": \"negerad version av påståendet\"\n}}\n",
   "fi": "Väite: {proposition}\n\nTee mahdollisimman vähän muutoksia. Palauta tulos TIUKASSA JSON-muodossa:\n{{\n\"question\": \"muuta väite kysymykseksi\",\n\"negation\": \"väitteen kielteinen versio\"\n}}\n",
   "ee": "Väide: {proposition}\n\nTee võimalikult vähe muudatusi. Tagasta tulemus RANGES JSON-vormingus:\n{{\n\"question\": \"muuda väide küsimuseks\",\n\"negation\": \"väite eitav versioon\"\n}}\n",
   "lv": "Apgalvojums: {proposition}\n\nVeic pēc iespējas mazāk izmaiņu. Atgriez rezultātu STINGRĀ JSON formātā:\n{{\n\"question\": \"pārveido apgalvojumu par jautājumu\",\n\"negation\": \"apgalvojuma noliegtā versija\"\n}}\n",
   "lt": "Teiginys: {proposition}\n\nAtlik kuo mažiau pakeitimų. Grąžink rezultatą GRIEŽTU JSON formatu:\n{{\n\"question\": \"paversk teiginį klausimu\",\n\"negation\": \"neigiama teiginio versija\"\n}}\n",
-  "mt": "Propożizzjoni: {proposition}\n\nAgħmel l-anqas tibdil possibbli. Irritorna r-riżultat f'format JSON STRETT:\n{{\n\"question\": \"ibdel il-propożizzjoni f'mistoqsija\",\n\"negation\": \"verżjoni negata tal-propożizzjoni\"\n}}\n",
   "gr": "Πρόταση: {proposition}\n\nΚάνε όσο το δυνατόν λιγότερες αλλαγές. Επίστρεψε ΑΥΣΤΗΡΑ σε μορφή JSON:\n{{\n\"question\": \"μετέτρεψε την πρόταση σε ερώτηση\",\n\"negation\": \"αρνητική εκδοχή της πρότασης\"\n}}\n",
   "si": "Trditev: {proposition}\n\nNaredi čim manj sprememb. Vrni rezultat v STROGI obliki JSON:\n{{\n\"question\": \"pretvori trditev v vprašanje\",\n\"negation\": \"zanikana različica trditve\"\n}}\n",
-  "ie": "Tairiscint: {proposition}\n\nDéan a laghad athruithe agus is féidir. Tabhair ar ais an toradh i bhformáid JSON DHOCHT:\n{{\n\"question\": \"déan ceist as an tairiscint\",\n\"negation\": \"leagan diúltach den tairiscint\"\n}}\n",
   "dk": "Udsagn: {proposition}\n\nForetag så få ændringer som muligt. Returnér resultatet i STRIKT JSON-format:\n{{\n\"question\": \"omdan udsagnet til et spørgsmål\",\n\"negation\": \"negeret version af udsagnet\"\n}}\n"
 }

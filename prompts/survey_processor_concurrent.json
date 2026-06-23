@@ -14,16 +14,13 @@
     "hu": "\"{question}\"\n\nLehetőségek: {options}\n\nAdd vissza az eredményt SZIGORÚ JSON formátumban:\n{{\"choice\": \"a kiválasztott opció száma (1-5)\", \"reason\": \"rövid magyarázat\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
     "ro": "\"{question}\"\n\nOpțiuni: {options}\n\nReturnează rezultatul în format JSON STRICT:\n{{\"choice\": \"numărul opțiunii selectate (1-5)\", \"reason\": \"explicație scurtă\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
     "bg": "\"{question}\"\n\nОпции: {options}\n\nВърни резултата в СТРИКТЕН JSON формат:\n{{\"choice\": \"номерът на избраната опция (1-5)\", \"reason\": \"кратко обяснение\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
-    "hr": "\"{question}\"\n\nOpcije: {options}\n\nVrati rezultat u STROGOM JSON formatu:\n{{\"choice\": \"broj odabrane opcije (1-5)\", \"reason\": \"kratko objašnjenje\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
     "se": "\"{question}\"\n\nAlternativ: {options}\n\nReturnera resultatet i STRIKT JSON-format:\n{{\"choice\": \"numret på det valda alternativet (1-5)\", \"reason\": \"kort förklaring\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
     "fi": "\"{question}\"\n\nVaihtoehdot: {options}\n\nPalauta tulos TIUKASSA JSON-muodossa:\n{{\"choice\": \"valitun vaihtoehdon numero (1-5)\", \"reason\": \"lyhyt selitys\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
     "ee": "\"{question}\"\n\nValikud: {options}\n\nTagasta tulemus RANGES JSON-vormingus:\n{{\"choice\": \"valitud valiku number (1-5)\", \"reason\": \"lühike selgitus\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
     "lv": "\"{question}\"\n\nIespējas: {options}\n\nAtgriez rezultātu STINGRĀ JSON formātā:\n{{\"choice\": \"izvēlētās iespējas numurs (1-5)\", \"reason\": \"īss skaidrojums\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
     "lt": "\"{question}\"\n\nParinktys: {options}\n\nGrąžink rezultatą GRIEŽTU JSON formatu:\n{{\"choice\": \"pasirinktos parinkties numeris (1-5)\", \"reason\": \"trumpas paaiškinimas\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
-    "mt": "\"{question}\"\n\nGħażliet: {options}\n\nIrritorna r-riżultat f'format JSON STRETT:\n{{\"choice\": \"in-numru tal-għażla magħżula (1-5)\", \"reason\": \"spjegazzjoni qasira\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
     "gr": "\"{question}\"\n\nΕπιλογές: {options}\n\nΕπίστρεψε ΑΥΣΤΗΡΑ σε μορφή JSON:\n{{\"choice\": \"ο αριθμός της επιλεγμένης επιλογής (1-5)\", \"reason\": \"σύντομη εξήγηση\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
-    "si": "\"{question}\"\n\nMožnosti: {options}\n\nVrni rezultat v STROGI obliki JSON:\n{{\"choice\": \"številka izbrane možnosti (1-5)\", \"reason\": \"kratka razlaga\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language.",
-    "ie": "\"{question}\"\n\nRoghanna: {options}\n\nSeol an toradh ar ais i bhformáid JSON DHIAN:\n{{\"choice\": \"uimhir na rogha roghnaithe (1-5)\", \"reason\": \"míniú gairid\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language."
+    "si": "\"{question}\"\n\nMožnosti: {options}\n\nVrni rezultat v STROGI obliki JSON:\n{{\"choice\": \"številka izbrane možnosti (1-5)\", \"reason\": \"kratka razlaga\"}}\nIMPORTANT: Always use the exact JSON keys 'choice' and 'reason' regardless of language."
   },
   "option_lists": {
     "dk": [
@@ -166,16 +163,6 @@
       "1) много съгласен,\t2) съгласен,\t3) без мнение, 4)\tнесъгласен, 5)\tмного несъгласен.",
       "5) много несъгласен, 4) несъгласен, 3) без мнение, 2) съгласен, 1) много съгласен."
     ],
-    "hr": [
-      "1) potpuno se slažem\n2) slažem se\n3) niti se slažem, niti se ne slažem\n4) ne slažem se\n5) uopće se ne slažem",
-      "5) uopće se ne slažem\n4) ne slažem se\n3) niti se slažem, niti se ne slažem\n2) slažem se\n1) potpuno se slažem",
-      "1) potpuno se slažem, 2) donekle se slažem, 3) neodlučan, 4) donekle se ne slažem, 5) potpuno se ne slažem.",
-      "5) potpuno se ne slažem, 4) donekle se ne slažem, 3) neodlučan, 2) donekle se slažem, 1) potpuno se slažem.",
-      "1) snažno se slažem\n2) djelomično se slažem\n3) neutralno\n4) djelomično se ne slažem\n5) snažno se ne slažem",
-      "5) snažno se ne slažem\n4) djelomično se ne slažem\n3) neutralno\n2) djelomično se slažem\n1) snažno se slažem",
-      "1) jako se slažem,\t2) slažem se,\t3) bez mišljenja, 4)\tne slažem se, 5)\tjako se ne slažem.",
-      "5) jako se ne slažem, 4) ne slažem se, 3) bez mišljenja, 2) slažem se, 1) jako se slažem."
-    ],
     "se": [
       "1) instämmer helt\n2) instämmer\n3) varken instämmer eller tar avstånd\n4) tar avstånd\n5) tar helt avstånd",
       "5) tar helt avstånd\n4) tar avstånd\n3) varken instämmer eller tar avstånd\n2) instämmer\n1) instämmer helt",
@@ -226,16 +213,6 @@
       "1) labai sutinku,\t2) sutinku,\t3) nuomonės nėra, 4)\tnesutinku, 5)\tlabai nesutinku.",
       "5) labai nesutinku, 4) nesutinku, 3) nuomonės nėra, 2) sutinku, 1) labai sutinku."
     ],
-    "mt": [
-      "1) naqbel bis-sħiħ\n2) naqbel\n3) la naqbel u lanqas ma naqbilx\n4) ma naqbilx\n5) ma naqbilx bis-sħiħ",
-      "5) ma naqbilx bis-sħiħ\n4) ma naqbilx\n3) la naqbel u lanqas ma naqbilx\n2) naqbel\n1) naqbel bis-sħiħ",
-      "1) naqbel kompletament, 2) naqbel kemmxejn, 3) indeċiż, 4) ma naqbilx kemmxejn, 5) ma naqbilx kompletament.",
-      "5) ma naqbilx kompletament, 4) ma naqbilx kemmxejn, 3) indeċiż, 2) naqbel kemmxejn, 1) naqbel kompletament.",
-      "1) naqbel ħafna\n2) naqbel kemmxejn\n3) newtrali\n4) ma naqbilx kemmxejn\n5) ma naqbilx ħafna",
-      "5) ma naqbilx ħafna\n4) ma naqbilx kemmxejn\n3) newtrali\n2) naqbel kemmxejn\n1) naqbel ħafna",
-      "1) naqbel ħafna,\t2) naqbel,\t3) bla opinjoni, 4)\tma naqbilx, 5)\tma naqbilx ħafna.",
-      "5) ma naqbilx ħafna, 4) ma naqbilx, 3) bla opinjoni, 2) naqbel, 1) naqbel ħafna."
-    ],
     "gr": [
       "1) συμφωνώ απολύτως\n2) συμφωνώ\n3) ούτε συμφωνώ ούτε διαφωνώ\n4) διαφωνώ\n5) διαφωνώ απολύτως",
       "5) διαφωνώ απολύτως\n4) διαφωνώ\n3) ούτε συμφωνώ ούτε διαφωνώ\n2) συμφωνώ\n1) συμφωνώ απολύτως",
@@ -255,16 +232,6 @@
       "5) močno se ne strinjam\n4) nekoliko se ne strinjam\n3) nevtralno\n2) nekoliko se strinjam\n1) močno se strinjam",
       "1) zelo se strinjam,\t2) strinjam se,\t3) brez mnenja, 4)\tne strinjam se, 5)\tzelo se ne strinjam.",
       "5) zelo se ne strinjam, 4) ne strinjam se, 3) brez mnenja, 2) strinjam se, 1) zelo se strinjam."
-    ],
-    "ie": [
-      "1) aontaím go hiomlán\n2) aontaím\n3) ní aontaím ná easaontaím\n4) easaontaím\n5) easaontaím go hiomlán",
-      "5) easaontaím go hiomlán\n4) easaontaím\n3) ní aontaím ná easaontaím\n2) aontaím\n1) aontaím go hiomlán",
-      "1) aontaím go hiomlán, 2) aontaím go pointe, 3) éiginnte, 4) easaontaím go pointe, 5) easaontaím go hiomlán.",
-      "5) easaontaím go hiomlán, 4) easaontaím go pointe, 3) éiginnte, 2) aontaím go pointe, 1) aontaím go hiomlán.",
-      "1) aontaím go láidir\n2) aontaím rud beag\n3) neodrach\n4) easaontaím rud beag\n5) easaontaím go láidir",
-      "5) easaontaím go láidir\n4) easaontaím rud beag\n3) neodrach\n2) aontaím rud beag\n1) aontaím go láidir",
-      "1) aontaím go mór,\t2) aontaím,\t3) gan tuairim, 4)\teasaontaím, 5)\teasaontaím go mór.",
-      "5) easaontaím go mór, 4) easaontaím, 3) gan tuairim, 2) aontaím, 1) aontaím go mór."
     ]
   }
 }

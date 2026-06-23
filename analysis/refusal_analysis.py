@@ -16,6 +16,7 @@ Outputs (under data/<dataset>_results/plots/refusals/):
   * refusal_heatmap.png -- models x languages, overall refusal rate
   * refusal_per_model.png -- bar chart, per-language refusal rate per model
   * refusal_breakdown.png -- hard vs semantic stacked bars per model
+  * refusal_by_variant.png -- grouped bars per model broken down by statement variant
 """
 import argparse
 import os
@@ -249,6 +250,17 @@ def overall_rate_per_model_language(rates_df):
     return pooled
 
 
+def overall_rate_per_model_variant(rates_df):
+    pooled = rates_df.groupby(["model", "variant"]).agg(
+        n_total=("n_total", "sum"),
+        n_hard=("n_hard", "sum"),
+        n_semantic=("n_semantic", "sum"),
+        n_refusal=("n_refusal", "sum"),
+    ).reset_index()
+    pooled["refusal_rate"] = pooled["n_refusal"] / pooled["n_total"]
+    return pooled
+
+
 def order_languages(languages_present):
     ordered = [lang for lang in ALL_LANGS if lang in languages_present]
     extras = sorted(lang for lang in languages_present if lang not in ALL_LANGS)
@@ -342,6 +354,46 @@ def plot_hard_vs_semantic_per_model(overall_df, output_path):
     print(f"  Saved {output_path}")
 
 
+def plot_refusal_by_variant(variant_df, output_path):
+    models = sorted(variant_df["model"].unique())
+    variants = ["base", "question", "negated"]
+    variant_colors = {"base": "#4C72B0", "question": "#DD8452", "negated": "#55A868"}
+
+    n_models = len(models)
+    n_variants = len(variants)
+    group_width = 0.8
+    bar_width = group_width / n_variants
+
+    fig, ax = plt.subplots(figsize=(max(6, 1.5 * n_models + 2), 5))
+    positions = np.arange(n_models)
+
+    for i, variant in enumerate(variants):
+        subset = variant_df[variant_df["variant"] == variant].set_index("model").reindex(models)
+        rates = subset["refusal_rate"].fillna(0.0).to_numpy()
+        offset = (i - n_variants / 2 + 0.5) * bar_width
+        bars = ax.bar(
+            positions + offset, rates, bar_width * 0.9,
+            color=variant_colors[variant], edgecolor="black", linewidth=0.4,
+            label=variant,
+        )
+        for bar, rate in zip(bars, rates):
+            if rate > 0.005:
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2, rate + 0.001,
+                    f"{rate:.3f}", ha="center", va="bottom", fontsize=7,
+                )
+
+    ax.set_xticks(positions, models, rotation=20, ha="right", fontsize=9)
+    ax.set_ylabel("Refusal rate")
+    ax.set_title("Refusal rate per statement variant per model (all languages pooled)", fontsize=11, pad=8)
+    ax.grid(axis="y", linestyle="--", alpha=0.4)
+    ax.legend(title="Variant", loc="upper right", fontsize=9, framealpha=0.9)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+    print(f"  Saved {output_path}")
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", default="euandi_2024", choices=["euandi_2019", "euandi_2024"])
@@ -400,6 +452,7 @@ def main():
 
     rates_df = aggregate_refusal_rates(annotated_df)
     overall_df = overall_rate_per_model_language(rates_df)
+    variant_df = overall_rate_per_model_variant(rates_df)
 
     output_dir = Path(args.output_dir) if args.output_dir else results_dir / "plots" / "refusals"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -422,9 +475,14 @@ def main():
     examples.to_csv(examples_path, index=False)
     print(f"  Saved {examples_path}")
 
+    variant_csv = output_dir / "refusal_rates_by_variant.csv"
+    variant_df.to_csv(variant_csv, index=False)
+    print(f"  Saved {variant_csv}")
+
     plot_heatmap(overall_df, output_dir / "refusal_heatmap.png")
     plot_per_model_languages(overall_df, output_dir / "refusal_per_model.png")
     plot_hard_vs_semantic_per_model(overall_df, output_dir / "refusal_breakdown.png")
+    plot_refusal_by_variant(variant_df, output_dir / "refusal_by_variant.png")
 
     print("\nDone.")
 

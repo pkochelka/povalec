@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Train a single mmBERT EU-party classifier that is robust to class imbalance.
 
-Logit-adjusted cross-entropy handles the imbalance using only training priors.
-The best epoch count is found on the dev split, then the model is retrained on
-train+dev combined for that many epochs and evaluated once on the test split.
+Train is heavily imbalanced, but dev/test are uniform across parties (and
+language-stratified). Logit-adjusted cross-entropy subtracts the train log-priors
+during the loss, so the model is optimised for a uniform label distribution: at
+inference the plain argmax of the logits is Bayes-optimal for the uniform dev/test.
+The best checkpoint is picked on the uniform dev split and evaluated once on test.
 """
 import os
 import sys
@@ -13,7 +15,7 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 import torch.nn.functional as F
-from datasets import ClassLabel, Dataset, DatasetDict, concatenate_datasets
+from datasets import ClassLabel, Dataset, DatasetDict
 from dotenv import load_dotenv
 from sklearn.metrics import f1_score
 from transformers import (
@@ -52,7 +54,6 @@ BEST_METRIC = "f1_macro_mean_lang"
 class TrainingData:
     train: Dataset
     dev: Dataset
-    trainval: Dataset
     test: Dataset
     collator: DataCollatorWithPadding
     label2id: dict
@@ -157,7 +158,6 @@ def prepare_training_data(data_dir, tokenizer):
     return TrainingData(
         train=tokenized["train"],
         dev=tokenized["validation"],
-        trainval=concatenate_datasets([tokenized["train"], tokenized["validation"]]),
         test=tokenized["test"],
         collator=DataCollatorWithPadding(tokenizer=tokenizer),
         label2id=label2id,
@@ -211,8 +211,8 @@ def release(model, trainer, device):
         torch.cuda.empty_cache()
 
 
-def find_best_epoch(data, tokenizer, hf_token, device):
-    print(f"\n{'=' * 60}\n  Stage 1: searching best epoch on dev\n{'=' * 60}")
+def train_and_evaluate(data, tokenizer, hf_token, device):
+    print(f"\n{'=' * 60}\n  Training on imbalanced train, selecting on uniform dev\n{'=' * 60}")
     model = build_model(data, hf_token, device)
     metrics_fn = LanguageAwareMetrics()
     metrics_fn.current_languages = data.dev_langs
@@ -220,7 +220,7 @@ def find_best_epoch(data, tokenizer, hf_token, device):
     trainer = LogitAdjustedTrainer(
         logit_adjustment=logit_adjustment_for(data.train, data.num_labels, device),
         model=model,
-        args=training_arguments(f"{MODEL_SLUG}-search", MAX_EPOCHS, evaluate_each_epoch=True),
+        args=training_arguments(OUTPUT_DIR, MAX_EPOCHS, evaluate_each_epoch=True),
         train_dataset=data.train,
         eval_dataset=data.dev,
         data_collator=data.collator,
@@ -228,35 +228,21 @@ def find_best_epoch(data, tokenizer, hf_token, device):
         compute_metrics=metrics_fn,
         callbacks=[EarlyStoppingCallback(early_stopping_patience=EARLY_STOPPING_PATIENCE)],
     )
-    trainer.train()
+    trainer.train()  # load_best_model_at_end restores the best-dev checkpoint
 
     scored = [entry for entry in trainer.state.log_history if f"eval_{BEST_METRIC}" in entry]
     best = max(scored, key=lambda entry: entry[f"eval_{BEST_METRIC}"])
     best_epoch = max(1, round(best["epoch"]))
-
-    release(model, trainer, device)
     print(f"Best dev {BEST_METRIC}={best[f'eval_{BEST_METRIC}']:.4f} at epoch {best_epoch}")
-    return best_epoch
 
-
-def train_final(data, tokenizer, hf_token, device, num_epochs):
-    print(f"\n{'=' * 60}\n  Stage 2: training on train+dev for {num_epochs} epochs\n{'=' * 60}")
-    model = build_model(data, hf_token, device)
-
-    trainer = LogitAdjustedTrainer(
-        logit_adjustment=logit_adjustment_for(data.trainval, data.num_labels, device),
-        model=model,
-        args=training_arguments(OUTPUT_DIR, num_epochs, evaluate_each_epoch=False),
-        train_dataset=data.trainval,
-        data_collator=data.collator,
-        processing_class=tokenizer,
-    )
-    trainer.train()
+    metrics_fn.current_languages = data.test_langs
     predictions = trainer.predict(data.test)
     trainer.save_model(OUTPUT_DIR)
 
+    y_test = predictions.label_ids
+    y_pred = np.argmax(predictions.predictions, axis=-1)
     release(model, trainer, device)
-    return predictions.label_ids, np.argmax(predictions.predictions, axis=-1)
+    return best_epoch, y_test, y_pred
 
 
 def save_manifest(output_dir, data, num_epochs):
@@ -296,8 +282,7 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, token=hf_token)
     data = prepare_training_data(DATA_DIR, tokenizer)
 
-    best_epoch = find_best_epoch(data, tokenizer, hf_token, device)
-    y_test, y_pred = train_final(data, tokenizer, hf_token, device, best_epoch)
+    best_epoch, y_test, y_pred = train_and_evaluate(data, tokenizer, hf_token, device)
 
     test_f1 = f1_score(y_test, y_pred, average="macro", zero_division=0)
     save_manifest(OUTPUT_DIR, data, best_epoch)

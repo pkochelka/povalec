@@ -1,8 +1,8 @@
 # EU&I serves identical statements for country locales that share a language, so
 # we keep one code per language: at, be -> de; cy -> gr; lu -> fr are dropped.
 LANGS = [
-    "bg", "hr", "cz", "dk", "ee", "fi", "fr",
-    "de", "gr", "hu", "ie", "it", "lv", "lt", "mt", "nl",
+    "bg", "cz", "dk", "ee", "fi", "fr",
+    "de", "gr", "hu", "it", "lv", "lt", "nl",
     "pl", "pt", "ro", "sk", "si", "es", "se",
 ]
 

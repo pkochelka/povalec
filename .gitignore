@@ -8,5 +8,6 @@ answerdotai/
 __pycache__/
 AIC/
 .env.local
+results*
 mmBERT-base-trainer_strat
 mmBERT-small-stance-crossencoder

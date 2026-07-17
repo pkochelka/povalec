@@ -24,12 +24,43 @@ from party_prototype_embeddings import (
 RESULTS_ROOT = REPO_ROOT / "data" / "euandi_2024_results"
 GEMMA_TO_EP = {
     "bg": "bg", "cz": "cs", "dk": "da", "ee": "et", "fi": "fi", "fr": "fr",
-    "de": "de", "gr": "el", "hu": "hu", "ie": "en", "it": "it", "lv": "lv",
-    "lt": "lt", "nl": "nl", "pl": "pl", "pt": "pt", "ro": "ro", "sk": "sk",
-    "si": "sl", "es": "es", "se": "sv", "en": "en",
+    "de": "de", "gr": "el", "hu": "hu", "it": "it", "lv": "lv", "lt": "lt",
+    "nl": "nl", "pl": "pl", "pt": "pt", "ro": "ro", "sk": "sk", "si": "sl",
+    "es": "es", "se": "sv", "en": "en",
 }
 ANSWER_RE = re.compile(r"^answer_([a-z]{2})(?:_(?:negated|question))?_v(\d+)$")
 
+def per_statement_report(df, parties, out_path=None):
+    sim_cols = [f"sim_{party_token(p)}" for p in parties]
+
+    # mean closeness to each party, per statement (pooled over language/variant/track)
+    by_stmt = df.groupby("statement_idx")[sim_cols].mean()
+    arr = by_stmt.to_numpy()
+    by_stmt = by_stmt.assign(
+        nearest=[parties[i] for i in arr.argmax(1)],
+        margin=np.sort(arr, axis=1)[:, -1] - np.sort(arr, axis=1)[:, -2],  # top1 - top2
+    )
+
+    print("\n=== per-statement nearest EP prototype (pooled) ===")
+    print(by_stmt[["nearest", "margin"]].to_string())
+    print("\ndistinct nearest parties across statements:",
+          by_stmt["nearest"].nunique(), "of", len(parties))
+    print(by_stmt["nearest"].value_counts().to_string())
+
+    # STANCE TEST: does negating the statement change its nearest party?
+    if {"base", "negated"} <= set(df["track"].unique()):
+        nb = (df[df.track.isin(["base", "negated"])]
+              .groupby(["statement_idx", "track"])[sim_cols].mean())
+        nb = nb.assign(nearest=[parties[i] for i in nb.to_numpy().argmax(1)]).reset_index()
+        wide = nb.pivot(index="statement_idx", columns="track", values="nearest")
+        same = (wide["base"] == wide["negated"]).mean()
+        print("\n=== stance sensitivity (base vs negated nearest party) ===")
+        print(wide.to_string())
+        print(f"\nsame nearest party for base & negated: {same:.0%} of statements")
+
+    if out_path:
+        by_stmt.to_csv(out_path)
+        print(f"\nSaved per-statement table to {out_path}")
 
 def party_token(party):
     return party.replace("/", "_").replace("&", "_").replace(" ", "")
@@ -91,15 +122,84 @@ def load_reference(ep_cache, tag):
     return prototypes, parties, transform
 
 
+def negation_quality_check(df, projected):
+    """
+    For each statement, measure cosine distance between base and negated embeddings.
+    
+    High distance (close to 1.0) = good negation (LLM expressed opposite stance)
+    Low distance (close to 0.0) = poor negation (LLM didn't flip semantically)
+    """
+    import numpy as np
+    import pandas as pd
+    
+    if "base" not in df["track"].values or "negated" not in df["track"].values:
+        print("\n[negation check] skipped: base and/or negated tracks missing")
+        return None
+    
+    # Group by statement_idx, language, variant and pair base with negated
+    pairs = []
+    for (stmt, lang, var), group_base in df[df["track"] == "base"].groupby(["statement_idx", "language", "variant"]):
+        group_neg = df[(df["statement_idx"] == stmt) & (df["language"] == lang) & 
+                       (df["variant"] == var) & (df["track"] == "negated")]
+        if len(group_base) > 0 and len(group_neg) > 0:
+            pairs.append((stmt, lang, var, group_base.index[0], group_neg.index[0]))
+    
+    if not pairs:
+        print("\n[negation check] no matching base/negated pairs")
+        return None
+    
+    cosine_dists = []
+    for stmt, lang, var, base_idx, neg_idx in pairs:
+        base_emb = projected[base_idx]
+        neg_emb = projected[neg_idx]
+        # Cosine distance = 1 - cosine similarity (both are L2-normalized, so dot product = cosine)
+        sim = np.dot(base_emb, neg_emb)
+        dist = 1.0 - sim
+        cosine_dists.append({
+            "statement_idx": stmt,
+            "language": lang,
+            "variant": var,
+            "cosine_similarity": float(sim),
+            "cosine_distance": float(dist),
+        })
+    
+    result_df = pd.DataFrame(cosine_dists)
+    
+    print("\n=== NEGATION QUALITY (cosine distance: base vs negated) ===")
+    print(f"Total pairs: {len(result_df)}")
+    print(f"Mean cosine distance: {result_df['cosine_distance'].mean():.4f}")
+    print(f"  (0.0 = identical, 1.0 = opposite; expect >0.3 for good negation)")
+    print(f"Median cosine distance: {result_df['cosine_distance'].median():.4f}")
+    print(f"Std dev: {result_df['cosine_distance'].std():.4f}")
+    print(f"\nQuartiles:")
+    print(result_df['cosine_distance'].quantile([0.25, 0.5, 0.75]).to_string())
+    
+    print(f"\nBy statement:")
+    by_stmt = result_df.groupby("statement_idx")["cosine_distance"].agg(["mean", "std", "count"])
+    print(by_stmt.to_string())
+    
+    print(f"\nBy language:")
+    by_lang = result_df.groupby("language")["cosine_distance"].agg(["mean", "std", "count"])
+    print(by_lang.to_string())
+    
+    # Flag statements with very low negation distance
+    low_neg = result_df[result_df["cosine_distance"] < 0.1]
+    if len(low_neg) > 0:
+        print(f"\n⚠️  {len(low_neg)} pairs with distance < 0.1 (poor negation):")
+        print(low_neg[["statement_idx", "language", "cosine_distance"]].to_string())
+    
+    return result_df
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model-dir", default=str(RESULTS_ROOT / "gemma-4-31b-it"))
+    parser.add_argument("--model-dir", default=str(RESULTS_ROOT / "kimi-k2.6"))
     parser.add_argument("--ep-cache", default=str(CACHE_DIR))
     parser.add_argument("--cache", default=None)
     parser.add_argument("--tag", default="lang_center")
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--max-tokens", type=int, default=1024)
     parser.add_argument("--out", default=None)
+    parser.add_argument("--tracks", default="base,negated")
     args = parser.parse_args()
 
     model_dir = Path(args.model_dir)
@@ -110,7 +210,11 @@ def main():
     prototypes, parties, transform = load_reference(Path(args.ep_cache), args.tag)
 
     speeches = []
+
+    keep = set(args.tracks.split(","))
     for track, path in discover_speech_files(model_dir):
+        if track not in keep:
+            continue
         rows = extract_speeches(track, path)
         speeches.extend(rows)
         print(f"[{model_name}] {track:<8} {path.name}: {len(rows):,} speeches")
@@ -124,10 +228,20 @@ def main():
     cache = EmbeddingCache(cache_dir)
     ensure_embedded(cache, embedder, df["text"].tolist())
 
-    projected = transform_split(cache, df, transform, "ep_language")
-    similarities = projected @ prototypes.T
+    
+    llm_emb = cache.get(df["id"].tolist())
+    # center LLM texts by their OWN per-language means -> removes language AND the LLM-domain offset
+    llm_transform = FeatureTransform(kind="lang_center").fit(llm_emb, groups=df["ep_language"].to_numpy())
+    projected = llm_transform.apply(llm_emb, df["ep_language"].to_numpy())
+    similarities = projected @ prototypes.T   # prototypes stay as the EuroParl reference axes
+
     for index, party in enumerate(parties):
         df[f"sim_{party_token(party)}"] = similarities[:, index]
+
+    
+    negation_df = negation_quality_check(df, projected)
+    if negation_df is not None:
+        negation_df.to_csv(out_path.with_name(out_path.stem + "_negation_quality.csv"), index=False)
     nearest = similarities.argmax(1)
     ordered = np.sort(similarities, axis=1)
     df["nearest_party"] = [party_token(parties[i]) for i in nearest]
@@ -143,6 +257,8 @@ def main():
     print("\n=== mean cosine similarity to each prototype ===")
     for party in parties:
         print(f"  {party:<12} {df[f'sim_{party_token(party)}'].mean():.4f}")
+    
+    per_statement_report(df, parties, out_path=out_path.with_name(out_path.stem + "_per_statement.csv"))
 
 
 if __name__ == "__main__":

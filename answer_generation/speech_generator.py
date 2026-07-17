@@ -3,14 +3,14 @@ import os
 import sys
 import argparse
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 
 import pandas as pd
 
-from utils import ALL_LANGS_STR, call_api, save_checkpoint
+from utils import ALL_LANGS_STR, call_api, save_checkpoint, make_pool
 
 def load_task_lists(path: str) -> dict[str, list[str]]:
     with open(path, "r", encoding="utf-8") as f:
@@ -18,14 +18,21 @@ def load_task_lists(path: str) -> dict[str, list[str]]:
 
 
 def call_speech(statement: str, task: str, model: str, max_retries: int = 5, second_provider: bool = False) -> str | None:
-    prompt = f"Task: {task}\n\"{statement}\"\n"
+    prompt = f"{task}\n\"{statement}\"\n"
     for attempt in range(max_retries):
         try:
-            response = call_api(prompt, model, second_provider=second_provider)
-            content = response["choices"][0]["message"]["content"]
+            response = call_api(prompt, model, second_provider=second_provider, enable_thinking=False)
+            choice = response["choices"][0]
+            content = choice["message"]["content"]
             if content:
                 return content
-            raise ValueError(f"API returned empty content, full message: {response['choices'][0]['message']}")
+            finish_reason = choice.get("finish_reason")
+            if finish_reason == "length":
+                raise ValueError(
+                    "Truncated before any content (finish_reason=length): the token budget was "
+                    "exhausted (likely by reasoning). Disable thinking or raise max_tokens."
+                )
+            raise ValueError(f"API returned empty content (finish_reason={finish_reason}), full message: {choice['message']}")
         except Exception as e:
             stmt_snippet = statement[:80].replace("\n", " ")
             print(f"Error (attempt {attempt+1}/{max_retries}) [{model}] stmt={stmt_snippet!r}: {e}", flush=True)
@@ -80,7 +87,7 @@ def generate_speeches(
     else:
         already_done = 0
 
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+    with make_pool(max_workers, second_provider) as pool:
         futures = {}
         for (i, language, j), (statement, task, lang_variant) in tasks.items():
             if i in results and f"answer_{lang_variant}_v{j}" in results[i]:
@@ -155,7 +162,7 @@ def patch_speeches(
         return
 
     print(f"Patching {len(tasks)} failed responses in {output_path}", flush=True)
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+    with make_pool(max_workers, second_provider) as pool:
         futures = {
             pool.submit(call_speech, statement, task, model, second_provider=second_provider): (i, lang_variant, j)
             for (i, lang_variant, j), (statement, task) in tasks.items()
@@ -201,7 +208,8 @@ if __name__ == "__main__":
         "statements.jsonl" if args.variant == "" else "statements_negated_neutral.jsonl",
     )
     df = pd.read_json(input_file, lines=True)
-    generate_speeches(
+    run = patch_speeches if args.patch else generate_speeches
+    run(
         df,
         model=args.model,
         variant=args.variant,

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Zero-shot LLM baseline for the 7-class EU party classification task.
+"""Zero-shot LLM baseline for the 6-class EU party classification task.
 
 Prompts an OpenAI-compatible endpoint to assign each EuroParl speech to one of
-the seven EU groups, caches each response to disk so runs are resumable, and
-prints a classification report comparable to the trained mmBERT model.
+the six EU groups (ECR and ID collapsed into a single ECR+ID group, matching
+the collapsed/ split track), caches each response to disk so runs are
+resumable, and prints a classification report comparable to the trained
+mmBERT model.
 """
 import argparse
 import json
@@ -28,7 +30,7 @@ from analysis.europarl_classification import (
     load_split,
 )
 
-LABELS = ["ALDE", "ECR", "GUE/NGL", "Greens/EFA", "ID", "PPE", "S&D"]
+LABELS = ["ALDE", "ECR+ID", "GUE/NGL", "Greens/EFA", "PPE", "S&D"]
 LABEL_TO_ID = {label: index for index, label in enumerate(LABELS)}
 LABEL_ALIASES = {
     "EPP": "PPE",
@@ -44,12 +46,17 @@ LABEL_ALIASES = {
     "S AND D": "S&D",
     "SOCIALISTS AND DEMOCRATS": "S&D",
     "SD": "S&D",
-    "ID GROUP": "ID",
-    "IDENTITY AND DEMOCRACY": "ID",
-    "ECR GROUP": "ECR",
+    "ECR": "ECR+ID",
+    "ID": "ECR+ID",
+    "ECR-ID": "ECR+ID",
+    "ECR/ID": "ECR+ID",
+    "ECR AND ID": "ECR+ID",
+    "ID GROUP": "ECR+ID",
+    "IDENTITY AND DEMOCRACY": "ECR+ID",
+    "ECR GROUP": "ECR+ID",
 }
 
-DEFAULT_DATA_DIR = PROJECT_ROOT / "data" / "EuroParl Custom"
+DEFAULT_DATA_DIR = PROJECT_ROOT / "data" / "EuroParl Custom" / "collapsed"
 DEFAULT_PROMPT_FILE = PROJECT_ROOT / "prompts" / "classify_europarl_party.json"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "data" / "europarl_llm_results"
 
@@ -68,15 +75,27 @@ class ClassifierConfig:
     max_tokens: int
 
 
+def interleave_by_party(df, seed):
+    """Round-robin the rows across PARTY_COLUMN so every prefix of the result --
+    in particular each ~10k-row chunk served to the API -- is within one row of
+    perfectly balanced across parties, however the job gets paused/resumed."""
+    df = df.sample(frac=1, random_state=seed).reset_index(drop=True)
+    party_rank = df.groupby(PARTY_COLUMN).cumcount()
+    order = pd.DataFrame({"_rank": party_rank, PARTY_COLUMN: df[PARTY_COLUMN]}).sort_values(
+        ["_rank", PARTY_COLUMN], kind="stable"
+    ).index
+    return df.loc[order].reset_index(drop=True)
+
+
 def subsample(df, limit, seed):
-    if limit is None or limit >= len(df):
-        return df.sample(frac=1, random_state=seed).reset_index(drop=True)
-    fraction = limit / len(df)
-    parts = [
-        group.sample(max(1, round(len(group) * fraction)), random_state=seed)
-        for _, group in df.groupby(["language", PARTY_COLUMN])
-    ]
-    return pd.concat(parts).sample(frac=1, random_state=seed).reset_index(drop=True)
+    if limit is not None and limit < len(df):
+        fraction = limit / len(df)
+        parts = [
+            group.sample(max(1, round(len(group) * fraction)), random_state=seed)
+            for _, group in df.groupby(["language", PARTY_COLUMN])
+        ]
+        df = pd.concat(parts).reset_index(drop=True)
+    return interleave_by_party(df, seed)
 
 
 def build_prompt(config, text):
@@ -216,15 +235,15 @@ def write_predictions_csv(results, df, output_csv):
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", default="kimi-k2.6")
+    parser.add_argument("--model", default="deepseek-v4-pro")
     parser.add_argument("--split", default="test", choices=["train", "dev", "test"])
     parser.add_argument("--data_dir", default=DEFAULT_DATA_DIR, type=Path)
     parser.add_argument("--prompt_file", default=DEFAULT_PROMPT_FILE, type=Path)
     parser.add_argument("--output_dir", default=DEFAULT_OUTPUT_DIR, type=Path)
-    parser.add_argument("--max_workers", default=4, type=int)
+    parser.add_argument("--max_workers", default=10, type=int)
     parser.add_argument("--limit", default=None, type=int)
-    parser.add_argument("--second_provider", action="store_true")
-    parser.add_argument("--max_tokens", default=500, type=int)
+    parser.add_argument("--second_provider", default=True, action="store_true")
+    parser.add_argument("--max_tokens", default=1000, type=int)
     parser.add_argument("--seed", default=42, type=int)
     return parser.parse_args()
 
@@ -249,7 +268,7 @@ def main():
     )
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    base_name = f"{args.model.replace('/', '_')}_{args.split}"
+    base_name = f"{args.model.replace('/', '_')}_{args.data_dir.name}_{args.split}"
     if args.limit is not None:
         base_name += f"_n{args.limit}"
     cache_path = args.output_dir / f"{base_name}.cache.json"

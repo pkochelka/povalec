@@ -27,6 +27,25 @@ def load_split(split, data_dir, max_chars=None, keep_labels=None):
     return df.reset_index(drop=True)
 
 
+def fit_uniform_bias(logits, num_labels, iters=500, lr=0.5, eps=1e-9):
+    """Additive per-class logit bias so that argmax(logits + bias) has a uniform
+    marginal. Iterative prior-shift matching; keeps the bias whose hard prediction
+    histogram is closest (L1) to uniform. Fit on the uniform dev split, applied at
+    inference to undo the trained model's residual majority-class lean."""
+    target = np.full(num_labels, 1.0 / num_labels)
+    target_log = np.log(target)
+    bias = np.zeros(num_labels)
+    best_bias, best_dist = bias.copy(), np.inf
+    n = len(logits)
+    for _ in range(iters):
+        q = np.bincount((logits + bias).argmax(axis=1), minlength=num_labels) / n
+        dist = np.abs(q - target).sum()
+        if dist < best_dist:
+            best_dist, best_bias = dist, bias.copy()
+        bias += lr * (target_log - np.log(q + eps))
+    return best_bias
+
+
 def build_label_maps(labels):
     label_to_id = {label: index for index, label in enumerate(labels)}
     id_to_label = {index: label for label, index in label_to_id.items()}

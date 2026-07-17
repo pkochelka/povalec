@@ -8,22 +8,21 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils import ALL_LANGS_STR
 
-VARIANTS = ["", "_question", "_negated"]
+VARIANTS = ["", "_negated"]
 LANGUAGES = ALL_LANGS_STR
 MAX_RETRIES = 1
 DATASETS = [#"euandi_2019",
     "euandi_2024"]
 
 MODEL_DIRS = [
-    #"gemma-4-31b-it",
+    #"gemma-4-12b",
+    "gemma-4-31b",
     "deepseek-v4-pro",
     "qwen3.5-122b",
     "gpt-oss-120b",
-    #"grok-4.3",
-    #"mistral-small-2603",
-    "kimi-k2.6",
+    "kimi-k2.7",
     "mistral-medium-3.5",
-    "glm-5"
+    "glm-5.2"
 ]
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
@@ -34,32 +33,34 @@ def _results_dir(dataset, model_dir):
 
 
 PER_VARIANT_SCRIPTS = [
-    ("agreement_scoring.py", _DIR, "--llm", [],
-     lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"speeches_{LANGUAGES}{variant}_scored.csv")),
-    ("evaluate_cronbach_speeches.py", _DIR, "--model_dir", [],
-     lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"cronbach_speeches{variant}_{LANGUAGES}.csv")),
-    ("evaluate_euandi.py", _DIR, "--model_dir", [],
-     lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"vaa{variant}_{LANGUAGES}.csv")),
-    ("evaluate_euandi.py", _DIR, "--model_dir", ["--source", "speeches"],
-     lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"vaa_speeches{variant}_{LANGUAGES}.csv")),
-    ("evaluate_cronbach.py", _DIR, "--model_dir", [],
-     lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"cronbach{variant}_{LANGUAGES}.csv")),
-    ("classify_speeches_old.py", _DIR, "--llm", ["--source", "speeches"],
+    #("agreement_scoring.py", _DIR, "--llm", [],
+    # lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"speeches_{LANGUAGES}{variant}_scored.csv")),
+    #("evaluate_cronbach_speeches.py", _DIR, "--model_dir", [],
+    # lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"cronbach_speeches{variant}_{LANGUAGES}.csv")),
+    #("evaluate_euandi.py", _DIR, "--model_dir", ["--collapse-ecr-id"],
+    # lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"vaa{variant}_{LANGUAGES}.csv")),
+    #("evaluate_euandi.py", _DIR, "--model_dir", ["--source", "speeches", "--collapse-ecr-id"],
+    # lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"vaa_speeches{variant}_{LANGUAGES}.csv")),
+    #("evaluate_cronbach.py", _DIR, "--model_dir", [],
+    # lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"cronbach{variant}_{LANGUAGES}.csv")),
+    ("classify_speeches.py", _DIR, "--llm",
+     ["--source", "speeches", "--model_dir", "./mmBERT-base-multilabel-collapsed"],
      lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"speeches_{LANGUAGES}{variant}_classified.csv")),
-    ("classify_speeches_old.py", _DIR, "--llm", ["--source", "reasons"],
+    ("classify_speeches.py", _DIR, "--llm",
+     ["--source", "reasons", "--model_dir", "./mmBERT-base-multilabel-collapsed"],
      lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"{LANGUAGES}{variant}_classified.csv")),
 ]
 
 PER_DATASET_PLOTTING_SCRIPTS = [
-    ("plot_vaa_per_language.py",      _PLOTTING_DIR),
-    ("plot_vaa_variants_grouped.py",  _PLOTTING_DIR),
-    ("plot_vaa_speeches.py",          _PLOTTING_DIR),
-    ("plot_consistency.py",           _PLOTTING_DIR),
-    ("plot_cronbach.py",              _PLOTTING_DIR),
-    ("plot_speeches.py",              _PLOTTING_DIR),
+    #("plot_vaa_per_language.py",      _PLOTTING_DIR),
+    #("plot_vaa_variants_grouped.py",  _PLOTTING_DIR),
+    #("plot_vaa_speeches.py",          _PLOTTING_DIR),
+    #("plot_consistency.py",           _PLOTTING_DIR),
+    #("plot_cronbach.py",              _PLOTTING_DIR),
+    #("plot_speeches.py",              _PLOTTING_DIR),
     ("plot_political_bias.py",        _PLOTTING_DIR),
     ("plot_classified_parties.py",    _PLOTTING_DIR),
-    ("plot_likert_distributions.py",  _PLOTTING_DIR),
+    #("plot_likert_distributions.py",  _PLOTTING_DIR),
 ]
 
 

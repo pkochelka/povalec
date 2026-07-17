@@ -34,7 +34,7 @@ PARTY_PROBABILITY_COLUMN_PATTERN = re.compile(
     r"^party_prob_(?P<party_slug>.+?)_(?P<language>[a-z]{2})(?P<variant>|_negated|_question)_v(?P<variant_idx>\d+)$"
 )
 
-PARTY_DISPLAY_ORDER = ["GUE/NGL", "S&D", "Greens/EFA", "ALDE", "PPE", "ECR", "ID"]
+PARTY_DISPLAY_ORDER = ["GUE/NGL", "S&D", "Greens/EFA", "ALDE", "PPE", "ECR", "ID", "ECR+ID"]
 PARTY_COLORS = {
     "GUE/NGL":    "#BB1E10",
     "S&D":        "#E2061D",
@@ -43,6 +43,7 @@ PARTY_COLORS = {
     "PPE":        "#3399FF",
     "ECR":        "#0054A5",
     "ID":         "#2B3856",
+    "ECR+ID":     "#164B75",
 }
 FALLBACK_PARTY_COLOR = "#888888"
 
@@ -59,7 +60,7 @@ def save_figure(fig, output_path, **savefig_kwargs):
     fig.tight_layout()
     fig.savefig(output_path, dpi=150, **savefig_kwargs)
     plt.close(fig)
-    print(f"  Saved {output_path.relative_to(output_path.parents[3])}")
+    print(f"  Saved {output_path}")
 
 
 def color_for_party(party):
@@ -225,8 +226,7 @@ def plot_party_distribution_bar(mean_probability, predicted_share, title, output
     ax.set_xticks(bar_positions)
     ax.set_xticklabels(parties, rotation=20, ha="right", fontsize=9)
     ax.set_ylabel("Mean class probability  /  predicted-party share")
-    upper_limit = max(probabilities.max(), shares.max(), 0.2) + 0.1
-    ax.set_ylim(0.0, min(1.0, upper_limit))
+    ax.set_ylim(0.0, 1.0)
     ax.grid(axis="y", linestyle="--", alpha=0.4)
     ax.set_title(title, fontsize=11, pad=8)
     ax.legend(loc=LEGEND_UPPER_RIGHT, fontsize=8, framealpha=0.9)
@@ -284,6 +284,37 @@ def plot_language_party_heatmap(language_party_probability, title, output_path):
                         ha="center", va="center", fontsize=6,
                         color="white" if value > 0.45 else "black")
     save_figure(fig, output_path)
+
+
+def plot_all_languages_party_distribution(mean_probability_per_language, title, output_path):
+    languages = sorted(mean_probability_per_language)
+    parties_present = set().union(*(series.index for series in mean_probability_per_language.values()))
+    parties = ordered_parties_present(parties_present)
+    if not parties or not languages:
+        return
+
+    bar_positions = np.arange(len(parties))
+    group_width = 0.8
+    bar_width = group_width / len(languages)
+    language_cmap = plt.get_cmap("nipy_spectral", len(languages))
+
+    fig, ax = plt.subplots(figsize=(max(10, len(parties) * 1.6), 6.5))
+    for language_index, language in enumerate(languages):
+        probabilities = mean_probability_per_language[language].reindex(parties).fillna(0.0).to_numpy()
+        offsets = bar_positions - group_width / 2 + bar_width * (language_index + 0.5)
+        ax.bar(offsets, probabilities, width=bar_width,
+               color=language_cmap(language_index), edgecolor="black", linewidth=0.3,
+               label=language)
+
+    ax.set_xticks(bar_positions)
+    ax.set_xticklabels(parties, rotation=20, ha="right", fontsize=9)
+    ax.set_ylabel(MEAN_PROBABILITY_LABEL)
+    ax.set_ylim(0.0, 1.0)
+    ax.grid(axis="y", linestyle="--", alpha=0.4)
+    ax.set_title(title, fontsize=11, pad=8)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18), fontsize=7,
+              ncol=min(len(languages), 10), title="language")
+    save_figure(fig, output_path, bbox_inches="tight")
 
 
 def plot_speeches_vs_reasons(mean_probability_by_source, title, output_path):
@@ -527,6 +558,55 @@ def language_party_matrix_from_classifier(long_by_source_variant):
     )
 
 
+def mean_probability_and_share_per_language(long_by_source_variant):
+    frames = [long_df for long_df in long_by_source_variant.values() if not long_df.empty]
+    if not frames:
+        return {}
+    combined = pd.concat(frames, ignore_index=True)
+    return {
+        language: (mean_probability_per_party(group), predicted_party_share(group))
+        for language, group in combined.groupby("language")
+    }
+
+
+def plot_per_language_distributions_for_scope(model_name, long_by_source_variant, classified_plots_dir,
+                                              file_prefix, scope_label):
+    per_language = mean_probability_and_share_per_language(long_by_source_variant)
+    if not per_language:
+        return
+
+    for language, (mean_probability, predicted_share) in sorted(per_language.items()):
+        plot_party_distribution_bar(
+            mean_probability, predicted_share,
+            f"{model_name} – party distribution ({language}, {scope_label})",
+            classified_plots_dir / f"classified_{file_prefix}{language}.png",
+        )
+
+    plot_all_languages_party_distribution(
+        {language: mean_probability for language, (mean_probability, _) in per_language.items()},
+        f"{model_name} – party distribution by language ({scope_label})",
+        classified_plots_dir / f"classified_{file_prefix}all_languages.png",
+    )
+
+
+def plot_per_language_distributions(model_name, long_by_source_variant, plots_dir):
+    classified_plots_dir = plots_dir / "classified"
+    plot_per_language_distributions_for_scope(
+        model_name, long_by_source_variant, classified_plots_dir,
+        file_prefix="", scope_label="pooled over sources & variants",
+    )
+    for source in SOURCE_LABELS:
+        long_for_source = {
+            (csv_source, variant_label): long_df
+            for (csv_source, variant_label), long_df in long_by_source_variant.items()
+            if csv_source == source
+        }
+        plot_per_language_distributions_for_scope(
+            model_name, long_for_source, classified_plots_dir,
+            file_prefix=f"{source}_", scope_label=f"{source}, all variants",
+        )
+
+
 def language_party_matrix_from_vaa(vaa_csvs):
     frames = []
     for path in vaa_csvs.values():
@@ -723,6 +803,7 @@ def process_model(model_dir):
     plot_per_source_aggregates(model_dir.name, long_by_source_variant, plots_dir)
     plot_pooled_classifier_vs_vaa(model_dir.name, long_by_source_variant, vaa_csvs, plots_dir)
     plot_pooled_per_language_overview(model_dir.name, long_by_source_variant, vaa_csvs, plots_dir)
+    plot_per_language_distributions(model_dir.name, long_by_source_variant, plots_dir)
     write_vaa_summary_csv(model_dir, vaa_comparison_rows)
 
     classifier_mean_prob_per_source_variant = {

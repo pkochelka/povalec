@@ -20,11 +20,13 @@ from utils import flip_likert, likert_to_stance
 
 NUM_VARIANTS = 8
 NEUTRAL_LIKERT = 3
-FRAMING_SUFFIX = {"base": "", "negated": "_negated", "question": "_question"}
-FRAMING_FOR_VARIANT = {"": "base", "_negated": "negated", "_question": "question"}
-FRAMING_COLOR = {"base": "#1f77b4", "negated": "#d62728", "question": "#2ca02c"}
-RESPONSE_CSV = re.compile(r"^(?P<langs>[a-z]{2}(?:,[a-z]{2})+)(?P<variant>|_negated|_question)\.csv$")
-SPEECH_CSV = re.compile(r"^speeches_(?P<langs>[a-z]{2}(?:,[a-z]{2})+)(?P<variant>|_negated|_question)_scored\.csv$")
+FRAMING_SUFFIX = {"base": "", "negated": "_negated"}
+FRAMING_FOR_VARIANT = {"": "base", "_negated": "negated"}
+FRAMING_COLOR = {"base": "#1f77b4", "negated": "#d62728"}
+FRAMING_MARKER = {"base": "o", "negated": "X"}
+SOURCE_FILLED = {"likert": True, "speeches": False}
+RESPONSE_CSV = re.compile(r"^(?P<langs>[a-z]{2}(?:,[a-z]{2})+)(?P<variant>|_negated)\.csv$")
+SPEECH_CSV = re.compile(r"^speeches_(?P<langs>[a-z]{2}(?:,[a-z]{2})+)(?P<variant>|_negated)_scored\.csv$")
 RUN_KEYS = ["language", "variant_idx", "framing", "source"]
 
 SOURCE_POINT_MARKER = {"likert": "o", "speeches": "^"}
@@ -42,6 +44,13 @@ DIMENSION_POLES = {
     "Europe": ("More national autonomy", "More European integration"),
     "Left-Right": ("Left - progressive", "Right - conservative"),
 }
+
+
+def language_colors(languages):
+    palette = []
+    for name in ("tab20", "tab20b", "tab20c"):
+        palette.extend(plt.get_cmap(name).colors)
+    return {lang: palette[i % len(palette)] for i, lang in enumerate(sorted(languages))}
 
 
 def load_questionnaire(dataset):
@@ -162,8 +171,11 @@ def axis_label(dim, one_sided):
     return f"← {negative}      {dim}{flag}      {positive} →"
 
 
-def plot_compass(runs, x_dim, y_dim, one_sided, title, out_path):
-    fig, ax = plt.subplots(figsize=(8, 8))
+NEUTRAL_COLOR = "#1f77b4"
+
+
+def plot_compass(runs, x_dim, y_dim, one_sided, title, out_path, color_map=None, aggregate=False):
+    fig, ax = plt.subplots(figsize=(9, 9))
     setup_compass(ax, x_dim, y_dim, one_sided)
 
     all_points = runs[[x_dim, y_dim]].dropna().to_numpy()
@@ -172,41 +184,67 @@ def plot_compass(runs, x_dim, y_dim, one_sided, title, out_path):
             density = gaussian_kde(all_points.T)
             gx, gy = np.mgrid[-1:1:120j, -1:1:120j]
             grid = density(np.vstack([gx.ravel(), gy.ravel()])).reshape(gx.shape)
-            ax.contourf(gx, gy, grid, levels=12, cmap="Greys", alpha=0.35)
+            ax.contourf(gx, gy, grid, levels=12, cmap="Greys", alpha=0.25)
+            ax.contour(gx, gy, grid, levels=6, colors="gray", linewidths=0.5, alpha=0.5)
         except np.linalg.LinAlgError:
             pass
 
-    sources = [s for s in SOURCE_POINT_MARKER if s in set(runs["source"])]
-    for framing, color in FRAMING_COLOR.items():
+    sources = [s for s in SOURCE_FILLED if s in set(runs["source"])]
+    framings = [f for f in FRAMING_MARKER if f in set(runs["framing"])]
+
+    def draw_mean(points, marker, color):
+        face = color if SOURCE_FILLED[source] else "none"
+        ax.scatter(*points.mean(axis=0), s=260, marker=marker, facecolor=face,
+                   edgecolor="black" if SOURCE_FILLED[source] else color,
+                   linewidths=1.8, zorder=5)
+
+    for framing in framings:
+        marker = FRAMING_MARKER[framing]
         for source in sources:
-            points = runs[(runs["framing"] == framing) & (runs["source"] == source)][[x_dim, y_dim]].dropna().to_numpy()
-            if len(points) < 3:
+            if aggregate:
+                face = NEUTRAL_COLOR if SOURCE_FILLED[source] else "none"
+                points = runs[(runs["framing"] == framing) &
+                              (runs["source"] == source)][[x_dim, y_dim]].dropna().to_numpy()
+                if len(points):
+                    ax.scatter(points[:, 0], points[:, 1], s=10, marker=marker,
+                               facecolor=face, edgecolor=NEUTRAL_COLOR, alpha=0.25, linewidths=0.6)
+                    draw_mean(points, marker, NEUTRAL_COLOR)
                 continue
-            ax.scatter(points[:, 0], points[:, 1], s=12, color=color, alpha=0.3,
-                       marker=SOURCE_POINT_MARKER[source])
-            ax.add_patch(covariance_ellipse(points, 2, edgecolor=color, facecolor="none",
-                                             lw=1.4, ls=SOURCE_LINESTYLE[source]))
-            mean = points.mean(axis=0)
-            ax.scatter(*mean, s=170, color=color, edgecolor="black",
-                       marker=SOURCE_MEAN_MARKER[source], zorder=4)
+            for lang in sorted(runs["language"].dropna().unique()):
+                color = color_map[lang] if color_map else NEUTRAL_COLOR
+                face = color if SOURCE_FILLED[source] else "none"
+                points = runs[(runs["language"] == lang) &
+                              (runs["framing"] == framing) &
+                              (runs["source"] == source)][[x_dim, y_dim]].dropna().to_numpy()
+                if not len(points):
+                    continue
+                ax.scatter(points[:, 0], points[:, 1], s=18, marker=marker,
+                           facecolor=face, edgecolor=color, alpha=0.45, linewidths=0.8)
+                draw_mean(points, marker, color)
 
     ax.set_title(title, fontsize=11, pad=8)
-    add_framing_source_legends(ax, set(runs["framing"]), sources)
+    show_languages = color_map if color_map and len(color_map) > 1 else None
+    add_language_framing_legends(ax, show_languages, framings, sources)
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  Saved {out_path}")
 
 
-def add_framing_source_legends(ax, framings, sources):
-    framing_handles = [Line2D([], [], color=c, marker="s", ls="", label=f)
-                       for f, c in FRAMING_COLOR.items() if f in framings]
-    source_handles = [Line2D([], [], color="gray", marker=SOURCE_MEAN_MARKER[s],
-                             ls=SOURCE_LINESTYLE[s], label=f"{s} (★/X = mean, 2σ ellipse)")
+def add_language_framing_legends(ax, colors, framings, sources):
+    if colors:
+        lang_handles = [Line2D([], [], color=c, marker="o", ls="", label=lang)
+                        for lang, c in colors.items()]
+        ax.legend(handles=lang_handles, loc="upper left", bbox_to_anchor=(1.02, 1.0),
+                  fontsize=7, title="language")
+        return
+    style_handles = [Line2D([], [], color="gray", marker=FRAMING_MARKER[f], ls="",
+                            label=f"{f}  (small = run, large = mean)") for f in framings]
+    style_handles += [Line2D([], [], color="gray", marker="o", ls="",
+                             markerfacecolor="gray" if SOURCE_FILLED[s] else "none",
+                             label=f"{s}  ({'filled' if SOURCE_FILLED[s] else 'hollow'})")
                       for s in sources]
-    first = ax.legend(handles=framing_handles, loc="upper left", fontsize=8, title="framing")
-    ax.add_artist(first)
-    ax.legend(handles=source_handles, loc="upper right", fontsize=8, title="source")
+    ax.legend(handles=style_handles, loc="upper right", fontsize=8, title="framing / source")
 
 
 def violin_series(responses, framing, source, dims, positions_for_dim):
@@ -312,9 +350,22 @@ def process_model(model_dir, questionnaire, dims, one_sided, x_dim, y_dim):
 
     out_dir = model_dir / "plots"
     out_dir.mkdir(exist_ok=True)
+    compass_dir = out_dir / "political_compasses"
+    compass_dir.mkdir(exist_ok=True)
+
+    base_title = f"{model_dir.name} – political compass ({x_dim} × {y_dim}, per-run)"
     plot_compass(run_positions, x_dim, y_dim, one_sided,
-                 f"{model_dir.name} – political compass ({x_dim} × {y_dim}, per-run)",
-                 out_dir / "political_compass.png")
+                 f"{base_title}, all languages",
+                 out_dir / "political_compass.png", aggregate=True)
+
+    color_map = language_colors(run_positions["language"].dropna().unique())
+    plot_compass(run_positions, x_dim, y_dim, one_sided,
+                 f"{base_title}, by language",
+                 compass_dir / "political_compass_by_language.png", color_map=color_map)
+    for lang in sorted(color_map):
+        plot_compass(run_positions[run_positions["language"] == lang], x_dim, y_dim, one_sided,
+                     f"{base_title}, {lang}",
+                     compass_dir / f"political_compass_{lang}.png", color_map={lang: color_map[lang]})
     for granularity, label in VIOLIN_GRANULARITIES.items():
         responses = melt_positions(aggregate_positions(projected, dims, granularity), dims)
         plot_violins(responses, dims, one_sided,
@@ -326,7 +377,7 @@ def process_model(model_dir, questionnaire, dims, one_sided, x_dim, y_dim):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", default="euandi_2024")
-    parser.add_argument("--model", default=None)
+    parser.add_argument("--model", default="deepseek-v4-pro")
     parser.add_argument("--x-dim", default="Left-Right")
     parser.add_argument("--y-dim", default="Europe")
     args = parser.parse_args()

@@ -19,6 +19,7 @@ pyarrow>=14
 torch>=2.2
 transformers>=4.46
 accelerate>=1.1.0
+peft>=0.17          # LoRA fine-tuning in analysis/train_ideo_encoder.py
 datasets>=2.19
 sentencepiece>=0.2.0
 protobuf>=4.21

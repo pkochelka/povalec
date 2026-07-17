@@ -2,14 +2,14 @@ import os
 import sys
 import json
 import argparse
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 import time
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 
 import pandas as pd
-from utils import ALL_LANGS_STR, call_api, extract_json, save_checkpoint
+from utils import ALL_LANGS_STR, call_api, extract_json, save_checkpoint, make_pool
 
 def load_prompts(path: str) -> tuple[dict[str, str], dict[str, list[str]]]:
     with open(path, encoding="utf-8") as f:
@@ -88,7 +88,7 @@ def process_survey(
     else:
         already_done = 0
 
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+    with make_pool(max_workers, second_provider) as pool:
         futures = {}
         for (i, language, j), (statement, options, lang_variant) in tasks.items():
             if i in results and f"choice_{lang_variant}_v{j}" in results[i]:
@@ -165,7 +165,7 @@ def patch_survey(
         return
 
     print(f"Patching {len(tasks)} failed/refused responses in {output_path}", flush=True)
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+    with make_pool(max_workers, second_provider) as pool:
         futures = {
             pool.submit(call_survey, statement, model, options, language, prompts, second_provider=second_provider): (i, lang_variant, j)
             for (i, language, lang_variant, j), (statement, options) in tasks.items()

@@ -7,6 +7,7 @@ during the loss, so the model is optimised for a uniform label distribution: at
 inference the plain argmax of the logits is Bayes-optimal for the uniform dev/test.
 The best checkpoint is picked on the uniform dev split and evaluated once on test.
 """
+import functools
 import os
 import sys
 import json
@@ -24,6 +25,17 @@ from transformers import (
     Trainer, TrainingArguments, set_seed,
 )
 
+# accelerate probes for the optional lomo_optim package on EVERY optimizer
+# step; with the package absent, importlib re-lists site-packages whenever its
+# finder cache is stale. On a network-mounted venv a single transient I/O
+# error there kills the whole training run, so cache the probe to one call.
+try:
+    import accelerate.optimizer
+    accelerate.optimizer.is_lomo_available = functools.cache(
+        accelerate.optimizer.is_lomo_available)
+except (ImportError, AttributeError):
+    pass
+
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
@@ -33,23 +45,22 @@ from analysis.europarl_classification import (
     attach_labels,
     build_label_maps,
     classification_report_text,
+    fit_uniform_bias,
     load_split,
     per_language_f1_report,
 )
 
 MODEL_NAME = "jhu-clsp/mmBERT-base"
 MODEL_SLUG = MODEL_NAME.split("/")[-1]
-DATA_DIR = os.path.join(PROJECT_ROOT, "data", "EuroParl Custom")
-OUTPUT_DIR = f"{MODEL_SLUG}-logitadj"
+DATA_DIR = os.path.join(PROJECT_ROOT, "data", "EuroParl Custom", "balanced")
+OUTPUT_DIR = f"{MODEL_SLUG}-logitadj-balanced"
 MAX_LEN = 512
 SEED = 42
 MAX_EPOCHS = 6
 EARLY_STOPPING_PATIENCE = 2
 LOGIT_ADJUSTMENT_TAU = 1.0
-LABEL_SMOOTHING = 0.0   # >0 softens targets during training to curb overconfidence
 EPSILON = 1e-12
 BEST_METRIC = "f1_macro_mean_lang"
-CALIBRATION_BINS = 15
 
 
 @dataclass
@@ -112,7 +123,7 @@ class LogitAdjustedTrainer(Trainer):
         labels = inputs.pop("labels")
         outputs = model(**inputs)
         adjusted_logits = outputs.logits + self.logit_adjustment
-        loss = F.cross_entropy(adjusted_logits, labels, label_smoothing=LABEL_SMOOTHING)
+        loss = F.cross_entropy(adjusted_logits, labels)
         return (loss, outputs) if return_outputs else loss
 
 
@@ -129,63 +140,6 @@ def logit_adjustment_for(dataset, num_labels, device):
     priors = counts / counts.sum()
     return torch.tensor(
         LOGIT_ADJUSTMENT_TAU * np.log(priors + EPSILON), dtype=torch.float, device=device,
-    )
-
-
-def softmax_np(logits):
-    shifted = logits - logits.max(axis=1, keepdims=True)
-    exp = np.exp(shifted)
-    return exp / exp.sum(axis=1, keepdims=True)
-
-
-def calibration_metrics(probs, labels, num_labels, n_bins=CALIBRATION_BINS):
-    """Expected calibration error, NLL and Brier score for predicted probabilities."""
-    confidences = probs.max(axis=1)
-    predictions = probs.argmax(axis=1)
-    correct = (predictions == labels).astype(float)
-
-    edges = np.linspace(0.0, 1.0, n_bins + 1)
-    ece = 0.0
-    for low, high in zip(edges[:-1], edges[1:]):
-        in_bin = (confidences > low) & (confidences <= high)
-        if in_bin.any():
-            ece += in_bin.mean() * abs(correct[in_bin].mean() - confidences[in_bin].mean())
-
-    nll = float(-np.log(probs[np.arange(len(labels)), labels] + EPSILON).mean())
-    onehot = np.eye(num_labels)[labels]
-    brier = float(((probs - onehot) ** 2).sum(axis=1).mean())
-    return {"ece": float(ece), "nll": nll, "brier": brier}
-
-
-def fit_temperature(logits, labels, device):
-    """Single-parameter temperature that minimises dev NLL (Guo et al. 2017).
-
-    Optimised in log-space so the temperature stays positive. Dividing the logits
-    by T rescales confidence without ever changing the argmax (accuracy is fixed).
-    """
-    logits_t = torch.tensor(logits, dtype=torch.float, device=device)
-    labels_t = torch.tensor(labels, dtype=torch.long, device=device)
-    log_temperature = torch.zeros(1, device=device, requires_grad=True)
-    optimizer = torch.optim.LBFGS([log_temperature], lr=0.1, max_iter=100)
-
-    def closure():
-        optimizer.zero_grad()
-        loss = F.cross_entropy(logits_t / log_temperature.exp(), labels_t)
-        loss.backward()
-        return loss
-
-    optimizer.step(closure)
-    return float(log_temperature.exp().item())
-
-
-def calibration_report_text(calibration):
-    raw, tempered = calibration["raw"], calibration["tempered"]
-    return (
-        "\n=== CALIBRATION (test) ===\n"
-        f"Temperature (fit on dev): {calibration['temperature']:.4f}\n"
-        f"{'':<12}{'ECE':>10}{'NLL':>10}{'Brier':>10}\n"
-        f"{'raw':<12}{raw['ece']:>10.4f}{raw['nll']:>10.4f}{raw['brier']:>10.4f}\n"
-        f"{'tempered':<12}{tempered['ece']:>10.4f}{tempered['nll']:>10.4f}{tempered['brier']:>10.4f}\n"
     )
 
 
@@ -294,57 +248,48 @@ def train_and_evaluate(data, tokenizer, hf_token, device):
     best_epoch = max(1, round(best["epoch"]))
     print(f"Best dev {BEST_METRIC}={best[f'eval_{BEST_METRIC}']:.4f} at epoch {best_epoch}")
 
-    # Temperature scaling: fit T on the uniform dev logits, apply to test probs.
-    dev_pred = trainer.predict(data.dev)
-    temperature = fit_temperature(dev_pred.predictions, dev_pred.label_ids, device)
-    print(f"Fitted temperature on dev: T={temperature:.4f}")
+    # Per-class bias that flattens the argmax marginal to uniform, fit on dev only.
+    metrics_fn.current_languages = data.dev_langs
+    dev_logits = trainer.predict(data.dev).predictions
+    biases = fit_uniform_bias(dev_logits, data.num_labels)
+    print("Uniform-marginal bias (fit on dev): "
+          + ", ".join(f"{name}={b:+.3f}" for name, b in zip(data.target_names, biases)))
 
     metrics_fn.current_languages = data.test_langs
     predictions = trainer.predict(data.test)
     trainer.save_model(OUTPUT_DIR)
 
-    test_logits = predictions.predictions
     y_test = predictions.label_ids
-    y_pred = np.argmax(test_logits, axis=-1)
-
-    calibration = {
-        "temperature": temperature,
-        "raw":      calibration_metrics(softmax_np(test_logits), y_test, data.num_labels),
-        "tempered": calibration_metrics(softmax_np(test_logits / temperature), y_test, data.num_labels),
-    }
-
+    y_pred = np.argmax(predictions.predictions + biases, axis=-1)
     release(model, trainer, device)
-    return best_epoch, y_test, y_pred, calibration
+    return best_epoch, biases, y_test, y_pred
 
 
-def save_manifest(output_dir, data, num_epochs, temperature):
+def save_manifest(output_dir, data, num_epochs, biases):
     manifest = {
         "model_name": MODEL_NAME,
         "seed": SEED,
         "max_len": MAX_LEN,
         "num_epochs": num_epochs,
         "logit_adjustment_tau": LOGIT_ADJUSTMENT_TAU,
-        "label_smoothing": LABEL_SMOOTHING,
-        "temperature": temperature,
         "label2id": data.label2id,
-        "inference": "label = argmax(logits); probabilities = softmax(logits / temperature)",
+        "biases": [float(b) for b in biases],
+        "inference": "argmax(model logits + biases)",
     }
     with open(os.path.join(output_dir, "manifest.json"), "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
 
 
-def write_results_file(output_tag, num_epochs, test_f1, calibration, overall_report,
+def write_results_file(output_tag, num_epochs, test_f1, overall_report,
                        language_summary, per_language_reports):
     path = f"results_{output_tag}.txt"
     with open(path, "w") as f:
         f.write(output_tag + "\n" + "-" * 40 + "\n")
         f.write(f"Seed: {SEED}\n")
         f.write(f"Logit adjustment tau: {LOGIT_ADJUSTMENT_TAU}\n")
-        f.write(f"Label smoothing: {LABEL_SMOOTHING}\n")
         f.write(f"Best epoch from dev search: {num_epochs}\n")
-        f.write(f"Test f1_macro: {test_f1:.4f}\n")
-        f.write(calibration_report_text(calibration))
-        f.write("\n=== OVERALL ===\n" + overall_report)
+        f.write(f"Test f1_macro: {test_f1:.4f}\n\n")
+        f.write("=== OVERALL ===\n" + overall_report)
         f.write(language_summary)
         f.write("\n".join(per_language_reports))
     print(f"\nSaved {path}")
@@ -358,14 +303,13 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, token=hf_token)
     data = prepare_training_data(DATA_DIR, tokenizer)
 
-    best_epoch, y_test, y_pred, calibration = train_and_evaluate(data, tokenizer, hf_token, device)
+    best_epoch, biases, y_test, y_pred = train_and_evaluate(data, tokenizer, hf_token, device)
 
     test_f1 = f1_score(y_test, y_pred, average="macro", zero_division=0)
-    save_manifest(OUTPUT_DIR, data, best_epoch, calibration["temperature"])
+    save_manifest(OUTPUT_DIR, data, best_epoch, biases)
 
     overall_report = classification_report_text(y_test, y_pred, data.target_names)
     print(f"\n=== OVERALL (test f1_macro={test_f1:.4f}) ===\n" + overall_report)
-    print(calibration_report_text(calibration))
     language_summary, per_language_reports = per_language_f1_report(
         y_test, y_pred, data.test_langs, data.target_names,
     )
@@ -374,10 +318,10 @@ def main():
 
     output_tag = f"{MODEL_SLUG}_logitadj_ep{best_epoch}_len{MAX_LEN}"
     write_results_file(
-        output_tag, best_epoch, test_f1, calibration,
-        overall_report, language_summary, per_language_reports,
+        output_tag, best_epoch, test_f1, overall_report, language_summary, per_language_reports,
     )
 
 
 if __name__ == "__main__":
     main()
+

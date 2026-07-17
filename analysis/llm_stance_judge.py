@@ -26,10 +26,15 @@ from utils import call_api, extract_json, likert_to_stance, load_dataframe, save
 from analysis.sample_speeches_for_labeling import load_speech_pool, STANCE_BIN_EDGES, LABEL_PATH
 
 PROMPT_PATH = os.path.join(PROJECT_ROOT, "prompts", "stance_judge.json")
-OUTPUT_PATH = os.path.join(PROJECT_ROOT, "data", "euandi_2024_results", "stance_speeches_llm_labeled.csv")
-CHECKPOINT_PATH = OUTPUT_PATH + ".ckpt.json"
+RESULTS_DIR = os.path.join(PROJECT_ROOT, "data", "euandi_2024_results")
 MAX_TEXT_CHARS = 6000
 SEED = 42
+
+
+def output_paths(judge_model, source_models):
+    tag = f"{judge_model}_on_{'+'.join(source_models)}"
+    output_path = os.path.join(RESULTS_DIR, f"stance_speeches_llm_labeled_{tag}.csv")
+    return output_path, output_path + ".ckpt.json"
 
 
 def load_prompt():
@@ -56,6 +61,18 @@ def stratified_sample(pool, n_samples):
     sample = sample.sample(min(n_samples, len(sample)), random_state=SEED).reset_index(drop=True)
     print("Judging per NLI-stance bin:\n", sample["bin"].value_counts().sort_index().to_dict())
     return sample
+
+
+def interleave_by_bin(sample, seed):
+    """Round-robin rows across NLI-stance bins so every prefix served to the
+    judge -- in particular each ~10k-row chunk -- stays within one row of
+    balanced agree/disagree coverage, however the run gets paused/resumed."""
+    sample = sample.sample(frac=1, random_state=seed).reset_index(drop=True)
+    bin_rank = sample.groupby("bin").cumcount()
+    order = pd.DataFrame({"_rank": bin_rank, "bin": sample["bin"]}).sort_values(
+        ["_rank", "bin"], kind="stable"
+    ).index
+    return sample.loc[order].reset_index(drop=True)
 
 
 def balanced_sample(pool):
@@ -93,18 +110,18 @@ def judge_one(statement, text, model, prompt_template, second_provider, max_retr
     return None
 
 
-def load_checkpoint():
-    if not os.path.exists(CHECKPOINT_PATH):
+def load_checkpoint(checkpoint_path):
+    if not os.path.exists(checkpoint_path):
         return {}
-    with open(CHECKPOINT_PATH, encoding="utf-8") as f:
+    with open(checkpoint_path, encoding="utf-8") as f:
         return {int(k): v for k, v in json.load(f).items()}
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--judge_model", default="kimi-k2.6")
-    parser.add_argument("--second_provider", action="store_true")
-    parser.add_argument("--limit", default=None, type=int,
+    parser.add_argument("--judge_model", default="deepseek-v4-pro")
+    parser.add_argument("--second_provider", default=True, action="store_true")
+    parser.add_argument("--limit", default=40000, type=int,
                         help="Max speeches to label; default labels the whole pool.")
     parser.add_argument("--balanced", action="store_true",
                         help="Downsample over-represented NLI-stance bins to the median bin size "
@@ -112,22 +129,29 @@ def main():
     parser.add_argument("--reuse_labels", default=None,
                         help="Path to an existing labeled CSV; speeches whose answer_text is "
                              "already labeled there are reused instead of re-judged.")
-    parser.add_argument("--max_workers", default=4, type=int)
+    parser.add_argument("--max_workers", default=10, type=int)
+    parser.add_argument("--source_models", default="deepseek-v4-pro,glm-5.2,kimi-k2.7",
+                        help="Comma-separated models whose scored speech files feed the pool.")
     args = parser.parse_args()
+    source_models = args.source_models.split(",")
+    output_path, checkpoint_path = output_paths(args.judge_model, source_models)
 
     prompt_template = load_prompt()
-    pool = exclude_handlabeled(load_speech_pool())
+    pool = exclude_handlabeled(load_speech_pool(models=source_models))
     if args.balanced:
         sample = balanced_sample(pool)
     elif args.limit is None:
-        sample = pool.sample(frac=1.0, random_state=SEED).reset_index(drop=True)
+        pool = pool.copy()
+        pool["bin"] = pd.cut(pool["nli_stance"], bins=STANCE_BIN_EDGES, right=False, labels=False)
+        sample = pool.reset_index(drop=True)
         print(f"Labeling the full pool: {len(sample)} speeches")
     else:
         sample = stratified_sample(pool, args.limit)
+    sample = interleave_by_bin(sample, SEED)
 
-    choices = load_checkpoint()
+    choices = load_checkpoint(checkpoint_path)
     if choices:
-        print(f"Resuming: {len(choices)}/{len(sample)} already judged", flush=True)
+        print(f"Resuming: {len(choices)}/{len(sample)} already judged ({checkpoint_path})", flush=True)
     if args.reuse_labels and os.path.exists(args.reuse_labels):
         prior = load_dataframe(args.reuse_labels)
         prior_choice = dict(zip(prior["answer_text"],
@@ -151,7 +175,7 @@ def main():
             choices[futures[future]] = future.result()
             if done % 50 == 0:
                 print(f"  {done}/{len(futures)} judged", flush=True)
-                save_checkpoint(CHECKPOINT_PATH, choices)
+                save_checkpoint(checkpoint_path, choices)
 
     sample["llm_choice"] = sample.index.map(choices)
     labeled = sample.dropna(subset=["llm_choice"]).copy()
@@ -160,11 +184,11 @@ def main():
 
     columns = ["model", "paraphrase", "language", "variant", "statement",
                "statement_text", "answer_text", "nli_stance", "llm_choice", "llm_stance"]
-    labeled[columns].to_csv(OUTPUT_PATH, sep=";", encoding="utf-8-sig", index=False)
-    if os.path.exists(CHECKPOINT_PATH):
-        os.remove(CHECKPOINT_PATH)
+    labeled[columns].to_csv(output_path, sep=";", encoding="utf-8-sig", index=False)
+    if os.path.exists(checkpoint_path):
+        os.remove(checkpoint_path)
 
-    print(f"\nLabeled {len(labeled)}/{len(sample)} speeches -> {OUTPUT_PATH}")
+    print(f"\nLabeled {len(labeled)}/{len(sample)} speeches -> {output_path}")
     print("LLM stance distribution:\n",
           labeled["llm_stance"].round(2).value_counts().sort_index().to_dict())
     agreement = labeled[["llm_stance", "nli_stance"]].corr().iloc[0, 1]

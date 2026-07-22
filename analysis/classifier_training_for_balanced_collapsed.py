@@ -4,24 +4,19 @@
 Same setup as classifier_training_for_balanced, but over the 6 collapsed
 parties: train is data/EuroParl Custom/collapsed/train_balanced.parquet
 (party- and language-balanced, ECR and ID merged into "ECR+ID"), dev and test
-are the rebalanced uniform collapsed splits from the same directory. All
-three splits are uniform across parties, so the model is trained with plain
-cross-entropy and no imbalance correction.
-
-The model is then calibrated on dev only, in two steps applied at inference
-as probs = softmax((logits + biases) / temperature):
-  1. per-class additive biases flatten the argmax marginal to uniform,
-     undoing any residual class lean (see classifier_training.py);
-  2. a single softmax temperature (Guo et al. 2017, NLL-minimised as in
-     recalibrate_temperature.py) rescales the probabilities so each class's
-     mean probability matches its argmax share as closely as possible.
-Dev and test are scored through the identical argmax(logits + biases) path.
+are the uniform collapsed splits from the same directory. All three splits are
+uniform across parties, so the model is trained with plain cross-entropy, and
+dev and test are scored through the identical plain argmax(logits) path -- no
+bias or temperature correction. That keeps the two numbers directly comparable
+to each other and to the non-collapsed balanced model (which reports the same
+way): on a balanced train the label prior is already uniform, so argmax(logits)
+is Bayes-optimal for the uniform dev/test and a prior-shift correction is neither
+needed nor principled.
 """
 import json
 import os
 import sys
 
-import numpy as np
 from datasets import ClassLabel, Dataset, DatasetDict
 from dotenv import load_dotenv
 from transformers import AutoTokenizer, DataCollatorWithPadding, EarlyStoppingCallback, Trainer
@@ -33,7 +28,6 @@ from analysis.europarl_classification import (
     PARTY_COLUMN,
     attach_labels,
     build_label_maps,
-    fit_uniform_bias,
     load_split,
 )
 from analysis.classifier_training import (
@@ -51,8 +45,7 @@ from analysis.classifier_training import (
     select_device,
     training_arguments,
 )
-from analysis.classifier_training_for_balanced import report_split
-from analysis.recalibrate_temperature import calibration_metrics, fit_temperature, softmax_np
+from analysis.classifier_training_for_balanced import predict_labels, report_split
 
 DATA_DIR = os.path.join(PROJECT_ROOT, "data", "EuroParl Custom", "collapsed")
 OUTPUT_DIR = f"{MODEL_SLUG}-balanced-collapsed"
@@ -116,49 +109,20 @@ def train_and_evaluate(data, tokenizer, hf_token, device):
         compute_metrics=metrics_fn,
         callbacks=[EarlyStoppingCallback(early_stopping_patience=EARLY_STOPPING_PATIENCE)],
     )
-    trainer.train()
+    trainer.train()  # load_best_model_at_end restores the best-dev checkpoint
 
     scored = [entry for entry in trainer.state.log_history if f"eval_{BEST_METRIC}" in entry]
     best_epoch = max(1, round(max(scored, key=lambda e: e[f"eval_{BEST_METRIC}"])["epoch"]))
     print(f"Best dev {BEST_METRIC} at epoch {best_epoch}")
 
-    # Both calibration steps are fit on dev only; the temperature is fit on the
-    # already bias-adjusted logits, matching the inference formula.
-    metrics_fn.current_languages = data.dev_langs
-    dev_out = trainer.predict(data.dev)
-    biases = fit_uniform_bias(dev_out.predictions, data.num_labels)
-    print("Uniform-marginal bias (fit on dev): "
-          + ", ".join(f"{name}={b:+.3f}" for name, b in zip(data.target_names, biases)))
-    temperature = fit_temperature(dev_out.predictions + biases, dev_out.label_ids, device)
-    print(f"Temperature (fit on dev): {temperature:.4f}")
-
-    metrics_fn.current_languages = data.test_langs
-    test_out = trainer.predict(data.test)
+    dev = predict_labels(trainer, data.dev, data.dev_langs, metrics_fn)
+    test = predict_labels(trainer, data.test, data.test_langs, metrics_fn)
     trainer.save_model(OUTPUT_DIR)
     release(model, trainer, device)
-    return best_epoch, biases, temperature, dev_out, test_out
+    return best_epoch, dev, test
 
 
-def calibration_summary(name, logits, y_true, biases, temperature, num_labels, target_names):
-    """Per-class argmax share vs mean calibrated probability, plus ECE/NLL/Brier."""
-    adjusted = logits + biases
-    probs = softmax_np(adjusted / temperature)
-    shares = np.bincount(adjusted.argmax(axis=-1), minlength=num_labels) / len(adjusted)
-    mean_probs = probs.mean(axis=0)
-    metrics = calibration_metrics(probs, y_true, num_labels)
-
-    lines = [f"=== CALIBRATION ({name}) ===",
-             f"temperature={temperature:.4f}  ece={metrics['ece']:.4f}  "
-             f"nll={metrics['nll']:.4f}  brier={metrics['brier']:.4f}",
-             f"{'party':<12}{'argmax_share':>13}{'mean_prob':>11}{'gap':>9}"]
-    for c, party in enumerate(target_names):
-        lines.append(f"{party:<12}{shares[c]:>13.4f}{mean_probs[c]:>11.4f}"
-                     f"{mean_probs[c] - shares[c]:>+9.4f}")
-    lines.append(f"max |gap|: {np.abs(mean_probs - shares).max():.4f}")
-    return "\n".join(lines)
-
-
-def save_manifest(output_dir, data, num_epochs, biases, temperature):
+def save_manifest(output_dir, data, num_epochs):
     os.makedirs(output_dir, exist_ok=True)
     manifest = {
         "model_name": MODEL_NAME,
@@ -166,16 +130,13 @@ def save_manifest(output_dir, data, num_epochs, biases, temperature):
         "max_len": MAX_LEN,
         "num_epochs": num_epochs,
         "label2id": data.label2id,
-        "biases": [float(b) for b in biases],
-        "temperature": float(temperature),
-        "inference": "probs = softmax((model logits + biases) / temperature); "
-                     "argmax for the hard label",
+        "inference": "argmax(model logits)",
     }
     with open(os.path.join(output_dir, "manifest.json"), "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
 
 
-def write_results_file(output_tag, num_epochs, dev_report, test_report, calibration):
+def write_results_file(output_tag, num_epochs, dev_report, test_report):
     dev_f1, dev_overall, dev_summary, dev_per_language = dev_report
     test_f1, test_overall, test_summary, test_per_language = test_report
     path = f"results_{output_tag}.txt"
@@ -185,7 +146,6 @@ def write_results_file(output_tag, num_epochs, dev_report, test_report, calibrat
         f.write(f"Best epoch from dev search: {num_epochs}\n")
         f.write(f"Dev f1_macro:  {dev_f1:.4f}\n")
         f.write(f"Test f1_macro: {test_f1:.4f}\n\n")
-        f.write(calibration + "\n\n")
         f.write("=== DEV ===\n" + dev_overall + dev_summary + "\n".join(dev_per_language) + "\n\n")
         f.write("=== TEST ===\n" + test_overall + test_summary + "\n".join(test_per_language))
     print(f"\nSaved {path}")
@@ -199,26 +159,14 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, token=hf_token)
     data = prepare_training_data(DATA_DIR, tokenizer)
 
-    best_epoch, biases, temperature, dev_out, test_out = train_and_evaluate(
-        data, tokenizer, hf_token, device)
+    best_epoch, dev, test = train_and_evaluate(data, tokenizer, hf_token, device)
 
-    dev_pred = (dev_out.predictions + biases).argmax(axis=-1)
-    test_pred = (test_out.predictions + biases).argmax(axis=-1)
+    dev_report = report_split("dev", *dev, data.dev_langs, data.target_names)
+    test_report = report_split("test", *test, data.test_langs, data.target_names)
 
-    dev_report = report_split("dev", dev_out.label_ids, dev_pred, data.dev_langs, data.target_names)
-    test_report = report_split("test", test_out.label_ids, test_pred, data.test_langs, data.target_names)
-
-    calibration = "\n\n".join([
-        calibration_summary("dev", dev_out.predictions, dev_out.label_ids,
-                            biases, temperature, data.num_labels, data.target_names),
-        calibration_summary("test", test_out.predictions, test_out.label_ids,
-                            biases, temperature, data.num_labels, data.target_names),
-    ])
-    print("\n" + calibration)
-
-    save_manifest(OUTPUT_DIR, data, best_epoch, biases, temperature)
+    save_manifest(OUTPUT_DIR, data, best_epoch)
     output_tag = f"{MODEL_SLUG}_balanced_collapsed_ep{best_epoch}_len{MAX_LEN}"
-    write_results_file(output_tag, best_epoch, dev_report, test_report, calibration)
+    write_results_file(output_tag, best_epoch, dev_report, test_report)
 
 
 if __name__ == "__main__":

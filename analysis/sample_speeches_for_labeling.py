@@ -7,6 +7,7 @@ deduplicated and stratified across NLI-stance bins for balanced agree/disagree
 coverage. The NLI proxy is written to a sidecar, never the labeling file, so it
 cannot anchor the annotator.
 """
+import argparse
 import os
 import re
 import sys
@@ -71,19 +72,30 @@ def melt_speeches(frame, model, paraphrase):
     return pd.concat(records, ignore_index=True)
 
 
-def load_speech_pool():
+def load_speech_pool(models=None):
+    models = SOURCE_MODELS if models is None else models
     frames = []
-    for model in SOURCE_MODELS:
+    for model in models:
         for suffix in PARAPHRASE_SUFFIXES:
             path = os.path.join(DATA_DIR, model, f"speeches_{ALL_LANGS_STR}{suffix}_scored.csv")
+            if not os.path.exists(path):
+                print(f"  [{model}{suffix}] no scored file at {path}, skipping.")
+                continue
             paraphrase = suffix.lstrip("_") or "base"
             frames.append(melt_speeches(load_dataframe(path), model, paraphrase))
     pool = pd.concat(frames, ignore_index=True)
     pool = pool.dropna(subset=["answer_text", "nli_stance"])
     pool = pool[pool["answer_text"].str.len() > 0]
     pool = pool.drop_duplicates(subset=["answer_text"]).reset_index(drop=True)
-    print(f"Speech pool: {len(pool)} unique answers across {SOURCE_MODELS}")
+    print(f"Speech pool: {len(pool)} unique answers across {models}")
     return pool
+
+
+def exclude_handlabeled(pool):
+    if not os.path.exists(LABEL_PATH):
+        return pool
+    handlabeled = set(load_dataframe(LABEL_PATH)["answer_text"].astype("string").str.strip())
+    return pool[~pool["answer_text"].isin(handlabeled)].reset_index(drop=True)
 
 
 def stratified_sample(pool):
@@ -111,21 +123,110 @@ def stratified_sample(pool):
     return sample
 
 
+def water_fill(capacities, total):
+    """Distribute `total` over keys, equal shares capped at each capacity (see
+    preprocessing/build_collapsed_splits.py for the same routine over languages)."""
+    alloc = dict.fromkeys(capacities, 0)
+    active = [key for key, cap in capacities.items() if cap > 0]
+    remaining = min(total, sum(capacities.values()))
+    while remaining > 0 and active:
+        share = remaining // len(active)
+        if share == 0:
+            for key in sorted(active, key=lambda k: capacities[k] - alloc[k], reverse=True):
+                if remaining == 0:
+                    break
+                alloc[key] += 1
+                remaining -= 1
+            break
+        for key in list(active):
+            give = min(share, capacities[key] - alloc[key])
+            alloc[key] += give
+            remaining -= give
+            if alloc[key] >= capacities[key]:
+                active.remove(key)
+    return alloc
+
+
+def stratified_sample_by_language(pool, languages, target_samples, seed=SEED):
+    """Water-filled three-level stratification: an even quota per language,
+    then within each language an even quota per NLI-stance bin, then within
+    each (language, bin) cell an even quota per paraphrase (base/negated) --
+    so a scarce cell (e.g. few neutral-agreement French speeches) just caps
+    out and the shortfall spreads to the other bins, instead of skewing the
+    whole sample toward whichever language/bin/paraphrase is most abundant.
+    Prompt variant (v0-v4) is left unconstrained: crossing it too would mostly
+    fragment the already-scarce neutral bins into near-empty cells."""
+    pool = pool[pool["language"].isin(languages)].copy()
+    pool["bin"] = pd.cut(pool["nli_stance"], bins=STANCE_BIN_EDGES, right=False, labels=False)
+    rng = np.random.default_rng(seed)
+
+    lang_capacities = {lang: int((pool["language"] == lang).sum()) for lang in languages}
+    lang_quota = water_fill(lang_capacities, target_samples)
+
+    chosen = []
+    for lang, quota in lang_quota.items():
+        lang_pool = pool[pool["language"] == lang]
+        bin_quota = water_fill(lang_pool["bin"].value_counts().to_dict(), quota)
+        for bin_id, n in bin_quota.items():
+            if n == 0:
+                continue
+            cell_pool = lang_pool[lang_pool["bin"] == bin_id]
+            paraphrase_quota = water_fill(cell_pool["paraphrase"].value_counts().to_dict(), n)
+            for paraphrase, k in paraphrase_quota.items():
+                if k > 0:
+                    group = cell_pool[cell_pool["paraphrase"] == paraphrase]
+                    chosen.append(group.sample(k, random_state=rng.integers(1 << 31)))
+
+    sample = pd.concat(chosen, ignore_index=True).sample(frac=1.0, random_state=seed).reset_index(drop=True)
+    sample.insert(0, "id", [f"sp{i:04d}" for i in range(len(sample))])
+    print(f"Sampled {len(sample)}/{target_samples} requested, per language x bin:\n",
+          sample.groupby(["language", "bin"], observed=True).size().unstack(fill_value=0).to_string())
+    print(f"\nper language x paraphrase:\n",
+          sample.groupby(["language", "paraphrase"], observed=True).size().unstack(fill_value=0).to_string())
+    return sample
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--languages", default=None,
+                        help="Comma-separated language codes to restrict to (default: all). "
+                             "Switches to the per-language-balanced sampler and writes to a "
+                             "language-tagged file instead of the default OOD label file.")
+    parser.add_argument("--target_samples", default=None, type=int,
+                        help=f"Total rows to sample (default: {TARGET_SAMPLES}).")
+    parser.add_argument("--models", default=None,
+                        help=f"Comma-separated source models (default: {SOURCE_MODELS}).")
+    return parser.parse_args()
+
+
 def main():
-    pool = load_speech_pool()
-    sample = stratified_sample(pool)
+    args = parse_args()
+    models = args.models.split(",") if args.models else None
+    languages = args.languages.split(",") if args.languages else None
+    target_samples = args.target_samples or TARGET_SAMPLES
+
+    pool = load_speech_pool(models=models)
+    if languages is None:
+        sample = stratified_sample(pool)
+        label_path, meta_path = LABEL_PATH, META_PATH
+    else:
+        pool = exclude_handlabeled(pool)
+        sample = stratified_sample_by_language(pool, languages, target_samples)
+        tag = "-".join(languages)
+        label_path = LABEL_PATH.replace(".csv", f"_{tag}.csv")
+        meta_path = META_PATH.replace(".csv", f"_{tag}.csv")
 
     labeling = sample[["id", "model", "language", "statement_text", "answer_text"]].copy()
     labeling["choice"] = ""
-    labeling.to_csv(LABEL_PATH, sep=";", encoding="utf-8-sig", index=False)
+    labeling.to_csv(label_path, sep=";", encoding="utf-8-sig", index=False)
 
     meta = sample[["id", "model", "paraphrase", "language", "variant", "statement", "nli_stance"]]
-    meta.to_csv(META_PATH, sep=";", encoding="utf-8-sig", index=False)
+    meta.to_csv(meta_path, sep=";", encoding="utf-8-sig", index=False)
 
-    print(f"\nWrote {len(labeling)} items to label -> {LABEL_PATH}")
+    print(f"\nWrote {len(labeling)} items to label -> {label_path}")
     print("Fill the 'choice' column with Likert 1-5 (1=totally agree ... 5=totally disagree),")
     print("judging how much the speech agrees with its statement_text. Leave blank to skip.")
-    print(f"Strata/NLI proxy kept separately -> {META_PATH}")
+    print(f"Strata/NLI proxy kept separately -> {meta_path}")
 
 
 if __name__ == "__main__":

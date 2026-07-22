@@ -49,6 +49,18 @@ def exclude_handlabeled(pool):
     return pool[~pool["answer_text"].isin(handlabeled)].reset_index(drop=True)
 
 
+def filter_pool(pool, statement_ids, paraphrases):
+    """Restrict the pool to specific statement ids and/or paraphrase framings --
+    e.g. to re-judge only the rows whose statement was rewritten. The pool's
+    `statement` column is the statement id (0..29); `paraphrase` is base/question/
+    negated."""
+    if statement_ids is not None:
+        pool = pool[pool["statement"].isin(statement_ids)]
+    if paraphrases is not None:
+        pool = pool[pool["paraphrase"].isin(paraphrases)]
+    return pool.reset_index(drop=True)
+
+
 def stratified_sample(pool, n_samples):
     pool = pool.copy()
     pool["bin"] = pd.cut(pool["nli_stance"], bins=STANCE_BIN_EDGES, right=False, labels=False)
@@ -132,12 +144,31 @@ def main():
     parser.add_argument("--max_workers", default=10, type=int)
     parser.add_argument("--source_models", default="deepseek-v4-pro,glm-5.2,kimi-k2.7",
                         help="Comma-separated models whose scored speech files feed the pool.")
+    parser.add_argument("--statements", default=None,
+                        help="Comma-separated statement ids to restrict to (e.g. the rewritten "
+                             "rows 0,2,4,13,16,18,23). Enables update mode: re-judged rows are "
+                             "MERGED into the existing labeled CSV, replacing only the stale rows.")
+    parser.add_argument("--paraphrases", default=None,
+                        help="Comma-separated paraphrase framings to restrict to "
+                             "(base/question/negated); only the negated framing changed for the "
+                             "rewritten statements. Also enables update mode.")
     args = parser.parse_args()
     source_models = args.source_models.split(",")
     output_path, checkpoint_path = output_paths(args.judge_model, source_models)
 
+    statement_ids = {int(s) for s in args.statements.split(",")} if args.statements else None
+    paraphrases = set(args.paraphrases.split(",")) if args.paraphrases else None
+    update_mode = statement_ids is not None or paraphrases is not None
+
     prompt_template = load_prompt()
     pool = exclude_handlabeled(load_speech_pool(models=source_models))
+    if update_mode:
+        before = len(pool)
+        pool = filter_pool(pool, statement_ids, paraphrases)
+        checkpoint_path = output_path + ".update.ckpt.json"
+        print(f"Update mode: filtered pool {before} -> {len(pool)} speeches "
+              f"(statements={sorted(statement_ids) if statement_ids else 'all'}, "
+              f"paraphrases={sorted(paraphrases) if paraphrases else 'all'})")
     if args.balanced:
         sample = balanced_sample(pool)
     elif args.limit is None:
@@ -184,11 +215,27 @@ def main():
 
     columns = ["model", "paraphrase", "language", "variant", "statement",
                "statement_text", "answer_text", "nli_stance", "llm_choice", "llm_stance"]
-    labeled[columns].to_csv(output_path, sep=";", encoding="utf-8-sig", index=False)
+    new_rows = labeled[columns]
+
+    if update_mode and os.path.exists(output_path):
+        existing = load_dataframe(output_path)
+        stale = pd.Series(True, index=existing.index)
+        if statement_ids is not None:
+            stale &= existing["statement"].astype(int).isin(statement_ids)
+        if paraphrases is not None:
+            stale &= existing["paraphrase"].isin(paraphrases)
+        kept = existing[~stale]
+        merged = pd.concat([kept, new_rows], ignore_index=True)
+        merged.to_csv(output_path, sep=";", encoding="utf-8-sig", index=False)
+        print(f"\nMerged {len(new_rows)} re-judged rows into {output_path}: "
+              f"replaced {int(stale.sum())} stale rows, kept {len(kept)}, total {len(merged)}")
+    else:
+        new_rows.to_csv(output_path, sep=";", encoding="utf-8-sig", index=False)
+        print(f"\nLabeled {len(labeled)}/{len(sample)} speeches -> {output_path}")
+
     if os.path.exists(checkpoint_path):
         os.remove(checkpoint_path)
 
-    print(f"\nLabeled {len(labeled)}/{len(sample)} speeches -> {output_path}")
     print("LLM stance distribution:\n",
           labeled["llm_stance"].round(2).value_counts().sort_index().to_dict())
     agreement = labeled[["llm_stance", "nli_stance"]].corr().iloc[0, 1]

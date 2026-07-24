@@ -17,6 +17,15 @@ from utils import ALL_LANGS_STR
 DEFAULT_CROSSENCODER_DIR = os.path.join(PROJECT_ROOT, "mmbert-small-stance-crossencoder")
 DEFAULT_MAX_TOKEN_LENGTH = 512
 
+REFUSED_REASON_PREFIXES = ("REFUSED",)
+FAILED_REASON_VALUES = {"FAILED"}
+
+SOURCE_TEXT_COLUMN_PREFIX = {"speeches": "answer", "reasons": "reason"}
+SOURCE_INPUT_FILENAME = {
+    "speeches": "speeches_{langs}{variant}.csv",
+    "reasons": "{langs}{variant}.csv",
+}
+
 
 def load_crossencoder(model_dir, device):
     tokenizer = AutoTokenizer.from_pretrained(model_dir)
@@ -41,28 +50,38 @@ def agreement_scores(statements, speeches, tokenizer, model, device, max_length)
     return np.clip(logits, -1.0, 1.0)
 
 
-def speech_variant_indices(df, lang_variant):
-    answer_column_prefix = f"answer_{lang_variant}_v"
+def text_variant_indices(df, lang_variant, text_prefix):
+    column_prefix = f"{text_prefix}_{lang_variant}_v"
     return sorted({
-        int(column[len(answer_column_prefix):])
+        int(column[len(column_prefix):])
         for column in df.columns
-        if column.startswith(answer_column_prefix)
-        and column[len(answer_column_prefix):].isdigit()
+        if column.startswith(column_prefix)
+        and column[len(column_prefix):].isdigit()
     })
 
 
-def collect_statement_speech_pairs(df, lang_variant):
+def is_scorable_text(value, source):
+    if not isinstance(value, str) or not value.strip():
+        return False
+    if source == "reasons":
+        text = value.strip()
+        if text in FAILED_REASON_VALUES or text.startswith(REFUSED_REASON_PREFIXES):
+            return False
+    return True
+
+
+def collect_statement_text_pairs(df, lang_variant, text_prefix, source):
     statement_column = f"original_text_{lang_variant}"
-    variant_indices = speech_variant_indices(df, lang_variant)
+    variant_indices = text_variant_indices(df, lang_variant, text_prefix)
     pairs = []
     for row_index, row in df.iterrows():
         statement = row[statement_column]
         if not isinstance(statement, str) or not statement.strip():
             continue
         for variant_index in variant_indices:
-            speech = row.get(f"answer_{lang_variant}_v{variant_index}")
-            if isinstance(speech, str) and speech.strip():
-                pairs.append((row_index, variant_index, statement, speech))
+            text = row.get(f"{text_prefix}_{lang_variant}_v{variant_index}")
+            if is_scorable_text(text, source):
+                pairs.append((row_index, variant_index, statement, text.strip()))
     return pairs, variant_indices
 
 
@@ -85,7 +104,8 @@ def write_stance_columns(df, pairs, scores, lang_variant, variant_indices):
     df[f"stance_{lang_variant}_mean"] = df[per_variant_stance_columns].mean(axis=1)
 
 
-def reorder_stance_columns(df):
+def reorder_stance_columns(df, text_prefix):
+    text_column_start = f"{text_prefix}_"
     per_variant_stance = {
         column for column in df.columns
         if column.startswith("stance_") and not column.endswith("_mean")
@@ -95,8 +115,8 @@ def reorder_stance_columns(df):
         if column in per_variant_stance:
             continue
         ordered.append(column)
-        if column.startswith("answer_"):
-            stance_column = f"stance_{column[len('answer_'):]}"
+        if column.startswith(text_column_start):
+            stance_column = f"stance_{column[len(text_column_start):]}"
             if stance_column in per_variant_stance:
                 ordered.append(stance_column)
                 placed.add(stance_column)
@@ -104,22 +124,23 @@ def reorder_stance_columns(df):
     return df[ordered]
 
 
-def score_speech_agreement(df, languages, variant, tokenizer, model, device, max_length, batch_size):
+def score_text_agreement(df, languages, variant, source, tokenizer, model, device, max_length, batch_size):
+    text_prefix = SOURCE_TEXT_COLUMN_PREFIX[source]
     for language in languages:
         lang_variant = f"{language}{variant}"
         if f"original_text_{lang_variant}" not in df.columns:
             print(f"[{lang_variant}] no statement column, skipping.")
             continue
-        pairs, variant_indices = collect_statement_speech_pairs(df, lang_variant)
+        pairs, variant_indices = collect_statement_text_pairs(df, lang_variant, text_prefix, source)
         if not pairs:
-            print(f"[{lang_variant}] no speeches found, skipping.")
+            print(f"[{lang_variant}] no {source} texts found, skipping.")
             continue
         scores = score_pairs_in_batches(
             pairs, tokenizer, model, device, max_length, batch_size,
             description=f"scoring {lang_variant}",
         )
         write_stance_columns(df, pairs, scores, lang_variant, variant_indices)
-    return reorder_stance_columns(df)
+    return reorder_stance_columns(df, SOURCE_TEXT_COLUMN_PREFIX[source])
 
 
 def parse_args():
@@ -128,6 +149,7 @@ def parse_args():
     parser.add_argument("--llm", default="qwen3.5-122b")
     parser.add_argument("--dataset", default="euandi_2024", choices=["euandi_2019", "euandi_2024"])
     parser.add_argument("--input", default=None)
+    parser.add_argument("--source", default="speeches", choices=["speeches", "reasons"])
     parser.add_argument("--variant", default="", choices=["", "_question", "_negated"])
     parser.add_argument("--languages", default=ALL_LANGS_STR)
     parser.add_argument("--batch_size", default=64, type=int)
@@ -140,7 +162,10 @@ def parse_args():
 def resolve_input_path(args, languages):
     if args.input:
         return args.input
-    return f"./data/{args.dataset}_results/{args.llm}/speeches_{','.join(languages)}{args.variant}.csv"
+    filename = SOURCE_INPUT_FILENAME[args.source].format(
+        langs=",".join(languages), variant=args.variant,
+    )
+    return f"./data/{args.dataset}_results/{args.llm}/{filename}"
 
 
 def resolve_output_path(input_path):
@@ -161,8 +186,8 @@ def main():
     df = pd.read_csv(input_path, sep=";", encoding="utf-8-sig", low_memory=False)
     tokenizer, model, max_length = load_crossencoder(args.crossencoder_dir, args.device)
 
-    df = score_speech_agreement(
-        df, languages, args.variant, tokenizer, model, args.device, max_length, args.batch_size,
+    df = score_text_agreement(
+        df, languages, args.variant, args.source, tokenizer, model, args.device, max_length, args.batch_size,
     )
 
     df.to_csv(output_path, sep=";", index=False, encoding="utf-8-sig")

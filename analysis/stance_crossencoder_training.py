@@ -3,13 +3,13 @@
 
 Unlike the text-only regressor, this model sees BOTH the statement and the text,
 so "I agree that X" is unambiguous. An mmBERT-small base is fine-tuned in two
-stages: first on the abundant reasons track (statement = original_text, free
-choice labels) as a warmup, then continued on the LLM-judged speeches (the target
-creative-writing register). The second stage is selected on the hand-labeled
-speeches, which neither training source touches.
+stages, both on texts pooled over TRAIN_MODELS as scored by the LLM stance judge
+(judge_all_speeches.py): first a warmup on the abundant reasons track (the short
+justifications), then continued on the speeches track (the target creative-writing
+register). The second stage is selected on LLM-judged speeches from a different
+source model (OOD_SOURCE_MODEL), which the training data never touches.
 """
 import os
-import re
 import sys
 import json
 import shutil
@@ -28,22 +28,24 @@ from transformers import (
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
-from utils import ALL_LANGS_STR, likert_to_stance, load_dataframe
+from utils import likert_to_stance, load_dataframe
 from analysis.stance_detector_training import stance_metrics, freeze_bottom_layers, select_device
+from analysis.judge_all_speeches import load_speech_pool, load_reason_pool
+from analysis.llm_stance_judge import load_checkpoint
 
 MODEL_NAME = "jhu-clsp/mmBERT-small"
 MODEL_SLUG = "mmbert-small-stance-crossencoder"
 DATA_DIR = os.path.join(PROJECT_ROOT, "data", "euandi_2024_results")
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, MODEL_SLUG)
-SOURCE_MODELS = ["kimi-k2.6", "deepseek-v4-pro"]
-PARAPHRASE_SUFFIXES = ["", "_question", "_negated"]
-LLM_LABELS_PATH = os.path.join(DATA_DIR, "stance_speeches_llm_labeled.csv")
-OOD_LABEL_PATH = os.path.join(DATA_DIR, "stance_speeches_to_label.csv")
-OOD_META_PATH = os.path.join(DATA_DIR, "stance_speeches_to_label_meta.csv")
-
-CHOICE_PATTERN = re.compile(r"^choice_(?P<lang>[a-z]{2})_v(?P<variant>\d+)$")
-REASON_PATTERN = re.compile(r"^reason_(?P<lang>[a-z]{2})_v(?P<variant>\d+)$")
-ORIGINAL_PATTERN = re.compile(r"^original_text_(?P<lang>[a-z]{2})$")
+# Both training stages read the LLM-judge outputs from judge_all_speeches.py, pooled
+# over several source models; the reasons track warms the model up, the speeches track
+# is the target register. Held-out speeches come from a model that is never trained on
+# (OOD_SOURCE_MODEL), used only to select/evaluate stage 2.
+TRAIN_MODELS = ["deepseek-v4-pro", "glm-5.2"]
+OOD_SOURCE_MODEL = "kimi-k2.7"
+# per-track pool reconstruction + output filename used when a judge run is unfinished
+POOL_LOADERS = {"speeches": load_speech_pool, "reasons": load_reason_pool}
+STANCE_NAME = {"speeches": "speeches_llm_stance.csv", "reasons": "reasons_llm_stance.csv"}
 
 MAX_LEN = 512
 SEED = 42
@@ -66,81 +68,58 @@ class WeightedRegressionTrainer(Trainer):
         return (loss, outputs) if return_outputs else loss
 
 
-def melt_reasons(frame, model):
-    frame.columns = [c.replace("_question", "").replace("_negated", "") for c in frame.columns]
-    reasons, choices, statements = {}, {}, {}
-    for column in frame.columns:
-        reason_match = REASON_PATTERN.match(column)
-        if reason_match:
-            reasons[(reason_match["lang"], int(reason_match["variant"]))] = frame[column]
-            continue
-        choice_match = CHOICE_PATTERN.match(column)
-        if choice_match:
-            choices[(choice_match["lang"], int(choice_match["variant"]))] = pd.to_numeric(
-                frame[column], errors="coerce")
-            continue
-        original_match = ORIGINAL_PATTERN.match(column)
-        if original_match:
-            statements[original_match["lang"]] = frame[column]
+def load_judged(model, track):
+    """One model/track's LLM-judged texts as (statement, text, stance, statement_id).
 
-    records = []
-    for (language, variant), reason_series in reasons.items():
-        if (language, variant) not in choices or language not in statements:
-            continue
-        records.append(pd.DataFrame({
-            "statement": statements[language].astype("string").str.strip(),
-            "text": reason_series.astype("string").str.strip(),
-            "choice": choices[(language, variant)],
-        }))
-    return pd.concat(records, ignore_index=True)
-
-
-def load_reason_pairs():
-    frames = []
-    for model in SOURCE_MODELS:
-        for suffix in PARAPHRASE_SUFFIXES:
-            path = os.path.join(DATA_DIR, model, f"{ALL_LANGS_STR}{suffix}.csv")
-            frames.append(melt_reasons(load_dataframe(path), model))
-    pairs = pd.concat(frames, ignore_index=True).dropna(subset=["statement", "text", "choice"])
-    pairs = pairs[(pairs["statement"].str.len() > 0) & (pairs["text"].str.len() > 0)]
-    pairs["stance"] = likert_to_stance(pairs["choice"]).astype("float32")
-    return pairs[["statement", "text", "stance"]]
+    Prefers the finished speeches_/reasons_llm_stance.csv; while a judge run is still
+    going, reconstructs labels from the checkpoint that indexes the pool the matching
+    pool loader rebuilds, so partial progress is usable. "statement_id" is the statement
+    index (shared across languages and the base/negated framings of one proposition),
+    the leakage-safe group for the OOD split.
+    """
+    output_path = os.path.join(DATA_DIR, model, STANCE_NAME[track])
+    if os.path.exists(output_path):
+        pool = load_dataframe(output_path)
+        pool["llm_choice"] = pd.to_numeric(pool["llm_choice"], errors="coerce")
+    else:
+        pool = POOL_LOADERS[track](model).copy()
+        pool["llm_choice"] = pool.index.map(load_checkpoint(output_path + ".ckpt.json"))
+    pool = pool.dropna(subset=["llm_choice"]).reset_index(drop=True)
+    empty = pd.DataFrame(columns=["statement", "text", "stance", "statement_id"])
+    if pool.empty:
+        return empty
+    out = pd.DataFrame({
+        "statement": pool["statement_text"].astype("string").str.strip(),
+        "text": pool["answer_text"].astype("string").str.strip(),
+        "stance": likert_to_stance(pool["llm_choice"].astype(int)).astype("float32"),
+        "statement_id": pool["statement"].values,
+    })
+    out = out.dropna(subset=["statement", "text", "stance", "statement_id"])
+    out = out[(out["statement"].str.len() > 0) & (out["text"].str.len() > 0)]
+    return out
 
 
-def load_llm_speeches():
-    if not os.path.exists(LLM_LABELS_PATH):
-        return pd.DataFrame(columns=["statement", "text", "stance"])
-    frame = load_dataframe(LLM_LABELS_PATH).drop(columns=["statement"], errors="ignore")
-    frame = frame.rename(columns={"statement_text": "statement", "answer_text": "text"})
-    frame["stance"] = pd.to_numeric(frame["llm_stance"], errors="coerce").astype("float32")
-    frame = frame.dropna(subset=["statement", "text", "stance"])
-    return frame[["statement", "text", "stance"]]
+def load_train_pairs(track):
+    frames = [load_judged(model, track) for model in TRAIN_MODELS]
+    return pd.concat(frames, ignore_index=True)[["statement", "text", "stance"]]
 
 
-def build_stage_pairs(loader, name):
-    pairs = loader().drop_duplicates(subset=["statement", "text"]).reset_index(drop=True)
-    print(f"{name} pairs: {len(pairs)} after dedup")
+def build_stage_pairs(track, name):
+    pairs = load_train_pairs(track).drop_duplicates(subset=["statement", "text"]).reset_index(drop=True)
+    print(f"{name} pairs: {len(pairs)} after dedup (models: {', '.join(TRAIN_MODELS)})")
     print("Stance distribution:\n", pairs["stance"].round(2).value_counts().sort_index().to_dict())
     return pairs
 
 
 def load_ood_eval():
-    if not (os.path.exists(OOD_LABEL_PATH) and os.path.exists(OOD_META_PATH)):
+    """Judged speeches from OOD_SOURCE_MODEL (never trained on) for stage-2 selection."""
+    ood = load_judged(OOD_SOURCE_MODEL, "speeches").drop_duplicates(
+        subset=["statement", "text"]).reset_index(drop=True)
+    if ood.empty:
         return None
-    labels = load_dataframe(OOD_LABEL_PATH)
-    meta = load_dataframe(OOD_META_PATH)
-    labels["choice"] = pd.to_numeric(labels["choice"], errors="coerce")
-    labels = labels.dropna(subset=["choice"])
-    if labels.empty:
-        return None
-    merged = labels.merge(meta[["id", "statement"]], on="id", how="left")
-    merged = merged.rename(columns={"statement_text": "statement", "answer_text": "text",
-                                    "statement": "statement_id"})
-    merged["stance"] = likert_to_stance(merged["choice"]).astype("float32")
-    merged = merged.dropna(subset=["statement", "text", "statement_id"])
-    print(f"OOD eval: {len(merged)} hand-labeled speeches "
-          f"across {merged['statement_id'].nunique()} statements")
-    return merged[["statement", "text", "stance", "statement_id"]].reset_index(drop=True)
+    print(f"OOD eval ({OOD_SOURCE_MODEL}): {len(ood)} judged speeches "
+          f"across {ood['statement_id'].nunique()} statements")
+    return ood
 
 
 def split_ood(ood):
@@ -219,10 +198,11 @@ def main():
     set_seed(SEED)
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, token=hf_token)
-    reason_pairs = build_stage_pairs(load_reason_pairs, "Stage 1 (reasons)")
-    speech_pairs = build_stage_pairs(load_llm_speeches, "Stage 2 (LLM-judged speeches)")
+    reason_pairs = build_stage_pairs("reasons", "Stage 1 (LLM-judged reasons)")
+    speech_pairs = build_stage_pairs("speeches", "Stage 2 (LLM-judged speeches)")
     if speech_pairs.empty:
-        raise SystemExit("No LLM-judged speeches found; run llm_stance_judge.py first.")
+        raise SystemExit(f"No LLM-judged speeches for {TRAIN_MODELS}; "
+                         "run judge_all_speeches.py first.")
     reason_ds = tokenize_dataset(reason_pairs, tokenizer)
     speech_ds = tokenize_dataset(speech_pairs, tokenizer)
 
@@ -230,13 +210,13 @@ def main():
     if ood is not None:
         ood_dev, ood_test = split_ood(ood)
         val_ds = tokenize_dataset(ood_dev, tokenizer)
-        selection_note = "out-of-domain hand-labeled speeches"
+        selection_note = f"out-of-domain LLM-judged {OOD_SOURCE_MODEL} speeches"
     else:
         ood_test = None
         holdout = speech_pairs.sample(frac=0.05, random_state=SEED)
         val_ds = tokenize_dataset(holdout, tokenizer)
-        selection_note = "5% random speech holdout (OOD speeches not labeled yet)"
-        print("\n!! No labeled OOD speeches -- selecting on a random speech holdout.\n")
+        selection_note = "5% random speech holdout (OOD speeches not judged yet)"
+        print("\n!! No judged OOD speeches -- selecting on a random speech holdout.\n")
 
     model = AutoModelForSequenceClassification.from_pretrained(
         MODEL_NAME, token=hf_token, num_labels=1, problem_type="regression",
@@ -270,7 +250,8 @@ def main():
         json.dump({
             "model_name": MODEL_NAME,
             "architecture": "cross-encoder (statement, text) -> stance",
-            "training": f"two-stage: {REASON_EPOCHS} reason warmup epochs -> "
+            "training": f"two-stage on {', '.join(TRAIN_MODELS)} LLM-judged texts: "
+                        f"{REASON_EPOCHS} reason warmup epochs -> "
                         f"{SPEECH_EPOCHS} speech epochs",
             "max_len": MAX_LEN,
             "frozen_bottom_layers": FREEZE_BOTTOM_LAYERS,

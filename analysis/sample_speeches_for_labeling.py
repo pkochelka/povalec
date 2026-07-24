@@ -21,9 +21,9 @@ sys.path.insert(0, PROJECT_ROOT)
 from utils import ALL_LANGS_STR, load_dataframe
 
 DATA_DIR = os.path.join(PROJECT_ROOT, "data", "euandi_2024_results")
-SOURCE_MODELS = ["kimi-k2.6", "deepseek-v4-pro"]
-PARAPHRASE_SUFFIXES = ["", "_question", "_negated"]
-TARGET_SAMPLES = 320
+SOURCE_MODELS = ["kimi-k2.7", "deepseek-v4-pro", "glm-5.2"]
+PARAPHRASE_SUFFIXES = ["", "_negated"]
+TARGET_SAMPLES = 160
 STANCE_BIN_EDGES = [-1.0, -0.6, -0.2, 0.2, 0.6, 1.0001]
 SEED = 42
 

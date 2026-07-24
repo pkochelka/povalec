@@ -365,15 +365,63 @@ def plot_models_party_distribution(mean_probability_per_model, source, variant_l
     fig, ax = plt.subplots(figsize=(max(8, len(parties) * 1.1), max(5, len(models) * 0.45)))
     image = ax.imshow(matrix, aspect="auto", cmap="viridis", vmin=0.0, vmax=max(0.4, matrix.max()))
     fig.colorbar(image, ax=ax, label=MEAN_PROBABILITY_LABEL, fraction=0.03, pad=0.02)
-    ax.set_xticks(range(len(parties)), parties, rotation=30, ha="right", fontsize=9)
-    ax.set_yticks(range(len(models)), models, fontsize=9)
-    ax.set_title(f"Mean party probability per model ({source}, {variant_label})", fontsize=11, pad=8)
+    ax.set_xticks(range(len(parties)), parties, rotation=30, ha="right", fontsize=12)
+    ax.set_yticks(range(len(models)), models, fontsize=12)
+    #ax.set_title(f"Mean party probability per model ({source}, {variant_label})", fontsize=11, pad=8)
     for row_index in range(len(models)):
         for column_index in range(len(parties)):
             value = matrix[row_index, column_index]
             ax.text(column_index, row_index, f"{value:.2f}",
-                    ha="center", va="center", fontsize=7,
+                    ha="center", va="center", fontsize=12,
                     color="white" if value > 0.45 else "black")
+    save_figure(fig, output_path)
+
+
+def aggregate_mean_probability_per_model(mean_probability_per_model_source_variant):
+    series_per_model = {}
+    for (model, _, _), series in mean_probability_per_model_source_variant.items():
+        if not series.empty:
+            series_per_model.setdefault(model, []).append(series)
+    return {
+        model: pd.concat(series_list).groupby(level=0).mean()
+        for model, series_list in series_per_model.items()
+    }
+
+
+def plot_models_party_distribution_bars(mean_probability_per_model, output_path):
+    if not mean_probability_per_model:
+        return
+    parties_present = set().union(*(series.index for series in mean_probability_per_model.values()))
+    parties = ordered_parties_present(parties_present)
+    models = sorted(mean_probability_per_model)
+    if not parties or not models:
+        return
+
+    bar_positions = np.arange(len(parties))
+    group_width = 0.86
+    bar_width = group_width / len(models)
+    model_cmap = plt.get_cmap("tab20", max(len(models), 2))
+
+    fig, ax = plt.subplots(figsize=(max(9, len(parties) * 1.2), 6.0))
+    highest_percentage = 0.0
+    for model_index, model in enumerate(models):
+        percentages = 100.0 * mean_probability_per_model[model].reindex(parties).fillna(0.0).to_numpy()
+        highest_percentage = max(highest_percentage, float(percentages.max()))
+        offsets = bar_positions - group_width / 2 + bar_width * (model_index + 0.5)
+        ax.bar(offsets, percentages, width=bar_width,
+               color=model_cmap(model_index), edgecolor="black", linewidth=0.3,
+               label=model)
+
+    ax.set_xticks(bar_positions)
+    ax.set_xticklabels(parties, rotation=20, ha="right", fontsize=10)
+    ax.set_xlim(-0.5, len(parties) - 0.5)
+    ax.set_ylabel(f"{MEAN_PROBABILITY_LABEL} (%)")
+    ax.set_ylim(0.0, min(100.0, max(35.0, highest_percentage * 1.35)))
+    ax.grid(axis="y", linestyle="--", alpha=0.4)
+    ax.set_title("Mean party probability per model (pooled over sources & variants)",
+                 fontsize=11, pad=8)
+    ax.legend(loc=LEGEND_UPPER_RIGHT, fontsize=8, framealpha=0.9,
+              ncol=2, title="model")
     save_figure(fig, output_path)
 
 
@@ -633,37 +681,37 @@ def language_party_matrix_from_vaa(vaa_csvs):
     )
 
 
-def plot_per_language_boxplot_panel(ax, matrix, parties, ylabel, title):
+def plot_per_language_bar_panel(ax, matrix, parties, ylabel, title):
     languages = sorted(matrix.index.tolist())
     matrix = matrix.reindex(index=languages, columns=parties)
     x_positions = np.arange(len(parties))
+    jitter_rng = np.random.default_rng(0)
 
-    per_party_values = []
+    mean_values = []
     languages_with_data = set()
-    for party in parties:
+    for x_position, party in zip(x_positions, parties):
         column = matrix[party].to_numpy(dtype=float)
-        per_party_values.append(column[~np.isnan(column)])
+        finite_values = column[~np.isnan(column)]
+        mean_values.append(float(finite_values.mean()) if finite_values.size else 0.0)
         for language, value in zip(languages, column):
             if not np.isnan(value):
                 languages_with_data.add(language)
 
-    box = ax.boxplot(
-        per_party_values, positions=x_positions, widths=0.6,
-        patch_artist=True, showfliers=True,
-        medianprops=dict(color="black", linewidth=1.5),
-        whiskerprops=dict(color="black", linewidth=0.8),
-        capprops=dict(color="black", linewidth=0.8),
-        flierprops=dict(marker="o", markersize=4, markerfacecolor="grey",
-                        markeredgecolor="none", alpha=0.6),
-    )
-    for patch, party in zip(box["boxes"], parties):
-        patch.set_facecolor(color_for_party(party))
-        patch.set_alpha(0.75)
-        patch.set_edgecolor("black")
-        patch.set_linewidth(0.6)
+        # keep the crosslingual spread visible on top of the election-style bar
+        if finite_values.size:
+            jitter = (jitter_rng.random(finite_values.size) - 0.5) * 0.3
+            ax.scatter(np.full(finite_values.size, x_position) + jitter, finite_values,
+                       s=12, color="black", alpha=0.35, linewidths=0, zorder=3)
+
+    bar_colors = [color_for_party(party) for party in parties]
+    ax.bar(x_positions, mean_values, width=0.7,
+           color=bar_colors, edgecolor="black", linewidth=0.6, alpha=0.85, zorder=2)
+    for x_position, value in zip(x_positions, mean_values):
+        ax.text(x_position, value + 0.005, f"{value:.2f}", ha="center", va="bottom", fontsize=7)
 
     ax.set_xticks(x_positions, parties, rotation=20, ha="right", fontsize=9)
     ax.set_ylabel(ylabel)
+    ax.set_ylim(bottom=0.0)
     ax.set_title(f"{title} ({len(languages_with_data)} languages)", fontsize=10)
     ax.grid(axis="y", linestyle="--", alpha=0.3)
 
@@ -681,12 +729,12 @@ def plot_pooled_per_language_overview(model_name, long_by_source_variant, vaa_cs
     fig, (ax_vaa, ax_clf) = plt.subplots(
         1, 2, figsize=(max(14, len(parties) * 2.0), 6.0)
     )
-    plot_per_language_boxplot_panel(
+    plot_per_language_bar_panel(
         ax_vaa, vaa_matrix, parties,
         ylabel="VAA mean agreement",
         title="VAA mean agreement per language",
     )
-    plot_per_language_boxplot_panel(
+    plot_per_language_bar_panel(
         ax_clf, classifier_matrix, parties,
         ylabel="Classifier mean probability",
         title="Classifier mean probability per language",
@@ -859,6 +907,10 @@ def main():
         dataset_plots_dir = results_dir / "plots"
         dataset_plots_dir.mkdir(exist_ok=True)
         plot_cross_model_comparisons(mean_probability_per_model_source_variant, dataset_plots_dir)
+        plot_models_party_distribution_bars(
+            aggregate_mean_probability_per_model(mean_probability_per_model_source_variant),
+            dataset_plots_dir / "classified_all_models_party_distribution.png",
+        )
         plot_cross_model_vaa_correlation_heatmap(
             vaa_comparison_rows_across_models,
             "spearman_rho_mean_prob_vs_vaa", "Spearman ρ (mean prob vs VAA agreement)",

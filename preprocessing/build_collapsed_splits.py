@@ -3,32 +3,31 @@
 Reads  data/EuroParl Custom/cleaned/{train,dev,test}.parquet
 Writes data/EuroParl Custom/collapsed/{train,dev,test,train_balanced}.parquet
 
-ECR and ID are merged into a single "ECR+ID" label so the (ex-)smallest
-parties get stronger combined support in training. Split membership is
-INHERITED from the cleaned splits rather than re-carved: no speech group ever
-moves between train/dev/test, so the collapsed eval sets stay strict subsets
-of the original ones and results remain comparable across the two tracks.
+ECR and ID are merged into a single "ECR+ID" label BEFORE splitting. The three
+cleaned splits are reunioned into one pool, relabelled, and then re-split from
+scratch with the same class-balanced, language-stratified, group-disjoint carve
+that split_preprocessed_data uses. ECR+ID is therefore a first-class party from
+the very start: dev and test come out balanced by construction (no post-hoc
+downsampling, no discarded eval rows), and every speech group (speaker+date)
+lands in exactly one split.
 
-Merging alone would leave ECR+ID with twice every other party's rows in dev
-and test, so the merged party is downsampled back to parity there. The
-per-language quota is read off the other parties (their max per-language
-count IS the language-stratified target split_preprocessed_data carved to),
-which keeps both eval sets uniform in exactly the same sense as before:
-every party contributes the same number of rows, with the same corpus-wide
-language mix.
+NOTE: because this track RE-SPLITS, its dev/test are NOT subsets of the original
+7-party splits -- a group in collapsed-train may have sat in the original
+dev/test and vice versa. The two tracks' eval sets are independent; never
+evaluate a model trained on one track against the other track's test set.
 
 train.parquet keeps the natural, imbalanced priors (relabelled only), for the
-logit-adjusted trainer. train_balanced.parquet downsamples it the same way as
-build_balanced_train — equal rows per party (default: the smallest party's
-count), water-filled toward an equal per-language split, most-recent-first
-within each (party, language) cell with a seeded random tiebreak — but from
-the natural train rows only, without the translation cache.
+logit-adjusted trainer. train_balanced.parquet downsamples it to equal rows per
+party (default: the smallest party's count), water-filled toward an equal
+per-language split, most-recent-first within each (party, language) cell with a
+seeded random tiebreak.
 
 --with-translations instead builds ONLY balanced_train_with_translations.parquet:
-originals and cache translations are balanced as separate strata, so every
-party contributes the same, maximal number of original rows AND the same,
-maximal number of translated rows (each stratum's target is its min count
-across parties). Rows carry a boolean `translated` provenance column.
+the same merge-then-split produces the collapsed train, then originals and cache
+translations are balanced as separate strata, so every party contributes the
+same, maximal number of original rows AND the same, maximal number of translated
+rows (each stratum's target is its min count across parties). Rows carry a
+boolean `translated` provenance column.
 """
 
 import argparse
@@ -46,6 +45,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from utils import write_parquet_chunked
+from split_preprocessed_data import split_dataframe
 
 DATA_DIR = PROJECT_ROOT / "data" / "EuroParl Custom"
 DEFAULT_INPUT_DIR = DATA_DIR / "cleaned"
@@ -62,28 +62,27 @@ MERGED_LABEL = "ECR+ID"
 RANK_SUFFIX = re.compile(r"#r\d+$")
 
 
-def rebalance_eval(split, rng):
-    """Downsample the merged party in one eval split back to per-party parity.
+def build_merged_splits(input_dir, seed):
+    """Reunion the cleaned splits, merge ECR+ID, and re-split from scratch.
 
-    Every language quota is the max per-language count among the OTHER
-    parties: that max is exactly the target split_preprocessed_data gave each
-    party, so the merged party ends up with the same size and language mix as
-    everyone else.
+    Returns {"train","dev","test"} DataFrames. Because ECR+ID is merged before
+    the carve, it is treated as a normal party and dev/test come out
+    class-balanced with no downsampling and no discarded eval rows.
     """
-    merged_mask = split[PARTY_COLUMN] == MERGED_LABEL
-    others = split[~merged_mask]
-    merged = split[merged_mask]
+    frames = [pd.read_parquet(input_dir / f"{name}.parquet")[COLUMNS]
+              for name in ("train", "dev", "test")]
+    pool = pd.concat(frames, ignore_index=True)
+    before = len(pool)
+    # Name-cleaning can turn once-distinct speeches identical (the party name it
+    # stripped was the only difference), so dedup the reunioned pool again.
+    pool = pool.drop_duplicates(subset=["text"]).reset_index(drop=True)
+    pool[PARTY_COLUMN] = np.where(
+        pool[PARTY_COLUMN].isin(MERGE_PARTIES), MERGED_LABEL, pool[PARTY_COLUMN])
+    print(f"Pool: {before:,} -> {len(pool):,} rows after reunion+dedup; "
+          f"parties after collapse: {pool[PARTY_COLUMN].value_counts().to_dict()}")
 
-    lang_party = others.groupby(["language", PARTY_COLUMN], observed=True).size()
-    target_per_lang = lang_party.groupby("language", observed=True).max()
-
-    picked = []
-    for lang, target in target_per_lang.items():
-        rows = merged.index[merged["language"] == lang].to_numpy()
-        take = min(len(rows), int(target))
-        picked.append(rng.choice(rows, size=take, replace=False))
-    merged_kept = merged.loc[np.concatenate(picked)]
-    return pd.concat([others, merged_kept]).sort_index()
+    train, dev, test = split_dataframe(pool, seed=seed)
+    return {"train": train, "dev": dev, "test": test}
 
 
 def reconstruct_augmented(train, cache_path):
@@ -171,9 +170,8 @@ def build_translated_balanced(args, rng):
     """Build balanced_train_with_translations.parquet: originals and cache
     translations balanced as separate strata, each to its own maximal common
     per-party count (the stratum's min across parties)."""
-    train = pd.read_parquet(args.input_dir / "train.parquet")[COLUMNS]
-    train[PARTY_COLUMN] = np.where(
-        train[PARTY_COLUMN].isin(MERGE_PARTIES), MERGED_LABEL, train[PARTY_COLUMN])
+    splits = build_merged_splits(args.input_dir, args.seed)
+    train = splits["train"][COLUMNS]
     print(f"train: {len(train):,} rows, parties after collapse: "
           f"{train[PARTY_COLUMN].value_counts().to_dict()}")
 
@@ -240,34 +238,20 @@ def main():
         build_translated_balanced(args, rng)
         return
 
-    splits = {}
-    for name in ["train", "dev", "test"]:
-        df = pd.read_parquet(args.input_dir / f"{name}.parquet")[COLUMNS]
-        df[PARTY_COLUMN] = np.where(
-            df[PARTY_COLUMN].isin(MERGE_PARTIES), MERGED_LABEL, df[PARTY_COLUMN])
-        splits[name] = df
-        print(f"{name}: {len(df):,} rows, parties after collapse: "
-              f"{df[PARTY_COLUMN].value_counts().to_dict()}")
-
-    for name in ["dev", "test"]:
-        splits[name] = rebalance_eval(splits[name], rng)
+    splits = build_merged_splits(args.input_dir, args.seed)
+    for name in ("train", "dev", "test"):
         counts = splits[name][PARTY_COLUMN].value_counts()
-        print(f"{name} rebalanced: {len(splits[name]):,} rows, "
-              f"party balance min={counts.min():,} max={counts.max():,}")
+        print(f"{name}: {len(splits[name]):,} rows, party balance "
+              f"min={counts.min():,} max={counts.max():,}")
 
-    # Split membership is inherited, so group disjointness is guaranteed by
-    # construction; this assert just documents (and re-checks) the invariant.
+    # carve guarantees group disjointness; these asserts document the invariant.
     group = {name: set(df["speaker"].astype(str) + "_" + df["date"].astype(str))
              for name, df in splits.items()}
     assert not group["train"] & (group["dev"] | group["test"]), \
         "speech groups leak between train and dev/test"
+    assert not group["dev"] & group["test"], "speech groups leak between dev and test"
 
     train = splits["train"]
-    before = len(train)
-    train = train.drop_duplicates(subset=["text"]).reset_index(drop=True)
-    if len(train) != before:
-        print(f"Train text dedup: {before:,} -> {len(train):,} rows")
-
     party_counts = train[PARTY_COLUMN].value_counts()
     target = args.per_party if args.per_party is not None else int(party_counts.min())
     print("\nTrain per-party counts:")
@@ -291,7 +275,7 @@ def main():
     print(balanced["language"].value_counts().to_string())
     print(f"\nDate range kept: {balanced['date'].min()} .. {balanced['date'].max()}")
 
-    for df, name in [(train, "train"), (splits["dev"], "dev"),
+    for df, name in [(splits["train"], "train"), (splits["dev"], "dev"),
                      (splits["test"], "test"), (balanced, "train_balanced")]:
         path = args.output_dir / f"{name}.parquet"
         write_parquet_chunked(df[COLUMNS], path)

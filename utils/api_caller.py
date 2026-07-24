@@ -110,7 +110,7 @@ def call_api(
     user_message: str,
     model_id: str,
     *,
-    max_tokens: int = 4096,
+    max_tokens: int = 6144,
     temperature: float = 0.0,
     second_provider: bool = False,
     enable_thinking: bool | None = None,

@@ -73,6 +73,20 @@ SPEECHES_FILENAME_PATTERN = re.compile(
 REASON_COLUMN_PATTERN = re.compile(r"^reason_(?P<lang>[a-z]{2})(?P<variant>|_negated|_question)_v(?P<idx>\d+)$")
 CHOICE_COLUMN_PATTERN = re.compile(r"^choice_(?P<lang>[a-z]{2})(?P<variant>|_negated|_question)_v(?P<idx>\d+)$")
 ANSWER_COLUMN_PATTERN = re.compile(r"^answer_(?P<lang>[a-z]{2})(?P<variant>|_negated|_question)_v(?P<idx>\d+)$")
+ORIGINAL_TEXT_PATTERN = re.compile(r"^original_text_(?P<lang>[a-z]{2})$")
+
+
+def extract_question_text(df, row_index):
+    """Return a representative statement text for a row (prefer English)."""
+    en_col = "original_text_en"
+    if en_col in df.columns and isinstance(df.at[row_index, en_col], str):
+        return df.at[row_index, en_col]
+    for column in df.columns:
+        if ORIGINAL_TEXT_PATTERN.match(column):
+            value = df.at[row_index, column]
+            if isinstance(value, str):
+                return value
+    return None
 
 
 def mean_pool(last_hidden_state, attention_mask):
@@ -157,6 +171,7 @@ def collect_records_from_likert(csv_path, variant_label):
                 "variant_idx": variant_idx,
                 "hard_refusal": hard,
                 "text": text,
+                "question_text": extract_question_text(df, row_index),
             })
     return records
 
@@ -181,6 +196,7 @@ def collect_records_from_speeches(csv_path, variant_label):
                 "variant_idx": variant_idx,
                 "hard_refusal": empty_or_failed,
                 "text": text,
+                "question_text": extract_question_text(df, row_index),
             })
     return records
 
@@ -259,6 +275,92 @@ def overall_rate_per_model_variant(rates_df):
     ).reset_index()
     pooled["refusal_rate"] = pooled["n_refusal"] / pooled["n_total"]
     return pooled
+
+
+def aggregate_per_question(annotated_df):
+    """Per (model, question) refusal counts plus each model's contribution to
+    the pooled per-question rate.
+
+    contribution = model's refusals at the question / all records at the
+    question (across every model). Contributions of all models at a question
+    sum to that question's aggregate refusal rate, so a per-model stacked bar
+    has total height equal to the aggregate rate.
+    """
+    annotated_df = annotated_df.copy()
+    annotated_df["refusal"] = annotated_df["hard_refusal"] | annotated_df["semantic_refusal"]
+
+    per_question_model = annotated_df.groupby(["row_idx", "model"]).agg(
+        n_total=("refusal", "size"),
+        n_hard=("hard_refusal", "sum"),
+        n_semantic=("semantic_refusal", "sum"),
+        n_refusal=("refusal", "sum"),
+    ).reset_index()
+    per_question_model["refusal_rate"] = per_question_model["n_refusal"] / per_question_model["n_total"]
+
+    question_totals = annotated_df.groupby("row_idx").agg(
+        question_n_total=("refusal", "size"),
+        question_n_refusal=("refusal", "sum"),
+    ).reset_index()
+    question_totals["aggregate_refusal_rate"] = (
+        question_totals["question_n_refusal"] / question_totals["question_n_total"]
+    )
+
+    per_question_model = per_question_model.merge(question_totals, on="row_idx", how="left")
+    per_question_model["contribution"] = (
+        per_question_model["n_refusal"] / per_question_model["question_n_total"]
+    )
+
+    question_text = (
+        annotated_df.dropna(subset=["question_text"])
+        .groupby("row_idx")["question_text"].first()
+    )
+    per_question_model["question_text"] = per_question_model["row_idx"].map(question_text)
+    question_totals["question_text"] = question_totals["row_idx"].map(question_text)
+
+    per_question_model = per_question_model.sort_values(["row_idx", "model"]).reset_index(drop=True)
+    question_totals = question_totals.sort_values("row_idx").reset_index(drop=True)
+    return per_question_model, question_totals
+
+
+def plot_refusal_per_question(per_question_model, question_totals, output_path):
+    models = sorted(per_question_model["model"].unique())
+    questions = question_totals["row_idx"].tolist()
+    positions = np.arange(len(questions))
+
+    colors = plt.get_cmap("tab20")(np.linspace(0, 1, max(len(models), 1)))
+    color_by_model = {model: colors[i] for i, model in enumerate(models)}
+
+    contribution = (
+        per_question_model.pivot(index="row_idx", columns="model", values="contribution")
+        .reindex(index=questions, columns=models)
+        .fillna(0.0)
+    )
+
+    fig, ax = plt.subplots(figsize=(max(10, 0.45 * len(questions) + 2), 6))
+    bottom = np.zeros(len(questions))
+    for model in models:
+        heights = contribution[model].to_numpy()
+        ax.bar(positions, heights, bottom=bottom, color=color_by_model[model],
+               edgecolor="black", linewidth=0.3, label=model)
+        bottom += heights
+
+    aggregate = question_totals.set_index("row_idx")["aggregate_refusal_rate"].reindex(questions).to_numpy()
+    for x, value in zip(positions, aggregate):
+        if value > 0.002:
+            ax.text(x, value + 0.003, f"{value:.2f}", ha="center", va="bottom", fontsize=7)
+
+    ax.set_xticks(positions, [f"Q{q + 1}" for q in questions], rotation=0, fontsize=8)
+    ax.set_xlabel("EU&I statement (question)")
+    ax.set_ylabel("Refusal rate")
+    ax.set_title("Refusal rate per question, decomposed by model contribution\n"
+                 "(bar height = aggregate rate over all models, languages, variants and sources)",
+                 fontsize=11, pad=8)
+    ax.grid(axis="y", linestyle="--", alpha=0.4)
+    ax.legend(title="Model", loc="upper right", fontsize=8, ncol=2, framealpha=0.9)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+    print(f"  Saved {output_path}")
 
 
 def order_languages(languages_present):
@@ -453,6 +555,7 @@ def main():
     rates_df = aggregate_refusal_rates(annotated_df)
     overall_df = overall_rate_per_model_language(rates_df)
     variant_df = overall_rate_per_model_variant(rates_df)
+    per_question_model, question_totals = aggregate_per_question(annotated_df)
 
     output_dir = Path(args.output_dir) if args.output_dir else results_dir / "plots" / "refusals"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -479,10 +582,19 @@ def main():
     variant_df.to_csv(variant_csv, index=False)
     print(f"  Saved {variant_csv}")
 
+    per_question_csv = output_dir / "refusal_rates_per_question.csv"
+    per_question_model.to_csv(per_question_csv, index=False)
+    print(f"  Saved {per_question_csv}")
+
+    per_question_overall_csv = output_dir / "refusal_rates_per_question_overall.csv"
+    question_totals.to_csv(per_question_overall_csv, index=False)
+    print(f"  Saved {per_question_overall_csv}")
+
     plot_heatmap(overall_df, output_dir / "refusal_heatmap.png")
     plot_per_model_languages(overall_df, output_dir / "refusal_per_model.png")
     plot_hard_vs_semantic_per_model(overall_df, output_dir / "refusal_breakdown.png")
     plot_refusal_by_variant(variant_df, output_dir / "refusal_by_variant.png")
+    plot_refusal_per_question(per_question_model, question_totals, output_dir / "refusal_per_question.png")
 
     print("\nDone.")
 

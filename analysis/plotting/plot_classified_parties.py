@@ -1,5 +1,6 @@
 import argparse
 import re
+import sys
 from pathlib import Path
 
 import matplotlib
@@ -7,12 +8,31 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.cbook import boxplot_stats
+from matplotlib.patches import Patch
 from scipy.stats import spearmanr
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from analysis.evaluate_euandi import (
+    DEFAULT_POSITIONS, POSITION_CHOICES, load_party_positions, positions_path,
+)
+from analysis.vaa_agreement_ci import (
+    agreement_matrices, bootstrap_group_means, stance_frame_for,
+)
+
 VARIANT_SUFFIX_TO_LABEL = {"": "base", "_negated": "negated", "_question": "question"}
+VARIANT_LABEL_TO_SUFFIX = {label: suffix for suffix, label in VARIANT_SUFFIX_TO_LABEL.items()}
 VARIANT_LABEL_ORDER = ["base", "negated", "question"]
 SOURCE_LABELS = ["speeches", "reasons"]
+SOURCE_DISPLAY = {"speeches": "open-ended", "reasons": "reasons"}
+# Top-to-bottom order of the stacked per-source panels, which is the reverse of
+# SOURCE_LABELS: the printed figure leads with the reasons track.
+SOURCE_PANEL_ORDER = ["reasons", "speeches"]
 VAA_SOURCE_FOR_CLASSIFIER_SOURCE = {"speeches": "vaa_speeches", "reasons": "vaa_likert"}
+# vaa_agreement_ci.py names the raw answer files by how they were elicited, not by
+# what the classifier later reads out of them.
+STANCE_SOURCE_FOR_CLASSIFIER_SOURCE = {"speeches": "speeches", "reasons": "likert"}
 
 SPEECHES_CLASSIFIED_PATTERN = re.compile(
     r"^speeches_[a-z]{2}(?:,[a-z]{2})*(?P<variant>|_negated|_question)_classified\.csv$"
@@ -21,10 +41,10 @@ REASONS_CLASSIFIED_PATTERN = re.compile(
     r"^(?!speeches_)[a-z]{2}(?:,[a-z]{2})*(?P<variant>|_negated|_question)_classified\.csv$"
 )
 VAA_LIKERT_PATTERN = re.compile(
-    r"^vaa(?P<variant>|_negated|_question)_[a-z]{2}(?:,[a-z]{2})*\.csv$"
+    r"^vaa(?P<variant>|_negated|_question)_(?P<languages>[a-z]{2}(?:,[a-z]{2})*)\.csv$"
 )
 VAA_SPEECHES_PATTERN = re.compile(
-    r"^vaa_speeches(?P<variant>|_negated|_question)_[a-z]{2}(?:,[a-z]{2})*\.csv$"
+    r"^vaa_speeches(?P<variant>|_negated|_question)_(?P<languages>[a-z]{2}(?:,[a-z]{2})*)\.csv$"
 )
 
 PREDICTED_PARTY_COLUMN_PATTERN = re.compile(
@@ -36,7 +56,10 @@ PARTY_PROBABILITY_COLUMN_PATTERN = re.compile(
 
 PARTY_DISPLAY_ORDER = ["GUE/NGL", "S&D", "Greens/EFA", "ALDE", "PPE", "ECR", "ID", "ECR+ID"]
 PARTY_COLORS = {
-    "GUE/NGL":    "#BB1E10",
+    # The group's own colour is a dark red, which sits a shade away from S&D's -- the two
+    # were indistinguishable wherever they are drawn side by side. Pushed towards magenta
+    # instead: still a red of the left, but separated (protanopic dE 4.0 -> 17.0).
+    "GUE/NGL":    "#8E1B6B",
     "S&D":        "#E2061D",
     "Greens/EFA": "#5DA13F",
     "ALDE":       "#FAD22D",
@@ -48,17 +71,70 @@ PARTY_COLORS = {
 FALLBACK_PARTY_COLOR = "#888888"
 
 MEAN_PROBABILITY_LABEL = "Mean probability"
+MEAN_AGREEMENT_LABEL = "Mean VAA agreement"
 LEGEND_UPPER_RIGHT = "upper right"
+
+BOX_MEDIAN_STYLE = {"color": "black", "linewidth": 1.3}
+
+# Sized for a figure that is reduced into a LaTeX column rather than browsed as a
+# PNG: the reduction scales the type with everything else, so the only thing that
+# survives it is the RATIO of type to figure -- the same reasoning the Layout
+# record in plot_argmax_shares.py sets out. These figures are drawn 9-14 inches
+# wide and land in a ~3.3-inch column, so a 2.5-3x reduction; the old 7-10pt
+# labels came out at 3pt on the page, which is what this block fixes. At roughly
+# 20pt on a 9-inch figure they land near 7pt printed, and the constants are
+# deliberately shared so no one figure drifts out of step with the others.
+TICK_FONTSIZE = 20
+AXIS_LABEL_FONTSIZE = 22
+TITLE_FONTSIZE = 20
+LEGEND_FONTSIZE = 17
+LEGEND_TITLE_FONTSIZE = 18
+# The per-bar value annotations sit between neighbouring bars, so they are the one
+# text that cannot simply grow -- kept a step down and dropped entirely from the
+# figures whose bars are too narrow to hold them.
+VALUE_FONTSIZE = 14
+ANNOTATION_FONTSIZE = 17
+HEATMAP_VALUE_FONTSIZE = 13
+FOOTNOTE_FONTSIZE = 11
+
+# At this type size a many-entry legend no longer fits over the bars without
+# covering them (the model legend is the worst case: up to 16 entries), so those
+# legends hang under the axes instead and the figure is saved with a tight bbox so
+# the extra rows are not cropped. Legends of two or three entries still fit in the
+# corner and stay there.
+LEGEND_BELOW = dict(loc="upper center", fontsize=LEGEND_FONTSIZE,
+                    title_fontsize=LEGEND_TITLE_FONTSIZE, framealpha=0.9)
+
+# The width the constants above are calibrated against. One figure here -- the
+# per-model box panel -- sizes itself by (parties x models) and runs to 26 inches
+# with a full model roster, so the same 20pt lands at half the printed size the
+# other figures get. type_scale keeps the type-to-figure ratio fixed instead.
+NOMINAL_FIGURE_WIDTH = 13.0
+
+
+def type_scale(figure_width):
+    """Multiplier keeping type proportional to a figure wider than the nominal one.
+    Never shrinks type: a figure narrower than nominal is already legible."""
+    return max(1.0, figure_width / NOMINAL_FIGURE_WIDTH)
 
 
 def slugify_party_label(label):
     return re.sub(r"[^0-9A-Za-z]+", "_", label).strip("_")
 
 
+# Stamped on every saved figure while set; plot_topical_parties.py uses it to mark
+# which statements a per-topic figure was drawn from, since the helpers below take
+# no title argument.
+FIGURE_FOOTNOTE = None
+
+
 def save_figure(fig, output_path, **savefig_kwargs):
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    if FIGURE_FOOTNOTE:
+        fig.text(0.99, 0.005, FIGURE_FOOTNOTE, ha="right", va="bottom",
+                 fontsize=FOOTNOTE_FONTSIZE, color="#666666")
     fig.tight_layout()
-    fig.savefig(output_path, dpi=150, **savefig_kwargs)
+    fig.savefig(output_path, dpi=300, **savefig_kwargs)
     plt.close(fig)
     print(f"  Saved {output_path}")
 
@@ -199,7 +275,7 @@ def predicted_party_share(long_df):
     return counts
 
 
-def plot_party_distribution_bar(mean_probability, predicted_share, title, output_path):
+def plot_party_distribution_bar(mean_probability, predicted_share, output_path):
     parties_present = set(mean_probability.index) | set(predicted_share.index)
     parties = ordered_parties_present(parties_present)
     if not parties:
@@ -211,7 +287,7 @@ def plot_party_distribution_bar(mean_probability, predicted_share, title, output
     shares = predicted_share.reindex(parties).fillna(0.0).to_numpy()
     bar_colors = [color_for_party(party) for party in parties]
 
-    fig, ax = plt.subplots(figsize=(max(8, len(parties) * 1.1), 5.5))
+    fig, ax = plt.subplots(figsize=(max(9, len(parties) * 1.3), 6.5))
     ax.bar(bar_positions - bar_width / 2, probabilities, width=bar_width,
            color=bar_colors, edgecolor="black", linewidth=0.5, label=MEAN_PROBABILITY_LABEL)
     ax.bar(bar_positions + bar_width / 2, shares, width=bar_width,
@@ -219,21 +295,25 @@ def plot_party_distribution_bar(mean_probability, predicted_share, title, output
            hatch="//", label="Argmax share")
 
     for position, probability in zip(bar_positions - bar_width / 2, probabilities):
-        ax.text(position, probability + 0.005, f"{probability:.2f}", ha="center", va="bottom", fontsize=7)
+        ax.text(position, probability + 0.005, f"{probability:.2f}", ha="center",
+                va="bottom", fontsize=VALUE_FONTSIZE, rotation=90)
     for position, share in zip(bar_positions + bar_width / 2, shares):
-        ax.text(position, share + 0.005, f"{share:.2f}", ha="center", va="bottom", fontsize=7)
+        ax.text(position, share + 0.005, f"{share:.2f}", ha="center",
+                va="bottom", fontsize=VALUE_FONTSIZE, rotation=90)
 
     ax.set_xticks(bar_positions)
-    ax.set_xticklabels(parties, rotation=20, ha="right", fontsize=9)
-    ax.set_ylabel("Mean class probability  /  predicted-party share")
+    ax.set_xticklabels(parties, rotation=20, ha="right", fontsize=TICK_FONTSIZE)
+    ax.tick_params(axis="y", labelsize=TICK_FONTSIZE)
+    # Shortened from "Mean class probability / predicted-party share": at this type
+    # size the old wording is taller than the axis it labels.
+    ax.set_ylabel("Probability / argmax share", fontsize=AXIS_LABEL_FONTSIZE)
     ax.set_ylim(0.0, 1.0)
     ax.grid(axis="y", linestyle="--", alpha=0.4)
-    ax.set_title(title, fontsize=11, pad=8)
-    ax.legend(loc=LEGEND_UPPER_RIGHT, fontsize=8, framealpha=0.9)
+    ax.legend(loc=LEGEND_UPPER_RIGHT, fontsize=LEGEND_FONTSIZE, framealpha=0.9)
     save_figure(fig, output_path)
 
 
-def plot_party_distribution_across_variants(mean_probability_by_variant, title, output_path):
+def plot_party_distribution_across_variants(mean_probability_by_variant, output_path):
     parties_present = set().union(*(series.index for series in mean_probability_by_variant.values()))
     parties = ordered_parties_present(parties_present)
     variants_present = [v for v in VARIANT_LABEL_ORDER if v in mean_probability_by_variant]
@@ -245,7 +325,7 @@ def plot_party_distribution_across_variants(mean_probability_by_variant, title, 
     bar_width = group_width / len(variants_present)
     variant_cmap = plt.get_cmap("tab10")
 
-    fig, ax = plt.subplots(figsize=(max(8, len(parties) * 1.2), 5.5))
+    fig, ax = plt.subplots(figsize=(max(9, len(parties) * 1.4), 6.5))
     for variant_index, variant_label in enumerate(variants_present):
         probabilities = mean_probability_by_variant[variant_label].reindex(parties).fillna(0.0).to_numpy()
         offsets = bar_positions - group_width / 2 + bar_width * (variant_index + 0.5)
@@ -254,39 +334,44 @@ def plot_party_distribution_across_variants(mean_probability_by_variant, title, 
                label=variant_label)
 
     ax.set_xticks(bar_positions)
-    ax.set_xticklabels(parties, rotation=20, ha="right", fontsize=9)
-    ax.set_ylabel("Mean class probability")
+    ax.set_xticklabels(parties, rotation=20, ha="right", fontsize=TICK_FONTSIZE)
+    ax.tick_params(axis="y", labelsize=TICK_FONTSIZE)
+    ax.set_ylabel(MEAN_PROBABILITY_LABEL, fontsize=AXIS_LABEL_FONTSIZE)
     ax.set_ylim(0.0, 1.0)
     ax.grid(axis="y", linestyle="--", alpha=0.4)
-    ax.set_title(title, fontsize=11, pad=8)
-    ax.legend(loc=LEGEND_UPPER_RIGHT, fontsize=8, framealpha=0.9, title="variant")
+    ax.legend(loc=LEGEND_UPPER_RIGHT, fontsize=LEGEND_FONTSIZE, framealpha=0.9,
+              title="variant", title_fontsize=LEGEND_TITLE_FONTSIZE)
     save_figure(fig, output_path)
 
 
-def plot_language_party_heatmap(language_party_probability, title, output_path):
+def plot_language_party_heatmap(language_party_probability, output_path):
     if language_party_probability.empty:
         return
     parties = ordered_parties_present(set(language_party_probability.columns))
     languages = sorted(language_party_probability.index)
     matrix = language_party_probability.reindex(index=languages, columns=parties).to_numpy(dtype=float)
 
-    fig, ax = plt.subplots(figsize=(max(7, len(parties) * 1.1), max(6, len(languages) * 0.35)))
+    # A cell has to hold "0.00" at the new type size, so the grid is given a fixed
+    # inch budget per cell rather than the old, tighter one.
+    fig, ax = plt.subplots(figsize=(max(9, len(parties) * 1.5),
+                                    max(7, len(languages) * 0.62)))
     image = ax.imshow(matrix, aspect="auto", cmap="viridis", vmin=0.0, vmax=max(0.3, np.nanmax(matrix)))
-    fig.colorbar(image, ax=ax, label=MEAN_PROBABILITY_LABEL, fraction=0.03, pad=0.02)
-    ax.set_xticks(range(len(parties)), parties, rotation=30, ha="right", fontsize=8)
-    ax.set_yticks(range(len(languages)), languages, fontsize=8)
-    ax.set_title(title, fontsize=11, pad=8)
+    colorbar = fig.colorbar(image, ax=ax, fraction=0.03, pad=0.02)
+    colorbar.set_label(MEAN_PROBABILITY_LABEL, fontsize=AXIS_LABEL_FONTSIZE)
+    colorbar.ax.tick_params(labelsize=TICK_FONTSIZE)
+    ax.set_xticks(range(len(parties)), parties, rotation=30, ha="right", fontsize=TICK_FONTSIZE)
+    ax.set_yticks(range(len(languages)), languages, fontsize=TICK_FONTSIZE)
     for row_index in range(len(languages)):
         for column_index in range(len(parties)):
             value = matrix[row_index, column_index]
             if not np.isnan(value):
                 ax.text(column_index, row_index, f"{value:.2f}",
-                        ha="center", va="center", fontsize=6,
+                        ha="center", va="center", fontsize=HEATMAP_VALUE_FONTSIZE,
                         color="white" if value > 0.45 else "black")
     save_figure(fig, output_path)
 
 
-def plot_all_languages_party_distribution(mean_probability_per_language, title, output_path):
+def plot_all_languages_party_distribution(mean_probability_per_language, output_path):
     languages = sorted(mean_probability_per_language)
     parties_present = set().union(*(series.index for series in mean_probability_per_language.values()))
     parties = ordered_parties_present(parties_present)
@@ -298,7 +383,7 @@ def plot_all_languages_party_distribution(mean_probability_per_language, title, 
     bar_width = group_width / len(languages)
     language_cmap = plt.get_cmap("nipy_spectral", len(languages))
 
-    fig, ax = plt.subplots(figsize=(max(10, len(parties) * 1.6), 6.5))
+    fig, ax = plt.subplots(figsize=(max(13, len(parties) * 2.1), 7.5))
     for language_index, language in enumerate(languages):
         probabilities = mean_probability_per_language[language].reindex(parties).fillna(0.0).to_numpy()
         offsets = bar_positions - group_width / 2 + bar_width * (language_index + 0.5)
@@ -307,17 +392,19 @@ def plot_all_languages_party_distribution(mean_probability_per_language, title, 
                label=language)
 
     ax.set_xticks(bar_positions)
-    ax.set_xticklabels(parties, rotation=20, ha="right", fontsize=9)
-    ax.set_ylabel(MEAN_PROBABILITY_LABEL)
+    ax.set_xticklabels(parties, rotation=20, ha="right", fontsize=TICK_FONTSIZE)
+    ax.tick_params(axis="y", labelsize=TICK_FONTSIZE)
+    ax.set_ylabel(MEAN_PROBABILITY_LABEL, fontsize=AXIS_LABEL_FONTSIZE)
     ax.set_ylim(0.0, 1.0)
     ax.grid(axis="y", linestyle="--", alpha=0.4)
-    ax.set_title(title, fontsize=11, pad=8)
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18), fontsize=7,
-              ncol=min(len(languages), 10), title="language")
+    # Fewer columns than before: the entries are two-letter codes but each now
+    # carries a legend handle sized to match 17pt text, so ten across no longer fit.
+    ax.legend(bbox_to_anchor=(0.5, -0.26), ncol=min(len(languages), 8),
+              title="language", **LEGEND_BELOW)
     save_figure(fig, output_path, bbox_inches="tight")
 
 
-def plot_speeches_vs_reasons(mean_probability_by_source, title, output_path):
+def plot_speeches_vs_reasons(mean_probability_by_source, output_path):
     sources_present = [s for s in SOURCE_LABELS if s in mean_probability_by_source]
     if len(sources_present) < 2:
         return
@@ -330,7 +417,7 @@ def plot_speeches_vs_reasons(mean_probability_by_source, title, output_path):
     bar_width = 0.4
     bar_colors = [color_for_party(party) for party in parties]
 
-    fig, ax = plt.subplots(figsize=(max(8, len(parties) * 1.1), 5.5))
+    fig, ax = plt.subplots(figsize=(max(9, len(parties) * 1.3), 6.5))
     for source_index, source in enumerate(sources_present):
         probabilities = mean_probability_by_source[source].reindex(parties).fillna(0.0).to_numpy()
         offsets = bar_positions - bar_width / 2 + bar_width * source_index
@@ -341,16 +428,17 @@ def plot_speeches_vs_reasons(mean_probability_by_source, title, output_path):
                label=source)
 
     ax.set_xticks(bar_positions)
-    ax.set_xticklabels(parties, rotation=20, ha="right", fontsize=9)
-    ax.set_ylabel("Mean class probability")
+    ax.set_xticklabels(parties, rotation=20, ha="right", fontsize=TICK_FONTSIZE)
+    ax.tick_params(axis="y", labelsize=TICK_FONTSIZE)
+    ax.set_ylabel(MEAN_PROBABILITY_LABEL, fontsize=AXIS_LABEL_FONTSIZE)
     ax.set_ylim(0.0, 1.0)
     ax.grid(axis="y", linestyle="--", alpha=0.4)
-    ax.set_title(title, fontsize=11, pad=8)
-    ax.legend(loc=LEGEND_UPPER_RIGHT, fontsize=8, framealpha=0.9, title="source")
+    ax.legend(loc=LEGEND_UPPER_RIGHT, fontsize=LEGEND_FONTSIZE, framealpha=0.9,
+              title="source", title_fontsize=LEGEND_TITLE_FONTSIZE)
     save_figure(fig, output_path)
 
 
-def plot_models_party_distribution(mean_probability_per_model, source, variant_label, output_path):
+def plot_models_party_distribution(mean_probability_per_model, output_path):
     if not mean_probability_per_model:
         return
     parties_present = set().union(*(series.index for series in mean_probability_per_model.values()))
@@ -362,24 +450,31 @@ def plot_models_party_distribution(mean_probability_per_model, source, variant_l
         for model in models
     ])
 
-    fig, ax = plt.subplots(figsize=(max(8, len(parties) * 1.1), max(5, len(models) * 0.45)))
+    fig, ax = plt.subplots(figsize=(max(10, len(parties) * 1.6), max(7, len(models) * 0.7)))
     image = ax.imshow(matrix, aspect="auto", cmap="viridis", vmin=0.0, vmax=max(0.4, matrix.max()))
-    fig.colorbar(image, ax=ax, label=MEAN_PROBABILITY_LABEL, fraction=0.03, pad=0.02)
-    ax.set_xticks(range(len(parties)), parties, rotation=30, ha="right", fontsize=12)
-    ax.set_yticks(range(len(models)), models, fontsize=12)
-    #ax.set_title(f"Mean party probability per model ({source}, {variant_label})", fontsize=11, pad=8)
+    colorbar = fig.colorbar(image, ax=ax, fraction=0.03, pad=0.02)
+    colorbar.set_label(MEAN_PROBABILITY_LABEL, fontsize=AXIS_LABEL_FONTSIZE)
+    colorbar.ax.tick_params(labelsize=TICK_FONTSIZE)
+    ax.set_xticks(range(len(parties)), parties, rotation=30, ha="right", fontsize=TICK_FONTSIZE)
+    ax.set_yticks(range(len(models)), models, fontsize=TICK_FONTSIZE)
     for row_index in range(len(models)):
         for column_index in range(len(parties)):
             value = matrix[row_index, column_index]
             ax.text(column_index, row_index, f"{value:.2f}",
-                    ha="center", va="center", fontsize=12,
+                    ha="center", va="center", fontsize=HEATMAP_VALUE_FONTSIZE,
                     color="white" if value > 0.45 else "black")
     save_figure(fig, output_path)
 
 
-def aggregate_mean_probability_per_model(mean_probability_per_model_source_variant):
+def scoped_mean_per_model(values_by_model_source_variant, source=None, variant_label=None):
+    """Per-party mean per model over the (source, variant) cells matching the
+    scope; None means "every value of that key"."""
     series_per_model = {}
-    for (model, _, _), series in mean_probability_per_model_source_variant.items():
+    for (model, csv_source, csv_variant), series in values_by_model_source_variant.items():
+        if source is not None and csv_source != source:
+            continue
+        if variant_label is not None and csv_variant != variant_label:
+            continue
         if not series.empty:
             series_per_model.setdefault(model, []).append(series)
     return {
@@ -388,41 +483,324 @@ def aggregate_mean_probability_per_model(mean_probability_per_model_source_varia
     }
 
 
-def plot_models_party_distribution_bars(mean_probability_per_model, output_path):
-    if not mean_probability_per_model:
-        return
-    parties_present = set().union(*(series.index for series in mean_probability_per_model.values()))
-    parties = ordered_parties_present(parties_present)
-    models = sorted(mean_probability_per_model)
-    if not parties or not models:
-        return
+def cross_model_scopes(values_by_model_source_variant):
+    """(source, variant, filename suffix, scope label) for the pooled cross-model
+    plot and each of its slices: per framing, per source, and every source x
+    framing cell. Slices that would just duplicate the pooled plot are dropped."""
+    keys = set(values_by_model_source_variant)
+    sources = [s for s in SOURCE_LABELS if any(key[1] == s for key in keys)]
+    variants = [v for v in VARIANT_LABEL_ORDER if any(key[2] == v for key in keys)]
 
+    scopes = [(None, None, "", "pooled over sources & variants")]
+    if len(variants) > 1:
+        scopes += [(None, v, f"_{v}", f"{v}, both sources") for v in variants]
+    if len(sources) > 1:
+        scopes += [(s, None, f"_{s}", f"{SOURCE_DISPLAY[s]}, all variants") for s in sources]
+    if len(sources) * len(variants) > 1:
+        scopes += [(s, v, f"_{s}_{v}", f"{SOURCE_DISPLAY[s]}, {v}")
+                   for s in sources for v in variants]
+    return scopes
+
+
+PERCENT_HEADROOM = 3.0
+
+
+def percent_bar_limits(values_by_model_source_variant):
+    """(0, tallest bar + headroom) over every scope plot_cross_model_party_bars draws,
+    so the figures of one run share a y-axis and can be compared as they are browsed."""
+    tallest = 0.0
+    for source, variant_label, _, _ in cross_model_scopes(values_by_model_source_variant):
+        for series in scoped_mean_per_model(
+                values_by_model_source_variant, source, variant_label).values():
+            values = 100.0 * series.to_numpy(dtype=float)
+            finite = values[np.isfinite(values)]
+            if finite.size:
+                tallest = max(tallest, float(finite.max()))
+    return (0.0, min(100.0, tallest + PERCENT_HEADROOM)) if tallest else None
+
+
+def whisker_extent(values):
+    """The whisker ends matplotlib would draw for `values` (the same 1.5 x IQR rule),
+    so a shared y-range can be worked out before the first box is drawn."""
+    finite = values[np.isfinite(values)]
+    if not finite.size:
+        return None
+    stats = boxplot_stats(finite)[0]
+    return float(stats["whislo"]), float(stats["whishi"])
+
+
+def percent_box_limits(replicates_by_model_source_variant):
+    """One padded y-range covering the whiskers of every scope plot_cross_model_vaa_boxes
+    draws. Not zero-based: the models sit within a few points of each other, so a bar from
+    zero would spend the whole axis on agreement no model is anywhere near."""
+    lowest, highest = np.inf, -np.inf
+    for source, variant_label, _, _ in cross_model_scopes(replicates_by_model_source_variant):
+        scoped = scoped_replicates_per_model(
+            replicates_by_model_source_variant, source, variant_label)
+        for replicates in scoped.values():
+            for row in 100.0 * replicates.to_numpy(dtype=float):
+                if (extent := whisker_extent(row)) is not None:
+                    lowest, highest = min(lowest, extent[0]), max(highest, extent[1])
+    if not np.isfinite(lowest):
+        return None
+    return padded_range(lowest, highest)
+
+
+def padded_range(lowest, highest):
+    """Room around the drawn values, clamped to the 0-100% a share can actually take."""
+    margin = max(0.06 * (highest - lowest), 0.5)
+    return max(0.0, lowest - margin), min(100.0, highest + margin)
+
+
+def widest_limits(limits):
+    """The union of several (low, high) ranges; None entries are ignored."""
+    present = [limit for limit in limits if limit is not None]
+    if not present:
+        return None
+    return min(low for low, _ in present), max(high for _, high in present)
+
+
+MODEL_LEGEND_NCOL = 4
+GROUP_WIDTH = 0.86
+
+
+def draw_models_party_bars(ax, value_per_model, parties, models, model_cmap,
+                           value_label, ylim, label_x=True):
+    """One grouped-bar panel: a bar per (party, model), colour-indexed by the
+    model's position in `models`.
+
+    `models` is passed in rather than derived from `value_per_model` so a panel
+    that is missing a model still colours the ones it has the same as its
+    neighbouring panel -- the whole point of a figure that shares one legend."""
     bar_positions = np.arange(len(parties))
-    group_width = 0.86
-    bar_width = group_width / len(models)
-    model_cmap = plt.get_cmap("tab20", max(len(models), 2))
-
-    fig, ax = plt.subplots(figsize=(max(9, len(parties) * 1.2), 6.0))
+    bar_width = GROUP_WIDTH / len(models)
     highest_percentage = 0.0
     for model_index, model in enumerate(models):
-        percentages = 100.0 * mean_probability_per_model[model].reindex(parties).fillna(0.0).to_numpy()
+        if model not in value_per_model:
+            continue
+        percentages = 100.0 * value_per_model[model].reindex(parties).fillna(0.0).to_numpy()
         highest_percentage = max(highest_percentage, float(percentages.max()))
-        offsets = bar_positions - group_width / 2 + bar_width * (model_index + 0.5)
+        offsets = bar_positions - GROUP_WIDTH / 2 + bar_width * (model_index + 0.5)
         ax.bar(offsets, percentages, width=bar_width,
                color=model_cmap(model_index), edgecolor="black", linewidth=0.3,
                label=model)
 
     ax.set_xticks(bar_positions)
-    ax.set_xticklabels(parties, rotation=20, ha="right", fontsize=10)
+    # The upper panel of a stacked figure hands its x-labels to the lower one;
+    # ticks stay so the party boundaries still read across both panels.
+    ax.set_xticklabels(parties if label_x else [""] * len(parties),
+                       rotation=20, ha="right", fontsize=TICK_FONTSIZE)
+    ax.tick_params(axis="y", labelsize=TICK_FONTSIZE)
     ax.set_xlim(-0.5, len(parties) - 0.5)
-    ax.set_ylabel(f"{MEAN_PROBABILITY_LABEL} (%)")
-    ax.set_ylim(0.0, min(100.0, max(35.0, highest_percentage * 1.35)))
+    ax.set_ylabel(f"{value_label} (%)", fontsize=AXIS_LABEL_FONTSIZE)
+    ax.set_ylim(*(ylim or (0.0, min(100.0, highest_percentage + PERCENT_HEADROOM))))
     ax.grid(axis="y", linestyle="--", alpha=0.4)
-    ax.set_title("Mean party probability per model (pooled over sources & variants)",
-                 fontsize=11, pad=8)
-    ax.legend(loc=LEGEND_UPPER_RIGHT, fontsize=8, framealpha=0.9,
-              ncol=2, title="model")
-    save_figure(fig, output_path)
+    ax.set_axisbelow(True)
+
+
+def plot_models_party_bars(value_per_model, value_label, output_path, ylim=None):
+    if not value_per_model:
+        return
+    parties_present = set().union(*(series.index for series in value_per_model.values()))
+    parties = ordered_parties_present(parties_present)
+    models = sorted(value_per_model)
+    if not parties or not models:
+        return
+
+    # Wider than the old 9 inches: this is the figure the thesis prints (mean
+    # probability per model, one panel per source), and at 20pt type the bars need
+    # the room the legend used to take over them.
+    fig, ax = plt.subplots(figsize=(max(13, len(parties) * 2.0), 7.5))
+    draw_models_party_bars(ax, value_per_model, parties, models,
+                           plt.get_cmap("tab20", max(len(models), 2)), value_label, ylim)
+    # Moved out from under "upper right": a 16-model legend at 17pt covers the
+    # tallest bars, which on this figure are the finding. The offset clears the
+    # rotated party labels, which at 20pt reach well below the axes.
+    ax.legend(bbox_to_anchor=(0.5, -0.26), ncol=min(len(models), MODEL_LEGEND_NCOL),
+              title="model", **LEGEND_BELOW)
+    save_figure(fig, output_path, bbox_inches="tight")
+
+
+def plot_models_party_bars_stacked(value_per_model_per_panel, value_label, output_path,
+                                   ylim=None):
+    """The per-source figures stacked into one, sharing a single legend.
+
+    Two copies of a 13-entry model legend is the most expensive thing on the page
+    when the two panels are placed side by side in LaTeX -- it is the same legend
+    twice, and at the type size these figures now use it costs more vertical space
+    than either panel's bars. Panels therefore share one x-axis and one legend
+    below, and the y-range is shared too so a bar in the upper panel can be
+    compared against the lower one by eye rather than by reading both axes.
+
+    `value_per_model_per_panel` is {panel title: {model: per-party series}}, drawn
+    top to bottom in the order given."""
+    panels = [(title, values) for title, values in value_per_model_per_panel.items() if values]
+    if len(panels) < 2:
+        return
+    parties_present = set().union(
+        *(series.index for _, values in panels for series in values.values()))
+    parties = ordered_parties_present(parties_present)
+    # The union, so a model present in only one panel still gets a legend entry and
+    # keeps one colour throughout.
+    models = sorted({model for _, values in panels for model in values})
+    if not parties or not models:
+        return
+
+    model_cmap = plt.get_cmap("tab20", max(len(models), 2))
+    ylim = ylim or (0.0, min(100.0, PERCENT_HEADROOM + max(
+        100.0 * float(np.nanmax(series.to_numpy(dtype=float)))
+        for _, values in panels for series in values.values())))
+
+    figure_width = max(13, len(parties) * 2.0)
+    fig, axes = plt.subplots(len(panels), 1, figsize=(figure_width, 5.5 * len(panels)),
+                             sharex=True)
+    for index, (ax, (title, values)) in enumerate(zip(axes, panels)):
+        draw_models_party_bars(ax, values, parties, models, model_cmap, value_label,
+                               ylim, label_x=index == len(panels) - 1)
+        ax.set_title(title, fontsize=TITLE_FONTSIZE)
+
+    # Hung off the bottom panel, so the offset is measured against one panel's
+    # height rather than the whole stack's.
+    axes[-1].legend(bbox_to_anchor=(0.5, -0.30), ncol=min(len(models), MODEL_LEGEND_NCOL),
+                    title="model", **LEGEND_BELOW)
+    save_figure(fig, output_path, bbox_inches="tight")
+
+
+def plot_models_party_boxes(replicates_per_model, value_label, output_path, ylim=None):
+    """One box per (party, model) over the bootstrap distribution of that model's
+    mean agreement: box = IQR, whiskers = the usual 1.5 x IQR, line = the median.
+
+    Bars from zero would spend the whole axis on agreement no model is anywhere near:
+    the models sit within a few points of each other, so the y-range is clipped to the
+    boxes drawn -- shared across the run when `ylim` is given, this figure's own
+    otherwise."""
+    if not replicates_per_model:
+        return
+    parties_present = set().union(
+        *(replicates.index for replicates in replicates_per_model.values()))
+    parties = ordered_parties_present(parties_present)
+    models = sorted(replicates_per_model)
+    if not parties or not models:
+        return
+
+    party_positions = np.arange(len(parties))
+    group_width = 0.86
+    slot_width = group_width / len(models)
+    model_cmap = plt.get_cmap("tab20", max(len(models), 2))
+
+    figure_width = max(13.0, len(parties) * len(models) * 0.34)
+    scale = type_scale(figure_width)
+    fig, ax = plt.subplots(figsize=(figure_width, 7.5 * scale))
+    lowest, highest = np.inf, -np.inf
+    for model_index, model in enumerate(models):
+        values = 100.0 * replicates_per_model[model].reindex(parties).to_numpy(dtype=float)
+        offsets = party_positions - group_width / 2 + slot_width * (model_index + 0.5)
+        drawn = [(row[np.isfinite(row)], offset) for row, offset in zip(values, offsets)]
+        drawn = [(row, offset) for row, offset in drawn if row.size]
+        if not drawn:
+            continue
+        parts = ax.boxplot(
+            [row for row, _ in drawn], positions=[offset for _, offset in drawn],
+            widths=slot_width * 0.78, patch_artist=True, showfliers=False,
+            medianprops=BOX_MEDIAN_STYLE, manage_ticks=False,
+        )
+        style_boxes(parts, model_cmap(model_index))
+        for whisker in parts["whiskers"]:
+            lowest = min(lowest, float(np.min(whisker.get_ydata())))
+            highest = max(highest, float(np.max(whisker.get_ydata())))
+
+    ax.set_ylim(*(ylim or padded_range(lowest, highest)))
+    ax.set_xticks(party_positions)
+    ax.set_xticklabels(parties, rotation=20, ha="right", fontsize=TICK_FONTSIZE * scale)
+    ax.tick_params(axis="y", labelsize=TICK_FONTSIZE * scale)
+    ax.set_xlim(-0.5, len(parties) - 0.5)
+    for boundary in party_positions[:-1] + 0.5:
+        ax.axvline(boundary, color="black", linewidth=0.5, alpha=0.15)
+    ax.set_ylabel(f"{value_label} (%)", fontsize=AXIS_LABEL_FONTSIZE * scale)
+    ax.grid(axis="y", linestyle="--", alpha=0.4)
+    ax.set_axisbelow(True)
+    ax.legend(
+        handles=[Patch(facecolor=model_cmap(index), edgecolor="black", linewidth=0.7,
+                       alpha=0.85, label=model) for index, model in enumerate(models)],
+        **{**LEGEND_BELOW,
+           "fontsize": LEGEND_FONTSIZE * scale,
+           "title_fontsize": LEGEND_TITLE_FONTSIZE * scale},
+        bbox_to_anchor=(0.5, -0.26), ncol=min(len(models), 4), title="model",
+    )
+    save_figure(fig, output_path, bbox_inches="tight")
+
+
+def style_boxes(parts, facecolor):
+    for box in parts["boxes"]:
+        box.set_facecolor(facecolor)
+        box.set_edgecolor("black")
+        box.set_linewidth(0.7)
+        box.set_alpha(0.85)
+    for key in ("whiskers", "caps"):
+        for artist in parts[key]:
+            artist.set_color("#444444")
+            artist.set_linewidth(0.9)
+
+
+def plot_cross_model_vaa_boxes(replicates_by_model_source_variant, value_label,
+                               dataset_plots_dir, filename_stem, ylim=None):
+    """One box figure per scope, mirroring plot_cross_model_party_bars. The scopes share
+    a y-axis; pass `ylim` to widen that to a whole run of calls."""
+    ylim = ylim or percent_box_limits(replicates_by_model_source_variant)
+    for source, variant_label, suffix, scope_label in cross_model_scopes(replicates_by_model_source_variant):
+        scoped = scoped_replicates_per_model(
+            replicates_by_model_source_variant, source, variant_label)
+        if len(scoped) < 2:
+            print(f"  only {len(scoped)} model(s) for '{scope_label}', skipping.")
+            continue
+        plot_models_party_boxes(
+            scoped, value_label, dataset_plots_dir / f"{filename_stem}{suffix}.png", ylim)
+
+
+def plot_cross_model_party_bars(values_by_model_source_variant, value_label,
+                                dataset_plots_dir, filename_stem, ylim=None):
+    """One grouped-bar figure per scope: pooled, per framing, per source, per cell. The
+    scopes share a y-axis; pass `ylim` to widen that to a whole run of calls."""
+    ylim = ylim or percent_bar_limits(values_by_model_source_variant)
+    for source, variant_label, suffix, scope_label in cross_model_scopes(values_by_model_source_variant):
+        value_per_model = scoped_mean_per_model(values_by_model_source_variant, source, variant_label)
+        if len(value_per_model) < 2:
+            print(f"  only {len(value_per_model)} model(s) for '{scope_label}', skipping.")
+            continue
+        plot_models_party_bars(
+            value_per_model, value_label, dataset_plots_dir / f"{filename_stem}{suffix}.png", ylim)
+
+
+def plot_cross_model_source_panels(values_by_model_source_variant, value_label,
+                                   dataset_plots_dir, filename_stem, ylim=None):
+    """The per-source figures again, but stacked into one shared-legend figure per
+    framing scope -- the layout the thesis prints, where the two panels otherwise
+    carry the same 13-entry legend twice.
+
+    One figure per framing (pooled, base, negated) rather than per full scope: the
+    panels ARE the sources, so a source-restricted scope has nothing to stack."""
+    ylim = ylim or percent_bar_limits(values_by_model_source_variant)
+    keys = set(values_by_model_source_variant)
+    # Reasons on top, open-ended below -- SOURCE_LABELS' own order is the reverse,
+    # and this figure is laid out to match the printed one.
+    sources = [source for source in SOURCE_PANEL_ORDER if any(key[1] == source for key in keys)]
+    if len(sources) < 2:
+        return
+    variants = [variant for variant in VARIANT_LABEL_ORDER if any(key[2] == variant for key in keys)]
+    scopes = [(None, "")] + ([(variant, f"_{variant}") for variant in variants]
+                             if len(variants) > 1 else [])
+    for variant_label, suffix in scopes:
+        panels = {
+            f"Source: {SOURCE_DISPLAY[source]}": scoped_mean_per_model(
+                values_by_model_source_variant, source, variant_label)
+            for source in sources
+        }
+        if any(len(values) < 2 for values in panels.values()):
+            print(f"  fewer than two models in a source panel for "
+                  f"'{variant_label or 'pooled'}', skipping the stacked figure.")
+            continue
+        plot_models_party_bars_stacked(
+            panels, value_label, dataset_plots_dir / f"{filename_stem}{suffix}.png", ylim)
 
 
 def discover_vaa_csvs(model_dir):
@@ -437,6 +815,84 @@ def discover_vaa_csvs(model_dir):
         variant_label = VARIANT_SUFFIX_TO_LABEL[match.group("variant")]
         vaa_by_source_and_variant[(classifier_source, variant_label)] = path
     return vaa_by_source_and_variant
+
+
+def languages_in_vaa_filename(path):
+    match = VAA_SPEECHES_PATTERN.match(path.name) or VAA_LIKERT_PATTERN.match(path.name)
+    return match.group("languages")
+
+
+def vaa_groups_are_collapsed(vaa_csv_paths):
+    """evaluate_euandi.py may be run with --collapse-ecr-id; its CSVs are the only
+    record of which way it went, so the bootstrap has to follow them."""
+    return any(
+        "ECR+ID" in set(pd.read_csv(path, usecols=["ep_group"])["ep_group"])
+        for path in vaa_csv_paths
+    )
+
+
+def load_vaa_agreement_replicates(model_dirs, positions, bootstrap_draws, seed):
+    """{(model, source, variant): mean agreement per party per bootstrap draw}.
+
+    The vaa*.csv files hold agreement already averaged over statements, so they cannot
+    say how much of a gap between two models is statement-sampling noise. Recompute the
+    per-party means from the raw answers and resample statements -- the unit that is
+    actually sampled -- as vaa_agreement_ci.py does. Every model and scope is scored on
+    the same draws, so the replicates stay comparable and can be averaged across the
+    (source, variant) cells a plotted scope pools over.
+    """
+    vaa_csvs_per_model = {model_dir: discover_vaa_csvs(model_dir) for model_dir in model_dirs}
+    every_vaa_csv = [path for csvs in vaa_csvs_per_model.values() for path in csvs.values()]
+    if not every_vaa_csv:
+        return {}
+
+    party_df = load_party_positions(positions_path(positions), positions)
+    if vaa_groups_are_collapsed(every_vaa_csv):
+        party_df["ep_group"] = party_df["ep_group"].replace({"ECR": "ECR+ID", "ID": "ECR+ID"})
+    party_df = party_df.dropna(subset=["ep_group"])
+    statement_index = np.sort(party_df["statement_idx"].unique())
+    groups = sorted(party_df["ep_group"].unique())
+
+    rng = np.random.default_rng(seed)
+    draws = rng.integers(0, len(statement_index), size=(bootstrap_draws, len(statement_index)))
+
+    replicates_per_model_source_variant = {}
+    for model_dir, vaa_csvs in vaa_csvs_per_model.items():
+        for (source, variant_label), path in vaa_csvs.items():
+            stance_df, languages = stance_frame_for(
+                str(model_dir.parent), model_dir.name,
+                STANCE_SOURCE_FOR_CLASSIFIER_SOURCE[source],
+                VARIANT_LABEL_TO_SUFFIX[variant_label],
+                languages_in_vaa_filename(path),
+            )
+            if stance_df is None:
+                continue
+            matrices = agreement_matrices(
+                stance_df, languages, party_df, groups, statement_index)
+            if not matrices[1].any():
+                continue
+            _, replicates = bootstrap_group_means(matrices, draws)
+            replicates_per_model_source_variant[(model_dir.name, source, variant_label)] = (
+                pd.DataFrame(replicates, index=groups))
+    return replicates_per_model_source_variant
+
+
+def scoped_replicates_per_model(replicates_by_model_source_variant, source=None, variant_label=None):
+    """Per-model replicates per party, averaged over the (source, variant) cells
+    matching the scope; None means "every value of that key". The cells share
+    bootstrap draws, so averaging them draw by draw gives the pooled figure its own
+    sampling distribution rather than a mixture of the cells'."""
+    cells_per_model = {}
+    for (model, csv_source, csv_variant), cell in replicates_by_model_source_variant.items():
+        if source is not None and csv_source != source:
+            continue
+        if variant_label is not None and csv_variant != variant_label:
+            continue
+        cells_per_model.setdefault(model, []).append(cell)
+    return {
+        model: sum(cells) / len(cells)
+        for model, cells in cells_per_model.items()
+    }
 
 
 def load_vaa_mean_agreement_per_party(vaa_csv_path):
@@ -495,24 +951,30 @@ def build_vaa_comparison_row(model_name, source, variant_label, classifier_mean_
 
 
 def plot_classifier_vs_vaa_scatter(classifier_mean_prob, vaa_mean_agreement,
-                                   spearman_rho, title, output_path):
+                                   spearman_rho, output_path):
     parties = sorted(set(classifier_mean_prob.index) & set(vaa_mean_agreement.index))
     if len(parties) < 2:
         return
     classifier_values = classifier_mean_prob.reindex(parties).to_numpy(dtype=float)
     vaa_values = vaa_mean_agreement.reindex(parties).to_numpy(dtype=float)
 
-    fig, ax = plt.subplots(figsize=(7, 6.5))
+    fig, ax = plt.subplots(figsize=(9, 8.0))
     for party, vaa_value, classifier_value in zip(parties, vaa_values, classifier_values):
-        ax.scatter(vaa_value, classifier_value, s=140, color=color_for_party(party),
+        ax.scatter(vaa_value, classifier_value, s=260, color=color_for_party(party),
                    edgecolor="black", linewidth=0.6, zorder=4)
-        ax.annotate(party, (vaa_value, classifier_value), xytext=(6, 4),
-                    textcoords="offset points", fontsize=8)
+        ax.annotate(party, (vaa_value, classifier_value), xytext=(8, 6),
+                    textcoords="offset points", fontsize=ANNOTATION_FONTSIZE)
 
-    ax.set_xlabel("VAA mean agreement (averaged over languages)")
-    ax.set_ylabel("Classifier mean probability (averaged over texts)")
+    # Both labels shortened: at 22pt the parenthetical qualifiers ran past the
+    # panel. What they averaged over is the caption's job, not the axis's.
+    ax.set_xlabel("VAA mean agreement", fontsize=AXIS_LABEL_FONTSIZE)
+    ax.set_ylabel("Classifier mean probability", fontsize=AXIS_LABEL_FONTSIZE)
+    ax.tick_params(labelsize=TICK_FONTSIZE)
     ax.grid(linestyle="--", alpha=0.4)
-    ax.set_title(f"{title}\nSpearman ρ = {spearman_rho:.3f}", fontsize=11, pad=8)
+    # The correlation is the point of the figure, so it stays on the panel now
+    # that the title is gone.
+    ax.text(0.02, 0.98, f"Spearman ρ = {spearman_rho:.3f}", transform=ax.transAxes,
+            ha="left", va="top", fontsize=ANNOTATION_FONTSIZE)
     save_figure(fig, output_path)
 
 
@@ -528,20 +990,21 @@ def plot_cross_model_vaa_correlation_heatmap(comparison_rows, value_column, valu
     pivoted = pivoted.sort_index().sort_index(axis=1)
     matrix = pivoted.to_numpy(dtype=float)
 
-    fig, ax = plt.subplots(figsize=(max(7, pivoted.shape[1] * 1.1),
-                                    max(5, pivoted.shape[0] * 0.5)))
+    fig, ax = plt.subplots(figsize=(max(10, pivoted.shape[1] * 1.7),
+                                    max(7, pivoted.shape[0] * 0.7)))
     image = ax.imshow(matrix, aspect="auto", cmap="RdBu_r", vmin=-1.0, vmax=1.0)
-    fig.colorbar(image, ax=ax, label=value_label, fraction=0.03, pad=0.02)
-    ax.set_xticks(range(pivoted.shape[1]), pivoted.columns, rotation=30, ha="right", fontsize=9)
-    ax.set_yticks(range(pivoted.shape[0]), pivoted.index, fontsize=9)
-    ax.set_title(value_label + " between classifier and VAA (per model × source · variant)",
-                 fontsize=11, pad=8)
+    colorbar = fig.colorbar(image, ax=ax, fraction=0.03, pad=0.02)
+    colorbar.set_label(value_label, fontsize=AXIS_LABEL_FONTSIZE)
+    colorbar.ax.tick_params(labelsize=TICK_FONTSIZE)
+    ax.set_xticks(range(pivoted.shape[1]), pivoted.columns, rotation=30, ha="right",
+                  fontsize=TICK_FONTSIZE)
+    ax.set_yticks(range(pivoted.shape[0]), pivoted.index, fontsize=TICK_FONTSIZE)
     for row_index in range(pivoted.shape[0]):
         for column_index in range(pivoted.shape[1]):
             value = matrix[row_index, column_index]
             if not np.isnan(value):
                 ax.text(column_index, row_index, f"{value:.2f}",
-                        ha="center", va="center", fontsize=8,
+                        ha="center", va="center", fontsize=HEATMAP_VALUE_FONTSIZE,
                         color="white" if abs(value) > 0.6 else "black")
     save_figure(fig, output_path)
 
@@ -552,17 +1015,15 @@ def plots_dir_for(model_dir):
     return plots_dir
 
 
-def plot_classifier_distributions_for_one_csv(model_name, source, variant_label,
+def plot_classifier_distributions_for_one_csv(source, variant_label,
                                               classifier_mean_prob, classifier_argmax_share,
                                               long_df, plots_dir):
     plot_party_distribution_bar(
         classifier_mean_prob, classifier_argmax_share,
-        f"{model_name} – {source} ({variant_label}): party distribution",
         plots_dir / f"classified_{source}_{variant_label}_party_distribution.png",
     )
     plot_language_party_heatmap(
         mean_probability_per_language_and_party(long_df),
-        f"{model_name} – {source} ({variant_label}): mean party probability per language",
         plots_dir / f"classified_{source}_{variant_label}_language_party_heatmap.png",
     )
 
@@ -587,7 +1048,6 @@ def compare_classifier_to_vaa(model_name, source, variant_label,
     plot_classifier_vs_vaa_scatter(
         classifier_mean_prob, vaa_mean_agreement,
         comparison_row["spearman_rho_mean_prob_vs_vaa"],
-        f"{model_name} – {source} ({variant_label}): classifier mean probability vs VAA mean agreement",
         plots_dir / f"classified_vs_vaa_{source}_{variant_label}_scatter.png",
     )
     return comparison_row
@@ -617,8 +1077,8 @@ def mean_probability_and_share_per_language(long_by_source_variant):
     }
 
 
-def plot_per_language_distributions_for_scope(model_name, long_by_source_variant, classified_plots_dir,
-                                              file_prefix, scope_label):
+def plot_per_language_distributions_for_scope(long_by_source_variant, classified_plots_dir,
+                                              file_prefix):
     per_language = mean_probability_and_share_per_language(long_by_source_variant)
     if not per_language:
         return
@@ -626,23 +1086,19 @@ def plot_per_language_distributions_for_scope(model_name, long_by_source_variant
     for language, (mean_probability, predicted_share) in sorted(per_language.items()):
         plot_party_distribution_bar(
             mean_probability, predicted_share,
-            f"{model_name} – party distribution ({language}, {scope_label})",
             classified_plots_dir / f"classified_{file_prefix}{language}.png",
         )
 
     plot_all_languages_party_distribution(
         {language: mean_probability for language, (mean_probability, _) in per_language.items()},
-        f"{model_name} – party distribution by language ({scope_label})",
         classified_plots_dir / f"classified_{file_prefix}all_languages.png",
     )
 
 
-def plot_per_language_distributions(model_name, long_by_source_variant, plots_dir):
+def plot_per_language_distributions(long_by_source_variant, plots_dir):
     classified_plots_dir = plots_dir / "classified"
     plot_per_language_distributions_for_scope(
-        model_name, long_by_source_variant, classified_plots_dir,
-        file_prefix="", scope_label="pooled over sources & variants",
-    )
+        long_by_source_variant, classified_plots_dir, file_prefix="")
     for source in SOURCE_LABELS:
         long_for_source = {
             (csv_source, variant_label): long_df
@@ -650,9 +1106,7 @@ def plot_per_language_distributions(model_name, long_by_source_variant, plots_di
             if csv_source == source
         }
         plot_per_language_distributions_for_scope(
-            model_name, long_for_source, classified_plots_dir,
-            file_prefix=f"{source}_", scope_label=f"{source}, all variants",
-        )
+            long_for_source, classified_plots_dir, file_prefix=f"{source}_")
 
 
 def language_party_matrix_from_vaa(vaa_csvs):
@@ -707,16 +1161,21 @@ def plot_per_language_bar_panel(ax, matrix, parties, ylabel, title):
     ax.bar(x_positions, mean_values, width=0.7,
            color=bar_colors, edgecolor="black", linewidth=0.6, alpha=0.85, zorder=2)
     for x_position, value in zip(x_positions, mean_values):
-        ax.text(x_position, value + 0.005, f"{value:.2f}", ha="center", va="bottom", fontsize=7)
+        ax.text(x_position, value + 0.005, f"{value:.2f}", ha="center", va="bottom",
+                fontsize=VALUE_FONTSIZE)
 
-    ax.set_xticks(x_positions, parties, rotation=20, ha="right", fontsize=9)
-    ax.set_ylabel(ylabel)
+    ax.set_xticks(x_positions, parties, rotation=20, ha="right", fontsize=TICK_FONTSIZE)
+    ax.tick_params(axis="y", labelsize=TICK_FONTSIZE)
+    ax.set_ylabel(ylabel, fontsize=AXIS_LABEL_FONTSIZE)
     ax.set_ylim(bottom=0.0)
-    ax.set_title(f"{title} ({len(languages_with_data)} languages)", fontsize=10)
+    # Two panels side by side, so this is the one title that has to stay short --
+    # the per-panel wording is trimmed at the call site for the same reason.
+    ax.set_title(f"{title} ({len(languages_with_data)} languages)",
+                 fontsize=TITLE_FONTSIZE)
     ax.grid(axis="y", linestyle="--", alpha=0.3)
 
 
-def plot_pooled_per_language_overview(model_name, long_by_source_variant, vaa_csvs, plots_dir):
+def plot_pooled_per_language_overview(long_by_source_variant, vaa_csvs, plots_dir):
     classifier_matrix = language_party_matrix_from_classifier(long_by_source_variant)
     vaa_matrix = language_party_matrix_from_vaa(vaa_csvs)
     if classifier_matrix.empty and vaa_matrix.empty:
@@ -727,27 +1186,22 @@ def plot_pooled_per_language_overview(model_name, long_by_source_variant, vaa_cs
         return
 
     fig, (ax_vaa, ax_clf) = plt.subplots(
-        1, 2, figsize=(max(14, len(parties) * 2.0), 6.0)
+        1, 2, figsize=(max(20, len(parties) * 3.0), 8.0)
     )
     plot_per_language_bar_panel(
         ax_vaa, vaa_matrix, parties,
-        ylabel="VAA mean agreement",
-        title="VAA mean agreement per language",
+        ylabel=MEAN_AGREEMENT_LABEL,
+        title="VAA agreement",
     )
     plot_per_language_bar_panel(
         ax_clf, classifier_matrix, parties,
         ylabel="Classifier mean probability",
-        title="Classifier mean probability per language",
-    )
-    fig.suptitle(
-        f"{model_name}: crosslingual variance per party "
-        f"(pooled over sources & variants)",
-        fontsize=11,
+        title="Classifier probability",
     )
     save_figure(fig, plots_dir / "classified_vs_vaa_per_language.png")
 
 
-def plot_pooled_classifier_vs_vaa(model_name, long_by_source_variant, vaa_csvs, plots_dir):
+def plot_pooled_classifier_vs_vaa(long_by_source_variant, vaa_csvs, plots_dir):
     if not long_by_source_variant or not vaa_csvs:
         return
 
@@ -770,13 +1224,11 @@ def plot_pooled_classifier_vs_vaa(model_name, long_by_source_variant, vaa_csvs, 
     spearman_rho = spearman_rho_between_party_vectors(classifier_mean_prob, vaa_mean_agreement)
     plot_classifier_vs_vaa_scatter(
         classifier_mean_prob, vaa_mean_agreement, spearman_rho,
-        f"{model_name} – pooled (speeches+reasons, all variants): "
-        f"classifier mean probability vs VAA mean agreement",
         plots_dir / "classified_vs_vaa_pooled_scatter.png",
     )
 
 
-def plot_per_source_aggregates(model_name, long_by_source_variant, plots_dir):
+def plot_per_source_aggregates(long_by_source_variant, plots_dir):
     mean_probability_per_source = {}
     for source in SOURCE_LABELS:
         mean_probability_by_variant = {
@@ -787,7 +1239,6 @@ def plot_per_source_aggregates(model_name, long_by_source_variant, plots_dir):
         if mean_probability_by_variant:
             plot_party_distribution_across_variants(
                 mean_probability_by_variant,
-                f"{model_name} – {source}: party distribution across variants",
                 plots_dir / f"classified_{source}_party_distribution_variants.png",
             )
         long_for_source = [
@@ -801,7 +1252,6 @@ def plot_per_source_aggregates(model_name, long_by_source_variant, plots_dir):
     if len(mean_probability_per_source) >= 2:
         plot_speeches_vs_reasons(
             mean_probability_per_source,
-            f"{model_name} – speeches vs reasons: party distribution (all variants)",
             plots_dir / "classified_speeches_vs_reasons_party_distribution.png",
         )
 
@@ -814,30 +1264,37 @@ def write_vaa_summary_csv(model_dir, vaa_comparison_rows):
     print(f"  Wrote {summary_path.relative_to(summary_path.parents[2])}")
 
 
-def process_model(model_dir):
-    print(f"\nProcessing: {model_dir.name}")
+def load_model_predictions(model_dir):
+    """Long predictions per (source, variant), with no plotting: the cross-model
+    plots are drawn from these before any per-model figure is generated."""
+    print(f"\nLoading: {model_dir.name}")
     classified_csvs = discover_classified_csvs(model_dir)
     if not classified_csvs:
         print("  No *_classified.csv files found, skipping.")
-        return {}, []
+        return {}
 
-    plots_dir = plots_dir_for(model_dir)
-    vaa_csvs = discover_vaa_csvs(model_dir)
     long_by_source_variant = {}
-    vaa_comparison_rows = []
-
     for (source, variant_label), csv_path in sorted(classified_csvs.items()):
         long_df = load_long_predictions(csv_path)
         if long_df.empty:
             print(f"  [{source}/{variant_label}] no predictions found in {csv_path.name}")
             continue
         long_by_source_variant[(source, variant_label)] = long_df
+    return long_by_source_variant
 
+
+def process_model(model_dir, long_by_source_variant):
+    print(f"\nProcessing: {model_dir.name}")
+    plots_dir = plots_dir_for(model_dir)
+    vaa_csvs = discover_vaa_csvs(model_dir)
+    vaa_comparison_rows = []
+
+    for (source, variant_label), long_df in sorted(long_by_source_variant.items()):
         classifier_mean_prob = mean_probability_per_party(long_df)
         classifier_argmax_share = predicted_party_share(long_df)
 
         plot_classifier_distributions_for_one_csv(
-            model_dir.name, source, variant_label,
+            source, variant_label,
             classifier_mean_prob, classifier_argmax_share, long_df, plots_dir,
         )
         comparison_row = compare_classifier_to_vaa(
@@ -848,17 +1305,12 @@ def process_model(model_dir):
         if comparison_row is not None:
             vaa_comparison_rows.append(comparison_row)
 
-    plot_per_source_aggregates(model_dir.name, long_by_source_variant, plots_dir)
-    plot_pooled_classifier_vs_vaa(model_dir.name, long_by_source_variant, vaa_csvs, plots_dir)
-    plot_pooled_per_language_overview(model_dir.name, long_by_source_variant, vaa_csvs, plots_dir)
-    plot_per_language_distributions(model_dir.name, long_by_source_variant, plots_dir)
+    plot_per_source_aggregates(long_by_source_variant, plots_dir)
+    plot_pooled_classifier_vs_vaa(long_by_source_variant, vaa_csvs, plots_dir)
+    plot_pooled_per_language_overview(long_by_source_variant, vaa_csvs, plots_dir)
+    plot_per_language_distributions(long_by_source_variant, plots_dir)
     write_vaa_summary_csv(model_dir, vaa_comparison_rows)
-
-    classifier_mean_prob_per_source_variant = {
-        (source, variant_label): mean_probability_per_party(long_df)
-        for (source, variant_label), long_df in long_by_source_variant.items()
-    }
-    return classifier_mean_prob_per_source_variant, vaa_comparison_rows
+    return vaa_comparison_rows
 
 
 def plot_cross_model_comparisons(mean_probability_per_model_source_variant, dataset_plots_dir):
@@ -870,15 +1322,20 @@ def plot_cross_model_comparisons(mean_probability_per_model_source_variant, data
         if len(per_model) < 2:
             continue
         plot_models_party_distribution(
-            per_model, source, variant_label,
-            dataset_plots_dir / f"classified_{source}_{variant_label}_models.png",
-        )
+            per_model, dataset_plots_dir / f"classified_{source}_{variant_label}_models.png")
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", default="euandi_2024")
     parser.add_argument("--model", default=None)
+    parser.add_argument("--positions", default=DEFAULT_POSITIONS, choices=POSITION_CHOICES,
+                        help="Which euandi answers stand for an EP group when the VAA "
+                             "confidence intervals are recomputed; must match the basis "
+                             "evaluate_euandi.py wrote the vaa*.csv files with.")
+    parser.add_argument("--bootstrap", default=10000, type=int,
+                        help="Bootstrap draws behind the VAA agreement intervals.")
+    parser.add_argument("--seed", default=42, type=int)
     return parser.parse_args()
 
 
@@ -894,23 +1351,48 @@ def main():
     if not model_dirs:
         raise SystemExit("No model directories found.")
 
-    mean_probability_per_model_source_variant = {}
-    vaa_comparison_rows_across_models = []
+    predictions_by_model = {}
     for model_dir in model_dirs:
-        per_source_variant, vaa_comparison_rows = process_model(model_dir)
-        for (source, variant_label), series in per_source_variant.items():
-            mean_probability_per_model_source_variant[(model_dir.name, source, variant_label)] = series
-        vaa_comparison_rows_across_models.extend(vaa_comparison_rows)
+        long_by_source_variant = load_model_predictions(model_dir)
+        if long_by_source_variant:
+            predictions_by_model[model_dir] = long_by_source_variant
 
+    mean_probability_per_model_source_variant = {
+        (model_dir.name, source, variant_label): mean_probability_per_party(long_df)
+        for model_dir, long_by_source_variant in predictions_by_model.items()
+        for (source, variant_label), long_df in long_by_source_variant.items()
+    }
     models_with_data = {model for model, _, _ in mean_probability_per_model_source_variant}
+    dataset_plots_dir = results_dir / "plots"
+
     if len(models_with_data) > 1:
-        dataset_plots_dir = results_dir / "plots"
         dataset_plots_dir.mkdir(exist_ok=True)
-        plot_cross_model_comparisons(mean_probability_per_model_source_variant, dataset_plots_dir)
-        plot_models_party_distribution_bars(
-            aggregate_mean_probability_per_model(mean_probability_per_model_source_variant),
-            dataset_plots_dir / "classified_all_models_party_distribution.png",
+        print("\nCross-model party distributions:")
+        plot_cross_model_party_bars(
+            mean_probability_per_model_source_variant, MEAN_PROBABILITY_LABEL,
+            dataset_plots_dir, "classified_all_models_party_distribution",
         )
+        plot_cross_model_source_panels(
+            mean_probability_per_model_source_variant, MEAN_PROBABILITY_LABEL,
+            dataset_plots_dir, "classified_all_models_party_distribution_sources",
+        )
+
+    vaa_replicates_per_model_source_variant = load_vaa_agreement_replicates(
+        model_dirs, args.positions, args.bootstrap, args.seed)
+    if len({model for model, _, _ in vaa_replicates_per_model_source_variant}) > 1:
+        dataset_plots_dir.mkdir(exist_ok=True)
+        print("\nCross-model VAA agreement:")
+        plot_cross_model_vaa_boxes(
+            vaa_replicates_per_model_source_variant, MEAN_AGREEMENT_LABEL,
+            dataset_plots_dir, "vaa_all_models_mean_agreement",
+        )
+
+    vaa_comparison_rows_across_models = []
+    for model_dir, long_by_source_variant in predictions_by_model.items():
+        vaa_comparison_rows_across_models.extend(process_model(model_dir, long_by_source_variant))
+
+    if len(models_with_data) > 1:
+        plot_cross_model_comparisons(mean_probability_per_model_source_variant, dataset_plots_dir)
         plot_cross_model_vaa_correlation_heatmap(
             vaa_comparison_rows_across_models,
             "spearman_rho_mean_prob_vs_vaa", "Spearman ρ (mean prob vs VAA agreement)",

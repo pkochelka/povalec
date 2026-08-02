@@ -20,13 +20,22 @@ from sample_speeches_for_labeling import STANCE_BIN_EDGES
 VARIANTS = ["", "_question", "_negated"]
 VARIANT_LABELS = {"": "base", "_question": "question", "_negated": "negated"}
 VARIANT_COLORS = {"base": "#2CA02C", "question": "#FFC107", "negated": "#D62728"}
+# On the cross-model panel the colour is spent on the model, so the framing split
+# has to be carried by the texture instead.
+VARIANT_HATCH = {"base": "", "question": "///", "negated": "xxx"}
 LIKERT_VALUES = [1, 2, 3, 4, 5]
+LIKERT_XLABEL = "Likert (1 = agree → 5 = disagree)"
+KIND_LABEL = {"choices": "Likert choices", "stance": "speech stances (NLI-scored)"}
 
 
 def save_figure(fig, out_path, **savefig_kwargs):
-    fig.savefig(out_path, dpi=150, **savefig_kwargs)
+    fig.savefig(out_path, dpi=300, **savefig_kwargs)
     plt.close(fig)
-    print(f"  Saved {out_path.relative_to(out_path.parents[3])}")
+    try:
+        shown = out_path.relative_to(Path.cwd())
+    except ValueError:
+        shown = out_path
+    print(f"  Saved {shown}")
 
 
 def find_survey_csv(model_dir, suffix):
@@ -127,20 +136,82 @@ def collect_likerts_per_question(model_dir, kind):
     return by_question
 
 
-def plot_distributions(likerts_by_language, title, out_path):
+def pool_over_languages(by_language):
+    """{language: {variant: values}} -> {variant: values}, concatenated over languages."""
+    pooled = {}
+    for per_variant in by_language.values():
+        for label, values in per_variant.items():
+            pooled.setdefault(label, []).append(values)
+    return {label: np.concatenate(chunks) for label, chunks in pooled.items()}
+
+
+def variant_shares(per_variant, variant_order):
+    """Per-Likert share of the model's answers, split by variant.
+
+    Normalised by the total over all variants, exactly like the per-model grids, so
+    a model's five stacks sum to 1 and heights compare across models.
+    """
+    total = sum(len(values) for values in per_variant.values())
+    shares = {}
+    for label in variant_order:
+        values = per_variant.get(label, np.array([]))
+        counts = np.array([(values == likert).sum() for likert in LIKERT_VALUES], dtype=float)
+        shares[label] = counts / total if total else counts
+    return shares, int(total)
+
+
+def plot_models_distribution(pooled_by_model, kind, out_path):
+    """All models on one panel: colour = model, hatch = framing, languages pooled."""
+    models = sorted(pooled_by_model)
+    variant_order = list(VARIANT_LABELS.values())
+    cmap = plt.get_cmap("tab10" if len(models) <= 10 else "tab20")
+
+    x = np.arange(len(LIKERT_VALUES))
+    bar_width = 0.8 / len(models)
+    fig, ax = plt.subplots(figsize=(max(10.0, len(models) * 1.0), 5.5))
+    model_handles, y_max = [], 0.0
+    for index, model in enumerate(models):
+        color = cmap(index % cmap.N)
+        shares, total = variant_shares(pooled_by_model[model], variant_order)
+        offsets = x - 0.4 + bar_width * (index + 0.5)
+        bottom = np.zeros(len(LIKERT_VALUES))
+        for label in variant_order:
+            ax.bar(offsets, shares[label], width=bar_width * 0.9, bottom=bottom, color=color,
+                   hatch=VARIANT_HATCH[label], edgecolor="black", linewidth=0.4)
+            bottom += shares[label]
+        y_max = max(y_max, bottom.max())
+        model_handles.append(plt.Rectangle((0, 0), 1, 1, facecolor=color, edgecolor="black",
+                                           linewidth=0.4, label=f"{model} (n={total})"))
+
+    ax.set_xticks(x, LIKERT_VALUES, fontsize=9)
+    ax.tick_params(axis="y", labelsize=8)
+    ax.set_ylim(0, y_max * 1.1 or 1.0)
+    ax.set_xlabel(LIKERT_XLABEL, fontsize=9)
+    ax.set_ylabel("Proportion", fontsize=9)
+    ax.set_title(f"{KIND_LABEL[kind]}: all models, languages pooled", fontsize=10)
+    ax.grid(axis="y", linestyle="--", alpha=0.3)
+
+    variant_handles = [plt.Rectangle((0, 0), 1, 1, facecolor="#BBBBBB", edgecolor="black",
+                                     linewidth=0.4, hatch=VARIANT_HATCH[label], label=label)
+                       for label in variant_order]
+    variant_legend = ax.legend(handles=variant_handles, loc="upper right", fontsize=8,
+                               title="Variant", title_fontsize=8, framealpha=0.9)
+    ax.add_artist(variant_legend)
+    # 13 model entries do not fit beside the bars, so they go under the axes.
+    ax.legend(handles=model_handles, loc="upper center", bbox_to_anchor=(0.5, -0.13),
+              ncol=min(4, len(models)), fontsize=8, title="Model", title_fontsize=8,
+              frameon=False)
+    save_figure(fig, out_path, bbox_inches="tight")
+
+
+def plot_distributions(likerts_by_language, out_path):
     languages = sorted(likerts_by_language)
     variant_order = list(VARIANT_LABELS.values())
     proportions = {}
     y_max = 0.0
     for language in languages:
-        per_variant = likerts_by_language[language]
-        total = sum(len(values) for values in per_variant.values())
-        shares = {}
-        for label in variant_order:
-            values = per_variant.get(label, np.array([]))
-            counts = np.array([(values == likert).sum() for likert in LIKERT_VALUES], dtype=float)
-            shares[label] = counts / total if total else counts
-        proportions[language] = (shares, int(total))
+        shares, total = variant_shares(likerts_by_language[language], variant_order)
+        proportions[language] = (shares, total)
         stacked = np.sum([shares[label] for label in variant_order], axis=0)
         y_max = max(y_max, stacked.max() if total else 0.0)
 
@@ -167,26 +238,19 @@ def plot_distributions(likerts_by_language, title, out_path):
 
     handles = [plt.Rectangle((0, 0), 1, 1, color=VARIANT_COLORS[label]) for label in variant_order]
     fig.legend(handles, variant_order, loc="upper right", fontsize=8, title="Variant")
-    fig.suptitle(title, fontsize=12)
-    fig.supxlabel("Likert (1 = agree → 5 = disagree)", fontsize=9)
+    fig.supxlabel(LIKERT_XLABEL, fontsize=9)
     fig.supylabel("Proportion", fontsize=9)
     save_figure(fig, out_path)
 
 
-def plot_distributions_per_question(likerts_by_question, title, out_path):
+def plot_distributions_per_question(likerts_by_question, out_path):
     question_ids = sorted(likerts_by_question)
     variant_order = list(VARIANT_LABELS.values())
 
     counts_per_question = {}
     y_max = 0.0
     for q_idx in question_ids:
-        per_variant = likerts_by_question[q_idx]
-        total = sum(len(v) for v in per_variant.values())
-        shares = {}
-        for label in variant_order:
-            values = per_variant.get(label, np.array([]))
-            counts = np.array([(values == lv).sum() for lv in LIKERT_VALUES], dtype=float)
-            shares[label] = counts / total if total else counts
+        shares, total = variant_shares(likerts_by_question[q_idx], variant_order)
         counts_per_question[q_idx] = (shares, total)
         stacked = np.sum([shares[label] for label in variant_order], axis=0)
         y_max = max(y_max, stacked.max() if total else 0.0)
@@ -214,21 +278,24 @@ def plot_distributions_per_question(likerts_by_question, title, out_path):
 
     handles = [plt.Rectangle((0, 0), 1, 1, color=VARIANT_COLORS[label]) for label in variant_order]
     fig.legend(handles, variant_order, loc="upper right", fontsize=8, title="Variant")
-    fig.suptitle(title, fontsize=12)
-    fig.supxlabel("Likert (1 = agree → 5 = disagree)", fontsize=9)
+    fig.supxlabel(LIKERT_XLABEL, fontsize=9)
     fig.supylabel("Proportion", fontsize=9)
     save_figure(fig, out_path)
 
 
 def process_model(model_dir):
+    """Writes this model's own grids and returns {kind: {variant: values}} for the
+    cross-model panel, so the CSVs are read once."""
     print(f"\nProcessing: {model_dir.name}")
     out_dir = model_dir / "plots"
     out_dir.mkdir(exist_ok=True)
+    pooled = {}
 
     choices = collect_likerts(model_dir, "choices")
     if choices:
+        pooled["choices"] = pool_over_languages(choices)
         plot_distributions(
-            choices, f"{model_dir.name} – Choice Likert distribution per language",
+            choices,
             out_dir / "likert_distribution_choices_per_language.png",
         )
     else:
@@ -237,14 +304,15 @@ def process_model(model_dir):
     choices_per_question = collect_likerts_per_question(model_dir, "choices")
     if choices_per_question:
         plot_distributions_per_question(
-            choices_per_question, f"{model_dir.name} – Choice Likert distribution per question",
+            choices_per_question,
             out_dir / "likert_distribution_choices_per_question.png",
         )
 
     stance = collect_likerts(model_dir, "stance")
     if stance:
+        pooled["stance"] = pool_over_languages(stance)
         plot_distributions(
-            stance, f"{model_dir.name} – Speech stance (binned) distribution per language",
+            stance,
             out_dir / "likert_distribution_stance_per_language.png",
         )
     else:
@@ -253,9 +321,10 @@ def process_model(model_dir):
     stance_per_question = collect_likerts_per_question(model_dir, "stance")
     if stance_per_question:
         plot_distributions_per_question(
-            stance_per_question, f"{model_dir.name} – Speech stance (binned) distribution per question",
+            stance_per_question,
             out_dir / "likert_distribution_stance_per_question.png",
         )
+    return pooled
 
 
 def main():
@@ -268,14 +337,26 @@ def main():
     if not results_dir.exists():
         raise SystemExit(f"Directory not found: {results_dir}")
 
-    model_dirs = sorted(p for p in results_dir.iterdir() if p.is_dir())
+    model_dirs = sorted(p for p in results_dir.iterdir()
+                        if p.is_dir() and p.name not in ("plots", "tables"))
     if args.model:
         model_dirs = [d for d in model_dirs if d.name == args.model]
     if not model_dirs:
         raise SystemExit("No model directories found.")
 
+    pooled_by_kind = {}
     for model_dir in model_dirs:
-        process_model(model_dir)
+        for kind, per_variant in process_model(model_dir).items():
+            pooled_by_kind.setdefault(kind, {})[model_dir.name] = per_variant
+
+    # Only worth a panel once there is more than one model on it, so --model still
+    # produces just that model's own grids.
+    out_dir = results_dir / "plots"
+    for kind, pooled_by_model in pooled_by_kind.items():
+        if len(pooled_by_model) > 1:
+            out_dir.mkdir(parents=True, exist_ok=True)
+            plot_models_distribution(pooled_by_model, kind,
+                                     out_dir / f"likert_distribution_{kind}_models.png")
 
     print("\nDone.")
 

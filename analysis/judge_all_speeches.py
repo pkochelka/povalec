@@ -33,7 +33,7 @@ from analysis.llm_stance_judge import judge_one, load_prompt, load_checkpoint
 
 DATA_DIR = os.path.join(PROJECT_ROOT, "data", "euandi_2024_results")
 DEFAULT_MODELS = [
-    "deepseek-v4-pro", "glm-5.2", "kimi-k2.7",
+    "deepseek-v4-pro", "glm-5.2", "kimi-k2.7", "gemini3.5-flash",
     "gemma-4-31b", "gpt-oss-120b", "mistral-medium-3.5", "qwen3.5-122b"
 ]
 # framing name -> filename infix carried by both tracks

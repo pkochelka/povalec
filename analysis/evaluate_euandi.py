@@ -11,8 +11,22 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils import ALL_LANGS_STR, flip_likert, likert_to_stance
 
 PARTY_POSITIONS_PATH = "data/euandi_2024_data/euandi_2024_parties.jsonl"
+GROUP_POSITIONS_PATH = "data/euandi_2024_data/euandi_2024_group_positions.jsonl"
 NUM_RESPONSE_VARIANTS = 8
 NEUTRAL_LIKERT = 3
+
+# Whose euandi answers stand for an EP group:
+#   ep-group   -- the europarty's own manifesto answers (country_iso == "eu"), one
+#                 position vector per group, nothing averaged across parties.
+#   national   -- the five countries' member parties in the same file, averaged.
+#   group-mean -- every national party that ran in 2024, averaged per group; built
+#                 from EUandI_2024_party_dataset.csv by build_group_positions.py.
+POSITION_CHOICES = ["ep-group", "national", "group-mean"]
+DEFAULT_POSITIONS = "ep-group"
+
+
+def positions_path(positions: str) -> str:
+    return GROUP_POSITIONS_PATH if positions == "group-mean" else PARTY_POSITIONS_PATH
 
 EP_GROUP_BY_PARTY = {
     "EPP": "PPE", "ECR": "ECR", "PES": "S&D", "ALDE": "ALDE",
@@ -56,7 +70,7 @@ def likert_means_per_statement(raw_df: pd.DataFrame, languages: list[str]) -> pd
     return means
 
 
-def load_party_positions(path: str) -> pd.DataFrame:
+def load_party_positions(path: str, positions: str = DEFAULT_POSITIONS) -> pd.DataFrame:
     records = []
     with open(path, encoding="utf-8") as f:
         for line in f:
@@ -66,7 +80,8 @@ def load_party_positions(path: str) -> pd.DataFrame:
                 records.append({**meta, **response})
 
     df = pd.DataFrame(records)
-    df = df[df["country_iso"] != "eu"].copy()
+    is_europarty = df["country_iso"] == "eu"
+    df = df[~is_europarty if positions == "national" else is_europarty].copy()
     df["statement_idx"] = df["statement_idx"].astype(int)
     df["statement"] = df["statement"].str.strip()
     df["ep_group"] = df["short_name"].map(EP_GROUP_BY_PARTY)
@@ -75,10 +90,12 @@ def load_party_positions(path: str) -> pd.DataFrame:
 
 def agreement_by_ep_group(
     stance_df: pd.DataFrame, languages: list[str], party_positions_path: str,
-    collapse_ecr_id: bool = False,
+    collapse_ecr_id: bool = False, positions: str = DEFAULT_POSITIONS,
 ) -> pd.DataFrame:
     stance_cols = [f"{lang}_stance" for lang in languages]
-    party_df = load_party_positions(party_positions_path)
+    party_df = load_party_positions(party_positions_path, positions)
+    print(f"Party positions ({positions}): "
+          f"{party_df.groupby('ep_group')['short_name'].nunique().to_dict()}")
     if collapse_ecr_id:
         # Pool the national parties of both groups before averaging, matching
         # the collapsed ECR+ID classifier label. EP_GROUP_BY_PARTY itself must
@@ -103,10 +120,8 @@ def agreement_by_ep_group(
     )
 
 
-def evaluate_likert(
-    llm_responses_path: str, party_positions_path: str, negated: bool = False,
-    collapse_ecr_id: bool = False,
-) -> pd.DataFrame:
+def likert_stance_frame(llm_responses_path: str, negated: bool = False):
+    """(statement_idx + one {lang}_stance column per language, languages)."""
     raw_df = pd.read_csv(llm_responses_path, sep=";", encoding="utf-8-sig")
     languages = detect_likert_languages(raw_df)
 
@@ -114,14 +129,11 @@ def evaluate_likert(
     for lang in languages:
         likert = flip_likert(likert_df[lang]) if negated else likert_df[lang]
         likert_df[f"{lang}_stance"] = likert_to_stance(likert)
+    return likert_df, languages
 
-    return agreement_by_ep_group(likert_df, languages, party_positions_path, collapse_ecr_id)
 
-
-def evaluate_speeches(
-    scored_path: str, party_positions_path: str, variant: str = "",
-    collapse_ecr_id: bool = False,
-) -> pd.DataFrame:
+def speech_stance_frame(scored_path: str, variant: str = ""):
+    """(statement_idx + one {lang}_stance column per language, languages)."""
     raw_df = pd.read_csv(scored_path, sep=";", encoding="utf-8-sig")
     languages = detect_speech_languages(raw_df, variant)
     flip_sign = -1.0 if variant == "_negated" else 1.0
@@ -130,8 +142,25 @@ def evaluate_speeches(
     for lang in languages:
         speech_stance = pd.to_numeric(raw_df[f"stance_{lang}{variant}_mean"], errors="coerce")
         stance_df[f"{lang}_stance"] = flip_sign * speech_stance
+    return stance_df, languages
 
-    return agreement_by_ep_group(stance_df, languages, party_positions_path, collapse_ecr_id)
+
+def evaluate_likert(
+    llm_responses_path: str, party_positions_path: str, negated: bool = False,
+    collapse_ecr_id: bool = False, positions: str = DEFAULT_POSITIONS,
+) -> pd.DataFrame:
+    likert_df, languages = likert_stance_frame(llm_responses_path, negated)
+    return agreement_by_ep_group(likert_df, languages, party_positions_path,
+                                 collapse_ecr_id, positions)
+
+
+def evaluate_speeches(
+    scored_path: str, party_positions_path: str, variant: str = "",
+    collapse_ecr_id: bool = False, positions: str = DEFAULT_POSITIONS,
+) -> pd.DataFrame:
+    stance_df, languages = speech_stance_frame(scored_path, variant)
+    return agreement_by_ep_group(stance_df, languages, party_positions_path,
+                                 collapse_ecr_id, positions)
 
 
 def main() -> None:
@@ -144,6 +173,10 @@ def main() -> None:
     parser.add_argument("--collapse-ecr-id", action="store_true",
                         help="Merge the ECR and ID EP groups into one 'ECR+ID' group, "
                              "matching the collapsed classifier labels.")
+    parser.add_argument("--positions", default=DEFAULT_POSITIONS, choices=POSITION_CHOICES,
+                        help="ep-group: the europarty's own euandi answers, one position "
+                             "vector per group. national: its national member parties, "
+                             "averaged within the group.")
     parser.add_argument("--override", action="store_true")
     args = parser.parse_args()
 
@@ -161,13 +194,13 @@ def main() -> None:
 
     if args.source == "likert":
         summary = evaluate_likert(
-            input_path, PARTY_POSITIONS_PATH, negated=args.variant == "_negated",
-            collapse_ecr_id=args.collapse_ecr_id,
+            input_path, positions_path(args.positions), negated=args.variant == "_negated",
+            collapse_ecr_id=args.collapse_ecr_id, positions=args.positions,
         )
     else:
         summary = evaluate_speeches(
-            input_path, PARTY_POSITIONS_PATH, args.variant,
-            collapse_ecr_id=args.collapse_ecr_id,
+            input_path, positions_path(args.positions), args.variant,
+            collapse_ecr_id=args.collapse_ecr_id, positions=args.positions,
         )
 
     summary.to_csv(output_path, index=False)

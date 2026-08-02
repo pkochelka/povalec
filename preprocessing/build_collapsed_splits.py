@@ -18,9 +18,17 @@ evaluate a model trained on one track against the other track's test set.
 
 train.parquet keeps the natural, imbalanced priors (relabelled only), for the
 logit-adjusted trainer. train_balanced.parquet downsamples it to equal rows per
-party (default: the smallest party's count), water-filled toward an equal
-per-language split, most-recent-first within each (party, language) cell with a
-seeded random tiebreak.
+party (default: the smallest party's count), most-recent-first within each
+(party, language) cell with a seeded random tiebreak.
+
+The per-language quota is SHARED: it is water-filled once over the elementwise
+MINIMUM capacity across parties, so every party is handed the identical language
+profile. Balancing each party independently (--free-language-mix) instead lets a
+party that is short in a small language (bg/ro/et/hu) re-spread its deficit onto
+the languages where it is plentiful (en/de/fr), which makes language a leaky cue
+for party -- the exact confound a party classifier should not be able to use.
+The shared quota costs rows only when no single party is the floor in every
+language; it is otherwise free.
 
 --with-translations instead builds ONLY balanced_train_with_translations.parquet:
 the same merge-then-split produces the collapsed train, then originals and cache
@@ -153,16 +161,31 @@ def water_fill(capacities, total):
     return alloc
 
 
-def balance_party(pdf, target, rng):
-    """Select `target` rows from one party's frame, language-water-filled,
-    most-recent-first within each language."""
-    capacities = pdf["language"].value_counts().to_dict()
-    alloc = water_fill(capacities, target)
+def shared_alloc(df, target):
+    """Water-fill one per-language quota that EVERY party can satisfy.
+
+    Capacity per language is the minimum count across parties, so the returned
+    allocation is simultaneously feasible for all of them and hands each the
+    identical language profile. The reachable per-party total is therefore
+    sum(min capacity), which may be below `target`; water_fill clamps to it.
+    """
+    caps = df.groupby([PARTY_COLUMN, "language"], observed=True).size().unstack(fill_value=0)
+    return water_fill(caps.min(axis=0).to_dict(), target)
+
+
+def balance_party(pdf, target, rng, alloc=None):
+    """Select rows from one party's frame, most-recent-first within each language.
+
+    `alloc` is a {language: quota} plan; when omitted the party is water-filled
+    on its own capacities to `target` rows (the --free-language-mix behaviour).
+    """
+    if alloc is None:
+        alloc = water_fill(pdf["language"].value_counts().to_dict(), target)
 
     work = pdf.assign(_tie=rng.random(len(pdf)))
     work = work.sort_values(["date", "_tie"], ascending=[False, True], kind="stable")
     work["_rank"] = work.groupby("language").cumcount()
-    work["_quota"] = work["language"].map(alloc)
+    work["_quota"] = work["language"].map(alloc).fillna(0)
     return work[work["_rank"] < work["_quota"]].drop(columns=["_tie", "_rank", "_quota"])
 
 
@@ -192,10 +215,13 @@ def build_translated_balanced(args, rng):
         print(f"\n{label} per-party counts:")
         for party in counts.sort_values().index:
             print(f"  {party}: {counts[party]:,}")
+        alloc = None if args.free_language_mix else shared_alloc(stratum, target)
+        if alloc is not None:
+            target = sum(alloc.values())
         print(f"{label} target per party: {target:,}")
         for party in sorted(counts.index):
             parts.append(balance_party(
-                stratum[stratum[PARTY_COLUMN] == party], target, rng))
+                stratum[stratum[PARTY_COLUMN] == party], target, rng, alloc))
 
     balanced = pd.concat(parts, ignore_index=True)
     balanced = balanced.sample(frac=1, random_state=args.seed).reset_index(drop=True)
@@ -219,6 +245,10 @@ def parse_args():
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--per-party", type=int, default=None,
                         help="Balanced-train rows per party (default: smallest party's count).")
+    parser.add_argument("--free-language-mix", action="store_true",
+                        help="Water-fill each party's language quota independently (legacy). "
+                             "Default shares one quota across parties so every party gets the "
+                             "identical language profile.")
     parser.add_argument("--with-translations", action="store_true",
                         help="Build ONLY balanced_train_with_translations.parquet (originals and "
                              "cache translations balanced as separate strata); the four standard "
@@ -257,13 +287,16 @@ def main():
     print("\nTrain per-party counts:")
     for party in party_counts.sort_values().index:
         print(f"  {party}: {party_counts[party]:,}")
+    alloc = None if args.free_language_mix else shared_alloc(train, target)
+    if alloc is not None:
+        target = sum(alloc.values())
     print(f"\nTarget per party: {target:,}  ({len(party_counts)} parties "
           f"-> {target * len(party_counts):,} rows)")
 
     parts = []
     for party in sorted(party_counts.index):
         sub = train[train[PARTY_COLUMN] == party]
-        parts.append(balance_party(sub, min(target, len(sub)), rng))
+        parts.append(balance_party(sub, min(target, len(sub)), rng, alloc))
 
     balanced = pd.concat(parts, ignore_index=True)
     balanced = balanced.sample(frac=1, random_state=args.seed).reset_index(drop=True)
@@ -271,8 +304,9 @@ def main():
     print(f"\nBalanced train: {len(balanced):,} rows")
     print("Party balance:")
     print(balanced[PARTY_COLUMN].value_counts().to_string())
-    print("\nLanguage balance (overall):")
-    print(balanced["language"].value_counts().to_string())
+    print("\nParty x language:")
+    print(balanced.groupby([PARTY_COLUMN, "language"], observed=True)
+          .size().unstack(fill_value=0).to_string())
     print(f"\nDate range kept: {balanced['date'].min()} .. {balanced['date'].max()}")
 
     for df, name in [(splits["train"], "train"), (splits["dev"], "dev"),

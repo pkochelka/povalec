@@ -43,7 +43,6 @@ def plot_party_ranking(
     df: pd.DataFrame,
     parties: list[str],
     colors: dict[str, tuple],
-    title: str,
     out_path: Path,
 ) -> None:
     means = df.groupby("ep_group")["mean_agreement"].mean().reindex(parties)
@@ -61,10 +60,9 @@ def plot_party_ranking(
     ax.set_ylabel("Mean agreement (averaged over languages)")
     ax.set_ylim(0.0, min(1.0, float(means.max()) + 0.08))
     ax.grid(axis="y", linestyle="--", alpha=0.4)
-    ax.set_title(title, fontsize=11, pad=8)
 
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
+    fig.savefig(out_path, dpi=300)
     plt.close(fig)
     print(f"  Saved {out_path.relative_to(out_path.parents[3])}")
 
@@ -73,7 +71,6 @@ def plot_per_language_bars(
     df: pd.DataFrame,
     parties: list[str],
     colors: dict[str, tuple],
-    title: str,
     out_path: Path,
 ) -> None:
     languages = sorted(df["language"].unique())
@@ -106,7 +103,6 @@ def plot_per_language_bars(
     ax.set_ylabel("Mean agreement")
     ax.set_ylim(0.0, 1.0)
     ax.grid(axis="y", linestyle="--", alpha=0.4)
-    ax.set_title(title, fontsize=11, pad=8)
     ax.legend(
         loc="upper center",
         bbox_to_anchor=(0.5, -0.12),
@@ -116,7 +112,7 @@ def plot_per_language_bars(
     )
 
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     print(f"  Saved {out_path.relative_to(out_path.parents[3])}")
 
@@ -125,7 +121,6 @@ def plot_per_language_scatter(
     df: pd.DataFrame,
     parties: list[str],
     colors: dict[str, tuple],
-    title: str,
     out_path: Path,
 ) -> None:
     languages = sorted(df["language"].unique())
@@ -158,7 +153,6 @@ def plot_per_language_scatter(
     ax.set_ylabel("Mean agreement")
     ax.set_ylim(0.0, 1.0)
     ax.grid(axis="y", linestyle="--", alpha=0.4)
-    ax.set_title(title, fontsize=11, pad=8)
     ax.legend(
         loc="upper center",
         bbox_to_anchor=(0.5, -0.12),
@@ -168,7 +162,7 @@ def plot_per_language_scatter(
     )
 
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     print(f"  Saved {out_path.relative_to(out_path.parents[3])}")
 
@@ -203,27 +197,16 @@ def process_model(model_dir: Path) -> None:
     parties, colors = party_order_and_colors(combined)
 
     for variant_label, df in dfs.items():
-        base_title = f"{model_dir.name} – VAA ({variant_label})"
-
         plot_party_ranking(
-            df,
-            parties,
-            colors,
-            f"{base_title}: party ranking (avg over languages)",
+            df, parties, colors,
             out_dir / f"vaa_party_ranking_{variant_label}.png",
         )
         plot_per_language_bars(
-            df,
-            parties,
-            colors,
-            f"{base_title}: per-language party agreement (bars)",
+            df, parties, colors,
             out_dir / f"vaa_per_language_bars_{variant_label}.png",
         )
         plot_per_language_scatter(
-            df,
-            parties,
-            colors,
-            f"{base_title}: per-language party agreement (scatter)",
+            df, parties, colors,
             out_dir / f"vaa_per_language_scatter_{variant_label}.png",
         )
 

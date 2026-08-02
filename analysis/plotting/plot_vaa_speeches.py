@@ -58,39 +58,25 @@ def process_model(model_dir: Path) -> None:
     parties, colors = party_order_and_colors(combined)
 
     for variant_label, df in dfs.items():
-        base_title = f"{model_dir.name} – Speech VAA ({variant_label})"
         plot_party_ranking(
             df, parties, colors,
-            f"{base_title}: party ranking (avg over languages)",
             out_dir / f"vaa_speeches_party_ranking_{variant_label}.png",
         )
         plot_per_language_bars(
             df, parties, colors,
-            f"{base_title}: per-language party agreement (bars)",
             out_dir / f"vaa_speeches_per_language_bars_{variant_label}.png",
         )
         plot_per_language_scatter(
             df, parties, colors,
-            f"{base_title}: per-language party agreement (scatter)",
             out_dir / f"vaa_speeches_per_language_scatter_{variant_label}.png",
         )
 
-    base_title = f"{model_dir.name} – Speech VAA across variants"
     plot_party_ranking_per_variant(
-        dfs, parties, colors,
-        f"{base_title}: party ranking per variant",
-        out_dir / "vaa_speeches_variants_party_ranking.png",
-    )
+        dfs, parties, colors, out_dir / "vaa_speeches_variants_party_ranking.png")
     plot_per_language_bars_per_variant(
-        dfs, parties, colors,
-        f"{base_title}: per-language party agreement",
-        out_dir / "vaa_speeches_variants_per_language_bars.png",
-    )
+        dfs, parties, colors, out_dir / "vaa_speeches_variants_per_language_bars.png")
     plot_party_sensitivity(
-        dfs, parties, colors,
-        f"{base_title}: party sensitivity to variant",
-        out_dir / "vaa_speeches_variants_party_sensitivity.png",
-    )
+        dfs, parties, colors, out_dir / "vaa_speeches_variants_party_sensitivity.png")
 
 
 def main() -> None:

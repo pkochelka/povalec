@@ -38,10 +38,22 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils import ALL_LANGS
 
-VARIANTS = ["", "_question", "_negated"]
-VARIANT_LABELS = {"": "base", "_question": "question", "_negated": "negated"}
+VARIANTS = ["", "_negated"]
+VARIANT_LABELS = {"": "base", "_negated": "negated"}
 
-SKIP_MODEL_SUBSTRINGS = ("grok", "gemma", "mistral-small-2603", "command-a")
+SKIP_MODEL_SUBSTRINGS = ()
+
+# Models dropped from the per-question figure only (they stay in every other output).
+PER_QUESTION_PLOT_EXCLUDE = ()
+
+# The per-question figure goes into the thesis at column width, so it is typed like the
+# per-language figures in plotting/plot_argmax_shares.py: sizes chosen so the labels are
+# still legible after the reduction, not sizes that look right on the saved PNG.
+PER_QUESTION_TICK_FONTSIZE = 24
+PER_QUESTION_AXIS_LABEL_FONTSIZE = 32
+PER_QUESTION_LEGEND_FONTSIZE = 22
+PER_QUESTION_LEGEND_TITLE_FONTSIZE = 26
+PER_QUESTION_VALUE_FONTSIZE = 16
 
 REFUSED_REASON_PREFIXES = ("REFUSED",)
 FAILED_REASON_VALUES = {"FAILED"}
@@ -323,9 +335,20 @@ def aggregate_per_question(annotated_df):
 
 
 def plot_refusal_per_question(per_question_model, question_totals, output_path):
+    per_question_model = per_question_model[
+        ~per_question_model["model"].isin(PER_QUESTION_PLOT_EXCLUDE)
+    ].copy()
+
     models = sorted(per_question_model["model"].unique())
     questions = question_totals["row_idx"].tolist()
     positions = np.arange(len(questions))
+
+    # Recompute the pooled denominators over the retained models so that the stacked
+    # heights and the aggregate labels stay consistent with any exclusions above.
+    kept_totals = per_question_model.groupby("row_idx")[["n_total", "n_refusal"]].sum()
+    per_question_model["contribution"] = (
+        per_question_model["n_refusal"] / per_question_model["row_idx"].map(kept_totals["n_total"])
+    )
 
     colors = plt.get_cmap("tab20")(np.linspace(0, 1, max(len(models), 1)))
     color_by_model = {model: colors[i] for i, model in enumerate(models)}
@@ -336,7 +359,11 @@ def plot_refusal_per_question(per_question_model, question_totals, output_path):
         .fillna(0.0)
     )
 
-    fig, ax = plt.subplots(figsize=(max(10, 0.45 * len(questions) + 2), 6))
+    # Type sized as in plot_argmax_shares' per-language figures: the figure is scaled to a
+    # LaTeX column whatever it measures, so what matters is the type-to-width ratio. The
+    # width follows from the tick size instead -- 30 propositions at this size need ~0.85in
+    # each before the "P30" labels start to touch.
+    fig, ax = plt.subplots(figsize=(max(18, 0.85 * len(questions) + 3), 12.0))
     bottom = np.zeros(len(questions))
     for model in models:
         heights = contribution[model].to_numpy()
@@ -344,19 +371,22 @@ def plot_refusal_per_question(per_question_model, question_totals, output_path):
                edgecolor="black", linewidth=0.3, label=model)
         bottom += heights
 
-    aggregate = question_totals.set_index("row_idx")["aggregate_refusal_rate"].reindex(questions).to_numpy()
+    aggregate = (kept_totals["n_refusal"] / kept_totals["n_total"]).reindex(questions).to_numpy()
     for x, value in zip(positions, aggregate):
         if value > 0.002:
-            ax.text(x, value + 0.003, f"{value:.2f}", ha="center", va="bottom", fontsize=7)
+            ax.text(x, value + 0.003, f"{value:.2f}", ha="center", va="bottom",
+                    fontsize=PER_QUESTION_VALUE_FONTSIZE)
 
-    ax.set_xticks(positions, [f"Q{q + 1}" for q in questions], rotation=0, fontsize=8)
-    ax.set_xlabel("EU&I statement (question)")
-    ax.set_ylabel("Refusal rate")
-    ax.set_title("Refusal rate per question, decomposed by model contribution\n"
-                 "(bar height = aggregate rate over all models, languages, variants and sources)",
-                 fontsize=11, pad=8)
+    ax.set_xticks(positions, [f"P{q + 1}" for q in questions], rotation=0,
+                  fontsize=PER_QUESTION_TICK_FONTSIZE)
+    ax.tick_params(axis="y", labelsize=PER_QUESTION_TICK_FONTSIZE)
+    ax.set_xlabel("EU&I proposition", fontsize=PER_QUESTION_AXIS_LABEL_FONTSIZE)
+    ax.set_ylabel("Refusal rate", fontsize=PER_QUESTION_AXIS_LABEL_FONTSIZE)
+    ax.set_xlim(-0.7, len(questions) - 0.3)
     ax.grid(axis="y", linestyle="--", alpha=0.4)
-    ax.legend(title="Model", loc="upper right", fontsize=8, ncol=2, framealpha=0.9)
+    ax.legend(title="Model", loc="upper center", bbox_to_anchor=(0.5, -0.14),
+              fontsize=PER_QUESTION_LEGEND_FONTSIZE,
+              title_fontsize=PER_QUESTION_LEGEND_TITLE_FONTSIZE, ncol=6, framealpha=0.9)
     fig.tight_layout()
     fig.savefig(output_path, dpi=150)
     plt.close(fig)

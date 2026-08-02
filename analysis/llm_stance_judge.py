@@ -131,7 +131,7 @@ def load_checkpoint(checkpoint_path):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--judge_model", default="deepseek-v4-pro")
+    parser.add_argument("--judge_model", default="kimi-k3")
     parser.add_argument("--second_provider", default=True, action="store_true")
     parser.add_argument("--limit", default=40000, type=int,
                         help="Max speeches to label; default labels the whole pool.")
@@ -141,8 +141,8 @@ def main():
     parser.add_argument("--reuse_labels", default=None,
                         help="Path to an existing labeled CSV; speeches whose answer_text is "
                              "already labeled there are reused instead of re-judged.")
-    parser.add_argument("--max_workers", default=10, type=int)
-    parser.add_argument("--source_models", default="deepseek-v4-pro,glm-5.2,kimi-k2.7",
+    parser.add_argument("--max_workers", default=6, type=int)
+    parser.add_argument("--source_models", default="gemini3.5-flash",
                         help="Comma-separated models whose scored speech files feed the pool.")
     parser.add_argument("--statements", default=None,
                         help="Comma-separated statement ids to restrict to (e.g. the rewritten "
@@ -150,7 +150,7 @@ def main():
                              "MERGED into the existing labeled CSV, replacing only the stale rows.")
     parser.add_argument("--paraphrases", default=None,
                         help="Comma-separated paraphrase framings to restrict to "
-                             "(base/question/negated); only the negated framing changed for the "
+                             "(base/negated); only the negated framing changed for the "
                              "rewritten statements. Also enables update mode.")
     args = parser.parse_args()
     source_models = args.source_models.split(",")

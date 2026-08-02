@@ -6,8 +6,8 @@ so "I agree that X" is unambiguous. An mmBERT-small base is fine-tuned in two
 stages, both on texts pooled over TRAIN_MODELS as scored by the LLM stance judge
 (judge_all_speeches.py): first a warmup on the abundant reasons track (the short
 justifications), then continued on the speeches track (the target creative-writing
-register). The second stage is selected on LLM-judged speeches from a different
-source model (OOD_SOURCE_MODEL), which the training data never touches.
+register). The second stage is selected on LLM-judged speeches from held-out source
+models (OOD_SOURCE_MODELS), which the training data never touches.
 """
 import os
 import sys
@@ -39,10 +39,12 @@ DATA_DIR = os.path.join(PROJECT_ROOT, "data", "euandi_2024_results")
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, MODEL_SLUG)
 # Both training stages read the LLM-judge outputs from judge_all_speeches.py, pooled
 # over several source models; the reasons track warms the model up, the speeches track
-# is the target register. Held-out speeches come from a model that is never trained on
-# (OOD_SOURCE_MODEL), used only to select/evaluate stage 2.
-TRAIN_MODELS = ["deepseek-v4-pro", "glm-5.2"]
-OOD_SOURCE_MODEL = "kimi-k2.7"
+# is the target register. Held-out speeches come from models that are never trained on
+# (OOD_SOURCE_MODELS), used only to select/evaluate stage 2. Models with no judge output
+# yet are reported and skipped, so this list may run ahead of judge_all_speeches.py.
+TRAIN_MODELS = ["deepseek-v4-pro", "glm-5.2", "qwen3.5-122b", "gpt-oss-120b",
+                "gemini3.5-flash", "gemma-4-31b"]
+OOD_SOURCE_MODELS = ["kimi-k2.7", "mistral-medium-3.5"]
 # per-track pool reconstruction + output filename used when a judge run is unfinished
 POOL_LOADERS = {"speeches": load_speech_pool, "reasons": load_reason_pool}
 STANCE_NAME = {"speeches": "speeches_llm_stance.csv", "reasons": "reasons_llm_stance.csv"}
@@ -78,14 +80,18 @@ def load_judged(model, track):
     the leakage-safe group for the OOD split.
     """
     output_path = os.path.join(DATA_DIR, model, STANCE_NAME[track])
+    checkpoint_path = output_path + ".ckpt.json"
+    empty = pd.DataFrame(columns=["statement", "text", "stance", "statement_id", "source"])
     if os.path.exists(output_path):
         pool = load_dataframe(output_path)
         pool["llm_choice"] = pd.to_numeric(pool["llm_choice"], errors="coerce")
-    else:
+    elif os.path.exists(checkpoint_path):
         pool = POOL_LOADERS[track](model).copy()
-        pool["llm_choice"] = pool.index.map(load_checkpoint(output_path + ".ckpt.json"))
+        pool["llm_choice"] = pool.index.map(load_checkpoint(checkpoint_path))
+    else:
+        print(f"  !! {model}/{track}: not judged yet (no {STANCE_NAME[track]}); skipping.")
+        return empty
     pool = pool.dropna(subset=["llm_choice"]).reset_index(drop=True)
-    empty = pd.DataFrame(columns=["statement", "text", "stance", "statement_id"])
     if pool.empty:
         return empty
     out = pd.DataFrame({
@@ -93,36 +99,56 @@ def load_judged(model, track):
         "text": pool["answer_text"].astype("string").str.strip(),
         "stance": likert_to_stance(pool["llm_choice"].astype(int)).astype("float32"),
         "statement_id": pool["statement"].values,
+        "source": model,
     })
     out = out.dropna(subset=["statement", "text", "stance", "statement_id"])
     out = out[(out["statement"].str.len() > 0) & (out["text"].str.len() > 0)]
     return out
 
 
-def load_train_pairs(track):
-    frames = [load_judged(model, track) for model in TRAIN_MODELS]
-    return pd.concat(frames, ignore_index=True)[["statement", "text", "stance"]]
+def load_pool(models, track):
+    """Judged (statement, text, stance) pairs pooled over models, deduped.
+
+    The same text can surface under two source models only by coincidence; dedup on
+    (statement, text) keeps one copy so no pair is weighted twice.
+    """
+    frames = [load_judged(model, track) for model in models]
+    pooled = pd.concat(frames, ignore_index=True)
+    if pooled.empty:
+        return pooled
+    return pooled.drop_duplicates(subset=["statement", "text"]).reset_index(drop=True)
 
 
 def build_stage_pairs(track, name):
-    pairs = load_train_pairs(track).drop_duplicates(subset=["statement", "text"]).reset_index(drop=True)
-    print(f"{name} pairs: {len(pairs)} after dedup (models: {', '.join(TRAIN_MODELS)})")
+    pairs = load_pool(TRAIN_MODELS, track)
+    if pairs.empty:
+        print(f"{name} pairs: none judged yet.")
+        return pairs
+    per_model = pairs["source"].value_counts().to_dict()
+    print(f"{name} pairs: {len(pairs)} after dedup -- " +
+          ", ".join(f"{model}={per_model.get(model, 0)}" for model in TRAIN_MODELS))
     print("Stance distribution:\n", pairs["stance"].round(2).value_counts().sort_index().to_dict())
     return pairs
 
 
 def load_ood_eval():
-    """Judged speeches from OOD_SOURCE_MODEL (never trained on) for stage-2 selection."""
-    ood = load_judged(OOD_SOURCE_MODEL, "speeches").drop_duplicates(
-        subset=["statement", "text"]).reset_index(drop=True)
+    """Judged speeches from OOD_SOURCE_MODELS (never trained on) for stage-2 selection."""
+    ood = load_pool(OOD_SOURCE_MODELS, "speeches")
     if ood.empty:
         return None
-    print(f"OOD eval ({OOD_SOURCE_MODEL}): {len(ood)} judged speeches "
-          f"across {ood['statement_id'].nunique()} statements")
+    for model, count in ood["source"].value_counts().items():
+        print(f"OOD eval ({model}): {count} judged speeches")
+    print(f"OOD eval total: {len(ood)} speeches across "
+          f"{ood['statement_id'].nunique()} statements")
     return ood
 
 
 def split_ood(ood):
+    """Split the pooled OOD speeches by statement, one split shared by all sources.
+
+    Splitting statements once (rather than per source) keeps every statement that
+    stage 2 is selected on out of every source's test half.
+    """
     statements = np.sort(ood["statement_id"].unique())
     rng = np.random.default_rng(SEED)
     rng.shuffle(statements)
@@ -132,6 +158,7 @@ def split_ood(ood):
     test = ood[~ood["statement_id"].isin(dev_ids)].reset_index(drop=True)
     print(f"OOD dev: {len(dev)} rows ({dev['statement_id'].nunique()} statements) | "
           f"OOD test: {len(test)} rows ({test['statement_id'].nunique()} statements)")
+    print("  test rows by source: ", test["source"].value_counts().to_dict())
     return dev, test
 
 
@@ -203,6 +230,10 @@ def main():
     if speech_pairs.empty:
         raise SystemExit(f"No LLM-judged speeches for {TRAIN_MODELS}; "
                          "run judge_all_speeches.py first.")
+    # only the models that actually had judge output, so the saved config does not
+    # claim training data that was skipped
+    trained_on = [model for model in TRAIN_MODELS
+                  if model in set(reason_pairs.get("source", [])) | set(speech_pairs["source"])]
     reason_ds = tokenize_dataset(reason_pairs, tokenizer)
     speech_ds = tokenize_dataset(speech_pairs, tokenizer)
 
@@ -210,7 +241,8 @@ def main():
     if ood is not None:
         ood_dev, ood_test = split_ood(ood)
         val_ds = tokenize_dataset(ood_dev, tokenizer)
-        selection_note = f"out-of-domain LLM-judged {OOD_SOURCE_MODEL} speeches"
+        selection_note = ("out-of-domain LLM-judged speeches from "
+                          f"{', '.join(sorted(ood['source'].unique()))}")
     else:
         ood_test = None
         holdout = speech_pairs.sample(frac=0.05, random_state=SEED)
@@ -239,7 +271,15 @@ def main():
 
     results = {}
     if ood_test is not None and len(ood_test) > 0:
-        results["OOD speeches (test)"] = evaluate_split(trainer, ood_test, tokenizer, "oodtest")
+        results["OOD speeches (test, pooled)"] = evaluate_split(
+            trainer, ood_test, tokenizer, "oodtest")
+        # per-source too: the sources differ in register, and a pooled number can hide
+        # one of them being much worse than the other.
+        for model in OOD_SOURCE_MODELS:
+            subset = ood_test[ood_test["source"] == model]
+            if len(subset) > 0:
+                results[f"OOD speeches (test, {model})"] = evaluate_split(
+                    trainer, subset, tokenizer, "oodtest")
     print(f"\n=== RESULTS (selected on {selection_note}) ===")
     for split_name, metrics in results.items():
         print(f"  [{split_name}] " + ", ".join(f"{k}={v:.4f}" for k, v in metrics.items()))
@@ -250,9 +290,10 @@ def main():
         json.dump({
             "model_name": MODEL_NAME,
             "architecture": "cross-encoder (statement, text) -> stance",
-            "training": f"two-stage on {', '.join(TRAIN_MODELS)} LLM-judged texts: "
+            "training": f"two-stage on {', '.join(trained_on)} LLM-judged texts: "
                         f"{REASON_EPOCHS} reason warmup epochs -> "
                         f"{SPEECH_EPOCHS} speech epochs",
+            "held_out_models": OOD_SOURCE_MODELS,
             "max_len": MAX_LEN,
             "frozen_bottom_layers": FREEZE_BOTTOM_LAYERS,
             "neutral_weight": NEUTRAL_WEIGHT,

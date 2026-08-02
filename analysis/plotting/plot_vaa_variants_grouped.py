@@ -25,7 +25,6 @@ def plot_party_ranking_per_variant(
     dfs: dict[str, pd.DataFrame],
     parties: list[str],
     colors: dict[str, tuple],
-    title: str,
     out_path: Path,
 ) -> None:
     variants = ordered_variants(dfs)
@@ -56,10 +55,9 @@ def plot_party_ranking_per_variant(
 
     axes[-1].set_xticks(list(x))
     axes[-1].set_xticklabels(parties, rotation=30, ha="right", fontsize=9)
-    axes[0].set_title(title, fontsize=11, pad=8)
 
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
+    fig.savefig(out_path, dpi=300)
     plt.close(fig)
     print(f"  Saved {out_path.relative_to(out_path.parents[3])}")
 
@@ -68,7 +66,6 @@ def plot_per_language_bars_per_variant(
     dfs: dict[str, pd.DataFrame],
     parties: list[str],
     colors: dict[str, tuple],
-    title: str,
     out_path: Path,
 ) -> None:
     variants = ordered_variants(dfs)
@@ -114,7 +111,6 @@ def plot_per_language_bars_per_variant(
 
     axes[-1].set_xticks(list(x))
     axes[-1].set_xticklabels(languages, fontsize=9)
-    axes[0].set_title(title, fontsize=11, pad=8)
     axes[0].legend(
         loc="upper center",
         bbox_to_anchor=(0.5, 1.0 + 0.18 / n_variants),
@@ -124,7 +120,7 @@ def plot_per_language_bars_per_variant(
     )
 
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     print(f"  Saved {out_path.relative_to(out_path.parents[3])}")
 
@@ -133,7 +129,6 @@ def plot_party_sensitivity(
     dfs: dict[str, pd.DataFrame],
     parties: list[str],
     colors: dict[str, tuple],
-    title: str,
     out_path: Path,
 ) -> None:
     variants = ordered_variants(dfs)
@@ -164,7 +159,6 @@ def plot_party_sensitivity(
     ax.set_ylim(0.0, 1.0)
     ax.set_xlim(-0.3, len(variants) - 0.7)
     ax.grid(axis="y", linestyle="--", alpha=0.4)
-    ax.set_title(title, fontsize=11, pad=8)
     ax.legend(
         loc="upper center",
         bbox_to_anchor=(0.5, -0.10),
@@ -174,7 +168,7 @@ def plot_party_sensitivity(
     )
 
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     print(f"  Saved {out_path.relative_to(out_path.parents[3])}")
 
@@ -194,29 +188,12 @@ def process_model(model_dir: Path) -> None:
     combined = pd.concat(dfs.values(), ignore_index=True)
     parties, colors = party_order_and_colors(combined)
 
-    base_title = f"{model_dir.name} – VAA across variants"
-
     plot_party_ranking_per_variant(
-        dfs,
-        parties,
-        colors,
-        f"{base_title}: party ranking per variant",
-        out_dir / "vaa_variants_party_ranking.png",
-    )
+        dfs, parties, colors, out_dir / "vaa_variants_party_ranking.png")
     plot_per_language_bars_per_variant(
-        dfs,
-        parties,
-        colors,
-        f"{base_title}: per-language party agreement",
-        out_dir / "vaa_variants_per_language_bars.png",
-    )
+        dfs, parties, colors, out_dir / "vaa_variants_per_language_bars.png")
     plot_party_sensitivity(
-        dfs,
-        parties,
-        colors,
-        f"{base_title}: party sensitivity to variant",
-        out_dir / "vaa_variants_party_sensitivity.png",
-    )
+        dfs, parties, colors, out_dir / "vaa_variants_party_sensitivity.png")
 
 
 def main() -> None:

@@ -24,7 +24,9 @@ FLUSH_EVERY = 50000
 SILHOUETTE_SAMPLE = 10000
 INSTRUCTION = "Represent this European Parliament speech for retrieving its political party group."
 PARTY_COLOR = {
-    "GUE/NGL": "#8b0000", "S&D": "#e8112d", "Greens/EFA": "#3eb049", "ALDE": "#f6b40e",
+    # GUE/NGL magenta rather than dark red, to separate it from S&D as PARTY_COLORS in
+    # analysis/plotting/plot_classified_parties.py does.
+    "GUE/NGL": "#8E1B6B", "S&D": "#e8112d", "Greens/EFA": "#3eb049", "ALDE": "#f6b40e",
     "PPE": "#3a86c8", "ECR": "#0a4ea3", "ID": "#1b1f3b",
 }
 LANG_COLUMN_CANDIDATES = ["language"]

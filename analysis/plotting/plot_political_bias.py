@@ -7,6 +7,7 @@ from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
+import matplotlib.patheffects
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -16,16 +17,44 @@ from scipy.stats import gaussian_kde
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from analysis.evaluate_euandi import (
+    DEFAULT_POSITIONS,
+    POSITION_CHOICES,
+    load_party_positions,
+    positions_path,
+)
 from utils import flip_likert, likert_to_stance
 
 NUM_VARIANTS = 8
 NEUTRAL_LIKERT = 3
+# Figure sizes are fixed, so text is sized to survive the ~3x downscale to an
+# ACL one-column figure. The axis labels carry the long DIMENSION_POLES strings
+# and are the one element that cannot take the full size without clipping.
+FONTSIZE = 15
+AXIS_FONTSIZE = 12
+LEGEND_FONTSIZE_SMALL = 7  # the 21-entry language lookup: scanned, not read
+# The compasses are dense in the upper right (PPE/ALDE anchors, the pro-EU lobe),
+# so the main legend sits in the lower left and its colour dots are drawn large
+# enough to be told apart after the downscale.
+MAIN_LEGEND_LOC = "lower left"
+LEGEND_MARKERSIZE = 12
+# The 21-entry language box would grow out of the panel at the full size.
+LANG_LEGEND_MARKERSIZE = 9
 FRAMING_SUFFIX = {"base": "", "negated": "_negated"}
 FRAMING_FOR_VARIANT = {"": "base", "_negated": "negated"}
 FRAMING_ORIENTATION = {"base": 1.0, "negated": -1.0}
 FRAMING_COLOR = {"base": "#2ca02c", "negated": "#d62728"}
 FRAMING_MARKER = {"base": "o", "negated": "X"}
-SOURCE_FILLED = {"likert": True, "speeches": False}
+# On top of the shape, each split has a hollow half: the negated framing and the
+# open-ended source are drawn unfilled, so which side of a split a mark belongs to
+# survives the downscale even where the two shapes overlap.
+SOURCE_MARKER = {"likert": "o", "speeches": "s"}
+HOLLOW_FRAMING = "negated"
+HOLLOW_SOURCE = "speeches"
+FRAMING_SOURCE_MARKER = {
+    ("base", "likert"): "o", ("base", "speeches"): "s",
+    ("negated", "likert"): "X", ("negated", "speeches"): "D",
+}
 SOURCE_LABEL = {"likert": "likert", "speeches": "open-ended"}
 LLM_SOURCE_LABEL = {"likert": "reasons (judged)", "speeches": "open-ended (judged)"}
 RESPONSE_CSV = re.compile(r"^(?P<langs>[a-z]{2}(?:,[a-z]{2})+)(?P<variant>|_negated)\.csv$")
@@ -37,10 +66,7 @@ RUN_KEYS = ["language", "variant_idx", "framing", "source"]
 LLM_STANCE_CSV = {"likert": "reasons_llm_stance.csv", "speeches": "speeches_llm_stance.csv"}
 LLM_STANCE_COLUMNS = ["paraphrase", "language", "variant", "statement", "llm_stance"]
 STANCE_SOURCE_SUFFIX = {"nli": "", "llm": "_llmjudge"}
-STANCE_SOURCE_TAG = {"nli": "", "llm": ", LLM-judged stance"}
 
-SOURCE_POINT_MARKER = {"likert": "o", "speeches": "^"}
-SOURCE_MEAN_MARKER = {"likert": "*", "speeches": "X"}
 SOURCE_LINESTYLE = {"likert": "-", "speeches": "--"}
 SOURCE_VIOLIN_SIDE = {"likert": "low", "speeches": "high"}
 SOURCE_VIOLIN_ALPHA = {"likert": 0.6, "speeches": 0.3}
@@ -52,7 +78,7 @@ DIMENSION_POLES = {
     "Values": ("Liberal", "Traditional"),
     "Economy": ("State intervention", "Free market"),
     "Europe": ("More national autonomy", "More European integration"),
-    "Left-Right": ("Left - progressive", "Right - conservative"),
+    "Left-Right": ("Left", "Right"),
 }
 
 
@@ -67,9 +93,34 @@ def load_questionnaire(dataset):
     path = Path("data") / f"{dataset}_data" / f"{dataset}_questionnaire.jsonl"
     rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     df = pd.DataFrame(rows).sort_values("statement_idx").reset_index(drop=True)
-    dims = [c for c in df.columns if c not in ("statement_idx", "statement")]
+    # axis columns only: the file also carries `statement` and the `axis_source`
+    # provenance string written by rebuild_questionnaire_axes.py
+    dims = [c for c in df.columns
+            if c not in ("statement_idx", "statement") and pd.api.types.is_numeric_dtype(df[c])]
     one_sided = {d for d in dims if len(set(np.sign(df[d])) - {0.0}) < 2}
+    df["admin_idx"] = administration_order(dataset, df["statement"])
     return df, dims, one_sided
+
+
+def administration_order(dataset, statements):
+    """Row each statement occupies in the result CSVs.
+
+    The questionnaire is in codebook order (s1..s36); every result CSV is written in
+    statements.jsonl order, and the two differ for 19 of the 30 statements. The
+    stance loaders index rows by CSV position, so projecting them onto the axes
+    requires this permutation -- merging on raw position silently attaches the wrong
+    statement's axes.
+    """
+    path = Path("data") / f"{dataset}_data" / "statements.jsonl"
+    administered = [json.loads(line)["statement"]["en"]
+                    for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    position = {" ".join(s.split()): i for i, s in enumerate(administered)}
+    keys = [" ".join(str(s).split()) for s in statements]
+    missing = [k for k in keys if k not in position]
+    if missing:
+        raise SystemExit(f"{len(missing)} questionnaire statement(s) are not in {path}; "
+                         f"first: {missing[0]!r}")
+    return [position[k] for k in keys]
 
 
 def find_csvs(model_dir, pattern):
@@ -170,8 +221,59 @@ def load_stances(model_dir, stance_source):
     )
 
 
+# Reference anchors: the EP groups' own euandi answers, projected onto the same
+# dimensions as the model runs. A star is used nowhere else on these plots, so a
+# black star always means "this is a party, not a run".
+PARTY_MARKER = "*"
+PARTY_COLOR = "black"
+PARTY_LABEL_COLOR = "#1a1a1a"
+
+
+def party_anchors(questionnaire, dims, positions=DEFAULT_POSITIONS):
+    """Mean position per EP group on every dimension, indexed by group name."""
+    party_df = load_party_positions(positions_path(positions), positions)
+    party_df = party_df.dropna(subset=["ep_group"])
+    wide = party_df.pivot_table(index=["ep_group", "short_name"], columns="statement_idx",
+                                values="normalized_answer")
+
+    signs = questionnaire[dims].to_numpy(dtype=float)[wide.columns.to_numpy()]
+    answers = wide.to_numpy(dtype=float)
+    projected = pd.DataFrame(index=wide.index)
+    for i, dim in enumerate(dims):
+        loading = signs[:, i] != 0
+        projected[dim] = np.nanmean(answers[:, loading] * signs[loading, i], axis=1)
+    # For ep-group positions this is one europarty per group and averages nothing;
+    # for national/group-mean it pools the member parties.
+    return projected.groupby("ep_group").mean()
+
+
+def draw_party_anchors(ax, anchors, x_dim, y_dim, size=260, fontsize=FONTSIZE,
+                       color=PARTY_COLOR):
+    """The label ink stays dark whatever the marker colour: a light star (EU
+    yellow, say) is fine as a mark but unreadable as text on a white panel."""
+    if anchors is None:
+        return None
+    edge = "white" if color == PARTY_COLOR else PARTY_LABEL_COLOR
+    for label, row in anchors.iterrows():
+        if not (np.isfinite(row[x_dim]) and np.isfinite(row[y_dim])):
+            continue
+        ax.scatter(row[x_dim], row[y_dim], s=size, marker=PARTY_MARKER,
+                   color=color, edgecolor=edge, linewidths=1.2, zorder=8)
+        # Bold, with a fatter white halo: the group names are read on top of the
+        # per-run dot cloud, which regular weight disappears into.
+        ax.annotate(label, (row[x_dim], row[y_dim]), textcoords="offset points",
+                    xytext=(9, 4), fontsize=fontsize, color=PARTY_LABEL_COLOR, zorder=9,
+                    fontweight="bold",
+                    path_effects=[matplotlib.patheffects.withStroke(
+                        linewidth=3.5, foreground="white")])
+    return Line2D([], [], color=color, marker=PARTY_MARKER, ls="",
+                  markersize=LEGEND_MARKERSIZE, markeredgecolor=edge, label="EP group")
+
+
 def project_onto_dimensions(stances, questionnaire, dims):
-    signs = questionnaire[dims].reset_index(names="row_idx")
+    # row_idx from the stance loaders is a position in the result CSV, so the axis
+    # signs are keyed by admin_idx, not by the questionnaire's own row order
+    signs = questionnaire[[*dims, "admin_idx"]].rename(columns={"admin_idx": "row_idx"})
     merged = stances.merge(signs, on="row_idx", how="left")
     for d in dims:
         merged[d] = merged["stance"] * merged[d].replace(0, np.nan)
@@ -204,8 +306,9 @@ def setup_compass(ax, x_dim, y_dim, one_sided):
     ax.set_xlim(-1, 1)
     ax.set_ylim(-1, 1)
     ax.set_aspect("equal")
-    ax.set_xlabel(axis_label(x_dim, one_sided), fontsize=9)
-    ax.set_ylabel(axis_label(y_dim, one_sided), fontsize=9)
+    ax.set_xlabel(axis_label(x_dim, one_sided), fontsize=AXIS_FONTSIZE)
+    ax.set_ylabel(axis_label(y_dim, one_sided), fontsize=AXIS_FONTSIZE)
+    ax.tick_params(labelsize=FONTSIZE)
     ax.grid(True, linestyle=":", alpha=0.3)
 
 
@@ -218,7 +321,23 @@ def axis_label(dim, one_sided):
 NEUTRAL_COLOR = "#1f77b4"
 
 
-def plot_compass(runs, x_dim, y_dim, one_sided, title, out_path, color_map=None, aggregate=False):
+def is_hollow(framing=None, source=None):
+    return framing == HOLLOW_FRAMING or source == HOLLOW_SOURCE
+
+
+def mark_style(color, hollow):
+    """facecolor/edgecolor pair for a scatter; the colour moves to the outline."""
+    return {"facecolor": "none" if hollow else color, "edgecolor": color}
+
+
+def legend_mark(color, marker, label, hollow=False, markersize=LEGEND_MARKERSIZE, ls="", **kwargs):
+    return Line2D([], [], color=color, marker=marker, ls=ls, label=label,
+                  markersize=markersize, markeredgecolor=color,
+                  markerfacecolor="none" if hollow else color, **kwargs)
+
+
+def plot_compass(runs, x_dim, y_dim, one_sided, out_path, color_map=None, aggregate=False,
+                 anchors=None):
     fig, ax = plt.subplots(figsize=(9, 9))
     setup_compass(ax, x_dim, y_dim, one_sided)
 
@@ -233,64 +352,73 @@ def plot_compass(runs, x_dim, y_dim, one_sided, title, out_path, color_map=None,
         except np.linalg.LinAlgError:
             pass
 
-    sources = [s for s in SOURCE_FILLED if s in set(runs["source"])]
+    sources = [s for s in SOURCE_MARKER if s in set(runs["source"])]
     framings = [f for f in FRAMING_MARKER if f in set(runs["framing"])]
 
+    # Means stay filled whatever the run marks do: hollow at this size reads as a
+    # ring the eye loses against the dot cloud.
     def draw_mean(points, marker, color):
-        face = color if SOURCE_FILLED[source] else "none"
-        ax.scatter(*points.mean(axis=0), s=260, marker=marker, facecolor=face,
-                   edgecolor="black" if SOURCE_FILLED[source] else color,
-                   linewidths=1.8, zorder=5)
+        ax.scatter(*points.mean(axis=0), s=260, marker=marker, facecolor=color,
+                   edgecolor="black", linewidths=1.8, zorder=5)
 
     for framing in framings:
-        marker = FRAMING_MARKER[framing]
         for source in sources:
+            marker = FRAMING_SOURCE_MARKER[(framing, source)]
+            hollow = is_hollow(framing, source)
             if aggregate:
                 framing_color = FRAMING_COLOR[framing]
-                face = framing_color if SOURCE_FILLED[source] else "none"
                 points = runs[(runs["framing"] == framing) &
                               (runs["source"] == source)][[x_dim, y_dim]].dropna().to_numpy()
                 if len(points):
                     ax.scatter(points[:, 0], points[:, 1], s=10, marker=marker,
-                               facecolor=face, edgecolor=framing_color, alpha=0.6, linewidths=0.6)
+                               **mark_style(framing_color, hollow),
+                               alpha=0.5, linewidths=0.6)
                     draw_mean(points, marker, framing_color)
                 continue
             for lang in sorted(runs["language"].dropna().unique()):
                 color = color_map[lang] if color_map else NEUTRAL_COLOR
-                face = color if SOURCE_FILLED[source] else "none"
                 points = runs[(runs["language"] == lang) &
                               (runs["framing"] == framing) &
                               (runs["source"] == source)][[x_dim, y_dim]].dropna().to_numpy()
                 if not len(points):
                     continue
                 ax.scatter(points[:, 0], points[:, 1], s=18, marker=marker,
-                           facecolor=face, edgecolor=color, alpha=0.45, linewidths=0.8)
+                           **mark_style(color, hollow), alpha=0.35, linewidths=0.8)
                 draw_mean(points, marker, color)
 
-    ax.set_title(title, fontsize=11, pad=8)
+    party_handle = draw_party_anchors(ax, anchors, x_dim, y_dim)
     show_languages = color_map if color_map and len(color_map) > 1 else None
-    add_language_framing_legends(ax, show_languages, framings, sources, aggregate=aggregate)
+    add_language_framing_legends(ax, show_languages, framings, sources,
+                                 aggregate=aggregate, party_handle=party_handle)
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     print(f"  Saved {out_path}")
 
 
-def add_language_framing_legends(ax, colors, framings, sources, aggregate=False):
+def add_language_framing_legends(ax, colors, framings, sources, aggregate=False,
+                                 party_handle=None):
     if colors:
-        lang_handles = [Line2D([], [], color=c, marker="o", ls="", label=lang)
+        lang_handles = [Line2D([], [], color=c, marker="o", ls="", label=lang,
+                               markersize=LANG_LEGEND_MARKERSIZE)
                         for lang, c in colors.items()]
-        ax.legend(handles=lang_handles, loc="upper left", bbox_to_anchor=(1.02, 1.0),
-                  fontsize=7, title="language")
+        legend = ax.legend(handles=lang_handles, loc=MAIN_LEGEND_LOC, title="language",
+                           fontsize=LEGEND_FONTSIZE_SMALL, title_fontsize=LEGEND_FONTSIZE_SMALL,
+                           ncol=2 if len(lang_handles) > 8 else 1, framealpha=0.9)
+        if party_handle is not None:
+            ax.add_artist(legend)
+            ax.legend(handles=[party_handle], loc="lower right", fontsize=FONTSIZE,
+                      framealpha=0.9)
         return
     framing_color = (lambda f: FRAMING_COLOR[f]) if aggregate else (lambda f: "gray")
-    style_handles = [Line2D([], [], color=framing_color(f), marker=FRAMING_MARKER[f], ls="",
-                            label=f"{f}  (small = run, large = mean)") for f in framings]
-    style_handles += [Line2D([], [], color="gray", marker="o", ls="",
-                             markerfacecolor="gray" if SOURCE_FILLED[s] else "none",
-                             label=f"{SOURCE_LABEL[s]}  ({'filled' if SOURCE_FILLED[s] else 'hollow'})")
-                      for s in sources]
-    ax.legend(handles=style_handles, loc="upper right", fontsize=8, title="framing / source")
+    style_handles = [legend_mark(framing_color(f), FRAMING_SOURCE_MARKER[(f, s)],
+                                 f"{f} · {SOURCE_LABEL[s]}", hollow=is_hollow(f, s))
+                     for f in framings for s in sources]
+    if party_handle is not None:
+        style_handles.append(party_handle)
+    ax.legend(handles=style_handles, loc=MAIN_LEGEND_LOC, fontsize=FONTSIZE, framealpha=0.9,
+              title_fontsize=FONTSIZE,
+              title="framing · source  (small = run, large = mean)")
 
 
 def violin_series(responses, framing, source, dims, positions_for_dim):
@@ -304,9 +432,9 @@ def violin_series(responses, framing, source, dims, positions_for_dim):
     return positions, datasets
 
 
-def plot_violins(responses, dims, one_sided, title, out_path):
+def plot_violins(responses, dims, one_sided, out_path):
     framings = [f for f in FRAMING_COLOR if f in set(responses["framing"])]
-    sources = [s for s in SOURCE_POINT_MARKER if s in set(responses["source"])]
+    sources = [s for s in SOURCE_MARKER if s in set(responses["source"])]
     split = len(sources) > 1
     x = np.arange(len(dims))
     band_width = 0.8 / max(len(framings), 1)
@@ -328,90 +456,95 @@ def plot_violins(responses, dims, one_sided, title, out_path):
             parts["cmeans"].set_color("black")
 
     ax.set_xticks(x)
-    ax.set_xticklabels([d + ("\n(one-sided!)" if d in one_sided else "") for d in dims], fontsize=9)
+    ax.set_xticklabels([d + ("\n(one-sided!)" if d in one_sided else "") for d in dims],
+                       fontsize=FONTSIZE)
+    ax.tick_params(axis="y", labelsize=FONTSIZE)
     ax.set_ylim(-1.05, 1.05)
-    ax.set_ylabel("position  (← disagree   ·   agree →)")
+    ax.set_ylabel("position  (← disagree   ·   agree →)", fontsize=AXIS_FONTSIZE)
     ax.grid(axis="y", linestyle=":", alpha=0.3)
-    ax.set_title(title, fontsize=11, pad=8)
 
     framing_handles = [Line2D([], [], color=c, marker="s", ls="", label=f)
                        for f, c in FRAMING_COLOR.items() if f in set(framings)]
     source_note = "  ".join(f"{SOURCE_VIOLIN_SIDE[s]} half = {SOURCE_LABEL[s]}" for s in sources) if split else ""
-    legend = ax.legend(handles=framing_handles, loc="upper right", fontsize=8,
-                       title="framing (black bar = mean)")
+    legend = ax.legend(handles=framing_handles, loc="upper right", fontsize=FONTSIZE,
+                       title_fontsize=FONTSIZE, title="framing (black bar = mean)")
     if source_note:
-        ax.text(0.99, 0.02, source_note, transform=ax.transAxes, ha="right", va="bottom", fontsize=8)
+        ax.text(0.99, 0.02, source_note, transform=ax.transAxes, ha="right", va="bottom", fontsize=FONTSIZE)
     ax.add_artist(legend)
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
+    fig.savefig(out_path, dpi=300)
     plt.close(fig)
     print(f"  Saved {out_path}")
 
 
-def plot_models_scatter_compass(runs_by_model, x_dim, y_dim, one_sided, title, out_path, split_by=None):
+def plot_models_scatter_compass(runs_by_model, x_dim, y_dim, one_sided, out_path,
+                                split_by=None, anchors=None):
     fig, ax = plt.subplots(figsize=(9, 9))
     setup_compass(ax, x_dim, y_dim, one_sided)
     cmap = plt.get_cmap("tab10" if len(runs_by_model) <= 10 else "tab20")
     all_runs = pd.concat(runs_by_model.values(), ignore_index=True)
     framings = [f for f in FRAMING_MARKER if f in set(all_runs["framing"])]
-    sources = [s for s in SOURCE_FILLED if s in set(all_runs["source"])]
+    sources = [s for s in SOURCE_MARKER if s in set(all_runs["source"])]
 
-    def draw(points, color, marker, filled):
+    def draw(points, color, marker, hollow=False):
         if not len(points):
             return
-        face = color if filled else "none"
         ax.scatter(points[:, 0], points[:, 1], s=12, marker=marker,
-                   facecolor=face, edgecolor=color, alpha=0.8, linewidths=0.5)
-        ax.scatter(*points.mean(axis=0), s=240, marker=marker, facecolor=face,
-                   edgecolor="black" if filled else color, linewidths=1.8, zorder=5)
+                   **mark_style(color, hollow), alpha=0.7, linewidths=0.5)
+        ax.scatter(*points.mean(axis=0), s=240, marker=marker, facecolor=color,
+                   edgecolor="black", linewidths=1.8, zorder=5)
 
     model_handles = []
     for i, (model, runs) in enumerate(sorted(runs_by_model.items())):
         color = cmap(i % cmap.N)
-        model_handles.append(Line2D([], [], color=color, marker="o", ls="", label=model))
+        model_handles.append(legend_mark(color, "o", model))
         if split_by == "framing":
             for framing in framings:
                 points = runs[runs["framing"] == framing][[x_dim, y_dim]].dropna().to_numpy()
-                draw(points, color, FRAMING_MARKER[framing], True)
+                draw(points, color, FRAMING_MARKER[framing], is_hollow(framing=framing))
         elif split_by == "source":
             for source in sources:
                 points = runs[runs["source"] == source][[x_dim, y_dim]].dropna().to_numpy()
-                draw(points, color, "o", SOURCE_FILLED[source])
+                draw(points, color, SOURCE_MARKER[source], is_hollow(source=source))
         else:
-            draw(runs[[x_dim, y_dim]].dropna().to_numpy(), color, "o", True)
+            draw(runs[[x_dim, y_dim]].dropna().to_numpy(), color, "o")
 
-    ax.set_title(title, fontsize=11, pad=8)
-    model_legend = ax.legend(handles=model_handles, loc="upper left", bbox_to_anchor=(1.02, 1.0),
-                             fontsize=8, title="model  (large = mean)")
+    party_handle = draw_party_anchors(ax, anchors, x_dim, y_dim)
+    model_legend = ax.legend(handles=model_handles, loc=MAIN_LEGEND_LOC, fontsize=FONTSIZE,
+                             title_fontsize=FONTSIZE, framealpha=0.9,
+                             title="model  (large = mean)")
     ax.add_artist(model_legend)
+    style_handles, style_title = [], None
     if split_by == "framing":
-        style_handles = [Line2D([], [], color="gray", marker=FRAMING_MARKER[f], ls="", label=f)
+        style_handles = [legend_mark("gray", FRAMING_MARKER[f], f, hollow=is_hollow(framing=f))
                          for f in framings]
-        ax.legend(handles=style_handles, loc="lower left", bbox_to_anchor=(1.02, 0.0),
-                  fontsize=8, title="framing")
+        style_title = "framing"
     elif split_by == "source":
-        style_handles = [Line2D([], [], color="gray", marker="o", ls="",
-                                 markerfacecolor="gray" if SOURCE_FILLED[s] else "none",
-                                 label=f"{SOURCE_LABEL[s]}  ({'filled' if SOURCE_FILLED[s] else 'hollow'})")
+        style_handles = [legend_mark("gray", SOURCE_MARKER[s], SOURCE_LABEL[s],
+                                     hollow=is_hollow(source=s))
                          for s in sources]
-        ax.legend(handles=style_handles, loc="lower left", bbox_to_anchor=(1.02, 0.0),
-                  fontsize=8, title="source")
+        style_title = "source"
+    if party_handle is not None:
+        style_handles.append(party_handle)
+    if style_handles:
+        ax.legend(handles=style_handles, loc="lower right", fontsize=FONTSIZE,
+                  title_fontsize=FONTSIZE, framealpha=0.9, title=style_title)
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     print(f"  Saved {out_path}")
 
 
-def plot_models_compass(runs_by_model, x_dim, y_dim, one_sided, title, out_path):
+def plot_models_compass(runs_by_model, x_dim, y_dim, one_sided, out_path, anchors=None):
     fig, ax = plt.subplots(figsize=(8.5, 8.5))
     setup_compass(ax, x_dim, y_dim, one_sided)
     cmap = plt.get_cmap("tab10" if len(runs_by_model) <= 10 else "tab20")
     all_runs = pd.concat(runs_by_model.values(), ignore_index=True)
-    sources = [s for s in SOURCE_POINT_MARKER if s in set(all_runs["source"])]
+    sources = [s for s in SOURCE_MARKER if s in set(all_runs["source"])]
     model_handles = []
     for i, (model, runs) in enumerate(sorted(runs_by_model.items())):
         color = cmap(i % cmap.N)
-        model_handles.append(Line2D([], [], color=color, marker="s", ls="", label=model))
+        model_handles.append(legend_mark(color, "s", model))
         for source in sources:
             points = runs[runs["source"] == source][[x_dim, y_dim]].dropna().to_numpy()
             if len(points) < 3:
@@ -419,30 +552,37 @@ def plot_models_compass(runs_by_model, x_dim, y_dim, one_sided, title, out_path)
             ax.add_patch(covariance_ellipse(points, 2, edgecolor=color, facecolor="none",
                                              lw=1.3, ls=SOURCE_LINESTYLE[source]))
             ax.scatter(*points.mean(axis=0), s=110, color=color, edgecolor="black",
-                       marker=SOURCE_MEAN_MARKER[source], zorder=4)
-    ax.set_title(title, fontsize=11, pad=8)
-    source_handles = [Line2D([], [], color="gray", marker=SOURCE_MEAN_MARKER[s],
-                             ls=SOURCE_LINESTYLE[s], label=f"{SOURCE_LABEL[s]} (mean, 2σ)") for s in sources]
-    first = ax.legend(handles=model_handles, loc="upper left", fontsize=8, title="model")
+                       marker=SOURCE_MARKER[source], zorder=4)
+    # This panel plots means only -- nothing hollow to key, the sources split by
+    # marker and by the ellipse line style.
+    party_handle = draw_party_anchors(ax, anchors, x_dim, y_dim, size=200)
+    source_handles = [legend_mark("gray", SOURCE_MARKER[s], f"{SOURCE_LABEL[s]} (mean, 2σ)",
+                                  ls=SOURCE_LINESTYLE[s])
+                      for s in sources]
+    if party_handle is not None:
+        source_handles.append(party_handle)
+    first = ax.legend(handles=model_handles, loc=MAIN_LEGEND_LOC, fontsize=FONTSIZE,
+                      title_fontsize=FONTSIZE, framealpha=0.9, title="model")
     ax.add_artist(first)
-    ax.legend(handles=source_handles, loc="upper right", fontsize=8, title="source")
+    ax.legend(handles=source_handles, loc="lower right", fontsize=FONTSIZE,
+              title_fontsize=FONTSIZE, framealpha=0.9, title="source")
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
+    fig.savefig(out_path, dpi=300)
     plt.close(fig)
     print(f"  Saved {out_path}")
 
 
-VIOLIN_GRANULARITIES = {"run": "per-run", "none": "per-answer"}
+VIOLIN_GRANULARITIES = ["run", "none"]  # per-run mean vs. every single answer
 
 
-def process_model(model_dir, questionnaire, dims, one_sided, x_dim, y_dim, stance_source):
+def process_model(model_dir, questionnaire, dims, one_sided, x_dim, y_dim, stance_source,
+                  anchors=None):
     print(f"\nProcessing: {model_dir.name}")
     stances = load_stances(model_dir, stance_source)
     if stances.empty:
         print("  No response CSVs found, skipping.")
         return None
     suffix = STANCE_SOURCE_SUFFIX[stance_source]
-    tag = STANCE_SOURCE_TAG[stance_source]
 
     projected = project_onto_dimensions(stances, questionnaire, dims)
     run_positions = aggregate_positions(projected, dims, "run")
@@ -454,24 +594,21 @@ def process_model(model_dir, questionnaire, dims, one_sided, x_dim, y_dim, stanc
     shared_compass_dir = model_dir.parent / "plots" / "political_compasses"
     shared_compass_dir.mkdir(parents=True, exist_ok=True)
 
-    base_title = f"{model_dir.name} – political compass ({x_dim} × {y_dim}, per-run{tag})"
     plot_compass(run_positions, x_dim, y_dim, one_sided,
-                 f"{base_title}, all languages",
-                 shared_compass_dir / f"{model_dir.name}{suffix}.png", aggregate=True)
+                 shared_compass_dir / f"{model_dir.name}{suffix}.png", aggregate=True,
+                 anchors=anchors)
 
     color_map = language_colors(run_positions["language"].dropna().unique())
     plot_compass(run_positions, x_dim, y_dim, one_sided,
-                 f"{base_title}, by language",
-                 compass_dir / f"political_compass_by_language{suffix}.png", color_map=color_map)
+                 compass_dir / f"political_compass_by_language{suffix}.png",
+                 color_map=color_map, anchors=anchors)
     for lang in sorted(color_map):
         plot_compass(run_positions[run_positions["language"] == lang], x_dim, y_dim, one_sided,
-                     f"{base_title}, {lang}",
                      compass_dir / f"political_compass_{lang}{suffix}.png",
-                     color_map={lang: color_map[lang]})
-    for granularity, label in VIOLIN_GRANULARITIES.items():
+                     color_map={lang: color_map[lang]}, anchors=anchors)
+    for granularity in VIOLIN_GRANULARITIES:
         responses = melt_positions(aggregate_positions(projected, dims, granularity), dims)
         plot_violins(responses, dims, one_sided,
-                     f"{model_dir.name} – per-dimension stance distribution ({label}{tag})",
                      out_dir / f"dimension_violins_{granularity}{suffix}.png")
     return run_positions
 
@@ -486,6 +623,10 @@ def main():
     parser.add_argument("--stance-source", default="nli", choices=sorted(STANCE_SOURCE_SUFFIX),
                         help="nli: Likert choice columns + NLI-scored speeches (*_scored.csv). "
                              "llm: both tracks from {reasons,speeches}_llm_stance.csv.")
+    parser.add_argument("--parties", default=DEFAULT_POSITIONS,
+                        choices=[*POSITION_CHOICES, "none"],
+                        help="Which euandi answers the black EP-group anchors come from; "
+                             "'none' draws no anchors.")
     args = parser.parse_args()
     if args.stance_source == "llm":
         SOURCE_LABEL.update(LLM_SOURCE_LABEL)
@@ -504,10 +645,15 @@ def main():
     if not model_dirs:
         raise SystemExit("No model directories found.")
 
+    anchors = None if args.parties == "none" else party_anchors(questionnaire, dims, args.parties)
+    if anchors is not None:
+        print(f"\nEP-group anchors ({args.parties}):")
+        print(anchors[[args.x_dim, args.y_dim]].round(3).to_string())
+
     runs_by_model = {}
     for model_dir in model_dirs:
         runs = process_model(model_dir, questionnaire, dims, one_sided,
-                             args.x_dim, args.y_dim, args.stance_source)
+                             args.x_dim, args.y_dim, args.stance_source, anchors)
         if runs is not None:
             runs_by_model[model_dir.name] = runs
 
@@ -515,20 +661,17 @@ def main():
         out_dir = results_dir / "plots"
         out_dir.mkdir(exist_ok=True)
         suffix = STANCE_SOURCE_SUFFIX[args.stance_source]
-        tag = STANCE_SOURCE_TAG[args.stance_source]
-        source_pair = " vs ".join(SOURCE_LABEL[s] for s in SOURCE_FILLED)
         plot_models_compass(runs_by_model, args.x_dim, args.y_dim, one_sided,
-                            f"Political compass across models ({args.x_dim} × {args.y_dim}, per-run{tag})",
-                            out_dir / f"political_compass_models{suffix}.png")
+                            out_dir / f"political_compass_models{suffix}.png", anchors=anchors)
         plot_models_scatter_compass(runs_by_model, args.x_dim, args.y_dim, one_sided,
-                            f"Political compass across models ({args.x_dim} × {args.y_dim}, per-run runs{tag})",
-                            out_dir / f"political_compass_models_scatter{suffix}.png")
+                            out_dir / f"political_compass_models_scatter{suffix}.png",
+                            anchors=anchors)
         plot_models_scatter_compass(runs_by_model, args.x_dim, args.y_dim, one_sided,
-                            f"Political compass across models ({args.x_dim} × {args.y_dim}, per-run runs, base vs negated{tag})",
-                            out_dir / f"political_compass_models_scatter_framing{suffix}.png", split_by="framing")
+                            out_dir / f"political_compass_models_scatter_framing{suffix}.png",
+                            split_by="framing", anchors=anchors)
         plot_models_scatter_compass(runs_by_model, args.x_dim, args.y_dim, one_sided,
-                            f"Political compass across models ({args.x_dim} × {args.y_dim}, per-run runs, {source_pair}{tag})",
-                            out_dir / f"political_compass_models_scatter_source{suffix}.png", split_by="source")
+                            out_dir / f"political_compass_models_scatter_source{suffix}.png",
+                            split_by="source", anchors=anchors)
 
     print("\nDone.")
 

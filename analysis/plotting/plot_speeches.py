@@ -29,7 +29,7 @@ RED_WHITE_GREEN = mcolors.LinearSegmentedColormap.from_list(
 
 
 def save_figure(fig: plt.Figure, out_path: Path, **savefig_kwargs) -> None:
-    fig.savefig(out_path, dpi=150, **savefig_kwargs)
+    fig.savefig(out_path, dpi=300, **savefig_kwargs)
     plt.close(fig)
     print(f"  Saved {out_path.relative_to(out_path.parents[3])}")
 
@@ -128,7 +128,7 @@ def compute_speech_matrices(
 
 
 def save_heatmap(
-    matrix: np.ndarray, languages: list[str], title: str, colorbar_label: str,
+    matrix: np.ndarray, languages: list[str], colorbar_label: str,
     out_path: Path, cmap, vmin: float, vmax: float,
 ) -> None:
     n_questions, n_langs = matrix.shape
@@ -137,7 +137,6 @@ def save_heatmap(
     fig.colorbar(im, ax=ax, label=colorbar_label, fraction=0.02, pad=0.02)
     ax.set_xticks(range(n_langs), languages, rotation=45, ha="right", fontsize=8)
     ax.set_yticks(range(n_questions), [f"Q{i + 1}" for i in range(n_questions)], fontsize=8)
-    ax.set_title(title, fontsize=11, pad=8)
     for row in range(n_questions):
         for col in range(n_langs):
             if not np.isnan(matrix[row, col]):
@@ -147,7 +146,7 @@ def save_heatmap(
 
 
 def save_boxplot(
-    data: list[np.ndarray], labels: list[str], title: str, ylabel: str,
+    data: list[np.ndarray], labels: list[str], ylabel: str,
     out_path: Path, ylim: tuple[float, float],
 ) -> None:
     fig, ax = plt.subplots(figsize=(max(10, len(labels) * 0.55), 5))
@@ -157,7 +156,6 @@ def save_boxplot(
     ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=8)
     ax.set_ylabel(ylabel)
     ax.set_ylim(ylim)
-    ax.set_title(title, fontsize=11, pad=8)
     fig.tight_layout()
     save_figure(fig, out_path)
 
@@ -184,38 +182,27 @@ def plot_speech_consistency(model_dir: Path, out_dir: Path) -> None:
         return
 
     languages, mean_mat, variance_mat, correlation_mat = compute_speech_matrices(arrays_per_variant)
-    name = model_dir.name
     question_labels = [f"Q{i + 1}" for i in range(mean_mat.shape[0])]
 
-    save_heatmap(mean_mat, languages,
-                 f"{name} – Speech mean stance (−1 disagree → +1 agree)", "Mean stance",
+    save_heatmap(mean_mat, languages, "Mean stance",
                  out_dir / "speech_language_mean_consistency.png",
                  RED_WHITE_GREEN, vmin=-1.0, vmax=1.0)
-    save_heatmap(variance_mat, languages,
-                 f"{name} – Speech stance variance (−1 to +1 scale)", "Variance",
+    save_heatmap(variance_mat, languages, "Variance",
                  out_dir / "speech_language_variance_consistency.png",
                  "YlOrRd", vmin=0.0, vmax=1.0)
-    save_heatmap(correlation_mat, languages,
-                 f"{name} – {PAIRWISE_R_LABEL} between speech-variant stance vectors",
-                 PAIRWISE_R_LABEL,
+    save_heatmap(correlation_mat, languages, PAIRWISE_R_LABEL,
                  out_dir / "speech_language_correlation_consistency.png",
                  "RdYlGn", vmin=-1.0, vmax=1.0)
 
     save_boxplot(columns_without_nan(mean_mat), languages,
-                 f"{name} – Speech mean stance per language (distribution over questions)",
                  "Mean stance (−1 disagree → +1 agree)",
                  out_dir / "speech_boxplot_mean_by_language.png", ylim=(-1.0, 1.0))
     save_boxplot(rows_without_nan(mean_mat), question_labels,
-                 f"{name} – Speech mean stance per question (distribution over languages)",
                  "Mean stance (−1 disagree → +1 agree)",
                  out_dir / "speech_boxplot_mean_by_question.png", ylim=(-1.0, 1.0))
-    save_boxplot(columns_without_nan(correlation_mat), languages,
-                 f"{name} – Speech variant correlation per language (distribution over questions)",
-                 PAIRWISE_R_LABEL,
+    save_boxplot(columns_without_nan(correlation_mat), languages, PAIRWISE_R_LABEL,
                  out_dir / "speech_boxplot_correlation_by_language.png", ylim=(-1.0, 1.0))
-    save_boxplot(rows_without_nan(correlation_mat), question_labels,
-                 f"{name} – Speech variant correlation per question (distribution over languages)",
-                 PAIRWISE_R_LABEL,
+    save_boxplot(rows_without_nan(correlation_mat), question_labels, PAIRWISE_R_LABEL,
                  out_dir / "speech_boxplot_correlation_by_question.png", ylim=(-1.0, 1.0))
 
 
@@ -238,7 +225,7 @@ def load_speech_alphas(model_dir: Path) -> dict[str, pd.Series]:
     return dict(sorted(alphas.items()))
 
 
-def plot_cronbach_per_language(alphas: dict[str, pd.Series], title: str, out_path: Path) -> None:
+def plot_cronbach_per_language(alphas: dict[str, pd.Series], out_path: Path) -> None:
     languages = sorted(set().union(*(series.index for series in alphas.values())))
     pivot = pd.DataFrame({label: series.reindex(languages) for label, series in alphas.items()})
 
@@ -261,7 +248,6 @@ def plot_cronbach_per_language(alphas: dict[str, pd.Series], title: str, out_pat
     ax.set_ylabel("Cronbach's α (across axes)")
     ax.set_ylim(0.0, max(1.0, float(pivot.max().max()) + 0.05))
     ax.grid(axis="y", linestyle="--", alpha=0.4)
-    ax.set_title(title, fontsize=11, pad=8)
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=min(n_variants, 6),
               fontsize=8, framealpha=0.9)
     save_figure(fig, out_path, bbox_inches="tight")
@@ -272,11 +258,7 @@ def plot_speech_cronbach(model_dir: Path, out_dir: Path) -> None:
     if not alphas:
         print("  No cronbach_speeches*.csv files found, skipping cronbach plot.")
         return
-    plot_cronbach_per_language(
-        alphas,
-        f"{model_dir.name} – Speech Cronbach's α per language",
-        out_dir / "cronbach_speeches_per_language.png",
-    )
+    plot_cronbach_per_language(alphas, out_dir / "cronbach_speeches_per_language.png")
 
 
 def load_likert_stance(model_dir: Path) -> pd.DataFrame | None:
@@ -291,7 +273,7 @@ def load_likert_stance(model_dir: Path) -> pd.DataFrame | None:
     return pd.DataFrame({lang: likert_to_stance(mean_likert[lang]) for lang in languages})
 
 
-def plot_correlation_bar(per_language_r: pd.Series, title: str, out_path: Path) -> None:
+def plot_correlation_bar(per_language_r: pd.Series, out_path: Path) -> None:
     fig, ax = plt.subplots(figsize=(max(10, len(per_language_r) * 0.5), 5))
     colors = ["seagreen" if r >= 0 else "indianred" for r in per_language_r.values]
     x = np.arange(len(per_language_r))
@@ -300,7 +282,6 @@ def plot_correlation_bar(per_language_r: pd.Series, title: str, out_path: Path) 
     ax.set_ylim(-1.0, 1.0)
     ax.set_ylabel("Pearson r (speech stance vs Likert stance)")
     ax.set_xticks(x, per_language_r.index, rotation=45, ha="right", fontsize=8)
-    ax.set_title(title, fontsize=11, pad=8)
     ax.grid(axis="y", linestyle="--", alpha=0.4)
     fig.tight_layout()
     save_figure(fig, out_path)
@@ -308,7 +289,7 @@ def plot_correlation_bar(per_language_r: pd.Series, title: str, out_path: Path) 
 
 def plot_correlation_scatter(
     speech_stance: pd.DataFrame, likert_stance: pd.DataFrame,
-    languages: list[str], pooled_r: float, title: str, out_path: Path,
+    languages: list[str], pooled_r: float, out_path: Path,
 ) -> None:
     fig, ax = plt.subplots(figsize=(6.5, 6.5))
     cmap = plt.get_cmap("tab20")
@@ -320,7 +301,9 @@ def plot_correlation_scatter(
     ax.set_ylim(-1.05, 1.05)
     ax.set_xlabel("Likert stance (−1 disagree → +1 agree)")
     ax.set_ylabel("Speech stance (NLI, −1 → +1)")
-    ax.set_title(f"{title}\npooled Pearson r = {pooled_r:.3f}", fontsize=11, pad=8)
+    # The pooled correlation is the finding, so it moves onto the panel.
+    ax.text(0.02, 0.98, f"pooled Pearson r = {pooled_r:.3f}", transform=ax.transAxes,
+            ha="left", va="top", fontsize=10)
     ax.grid(linestyle="--", alpha=0.3)
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=10, fontsize=6, framealpha=0.9)
     save_figure(fig, out_path, bbox_inches="tight")
@@ -328,7 +311,7 @@ def plot_correlation_scatter(
 
 def plot_langxlang_heatmap(
     speech_stance: pd.DataFrame, likert_stance: pd.DataFrame,
-    languages: list[str], title: str, out_path: Path,
+    languages: list[str], out_path: Path,
 ) -> None:
     n = len(languages)
     matrix = np.array([
@@ -346,7 +329,6 @@ def plot_langxlang_heatmap(
     ax.set_yticks(range(n), languages, fontsize=8)
     ax.set_xlabel("Likert language")
     ax.set_ylabel("Speech language")
-    ax.set_title(title, fontsize=11, pad=8)
     for row in range(n):
         for col in range(n):
             value = matrix[row, col]
@@ -383,23 +365,16 @@ def plot_speech_vs_likert(model_dir: Path, out_dir: Path) -> None:
             likert_stance[lang].to_numpy(dtype=float),
         ) for lang in languages
     })
-    name = model_dir.name
-    plot_correlation_bar(
-        per_language_r,
-        f"{name} – Speech stance vs Likert stance correlation per language",
-        out_dir / "speech_vs_likert_correlation_bar.png",
-    )
+    plot_correlation_bar(per_language_r, out_dir / "speech_vs_likert_correlation_bar.png")
 
     pooled_speech = np.concatenate([speech_stance[lang].to_numpy(dtype=float) for lang in languages])
     pooled_likert = np.concatenate([likert_stance[lang].to_numpy(dtype=float) for lang in languages])
     plot_correlation_scatter(
         speech_stance, likert_stance, languages, safe_pearson(pooled_speech, pooled_likert),
-        f"{name} – Speech stance vs Likert stance",
         out_dir / "speech_vs_likert_scatter.png",
     )
     plot_langxlang_heatmap(
         speech_stance, likert_stance, languages,
-        f"{name} – Speech vs Likert stance correlation (language × language)",
         out_dir / "speech_vs_likert_langxlang.png",
     )
 

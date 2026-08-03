@@ -17,15 +17,42 @@ sys.path.insert(0, str(_ANALYSIS_DIR))
 from utils import flip_likert
 from sample_speeches_for_labeling import STANCE_BIN_EDGES
 
-VARIANTS = ["", "_question", "_negated"]
-VARIANT_LABELS = {"": "base", "_question": "question", "_negated": "negated"}
-VARIANT_COLORS = {"base": "#2CA02C", "question": "#FFC107", "negated": "#D62728"}
+# The "_question" framing is generated but unused downstream, so it is not read
+# here at all: leaving it in would put a third of every stack's height behind a
+# variant nothing else in the analysis reports on.
+VARIANTS = ["", "_negated"]
+VARIANT_LABELS = {"": "base", "_negated": "negated"}
+VARIANT_COLORS = {"base": "#2CA02C", "negated": "#D62728"}
 # On the cross-model panel the colour is spent on the model, so the framing split
 # has to be carried by the texture instead.
-VARIANT_HATCH = {"base": "", "question": "///", "negated": "xxx"}
+VARIANT_HATCH = {"base": "", "negated": "xxx"}
 LIKERT_VALUES = [1, 2, 3, 4, 5]
 LIKERT_XLABEL = "Likert (1 = agree → 5 = disagree)"
-KIND_LABEL = {"choices": "Likert choices", "stance": "speech stances (NLI-scored)"}
+# Panel headings for the combined figure, in the thesis's own naming: the direct
+# track is the model's Likert choice, the indirect one is its prose scored back
+# onto the same scale. Ordered as the figure stacks them, top to bottom.
+KIND_PANEL_LABEL = {"choices": "Direct Likert", "stance": "Indirect Likert"}
+KIND_PANEL_ORDER = ["choices", "stance"]
+
+# Sized for a figure reduced into a LaTeX column rather than browsed as a PNG --
+# what survives the reduction is the ratio of type to figure, not the absolute pt.
+# See the equivalent block in plot_argmax_shares.py, whose per-language figures
+# posed the same problem. These panels are drawn ~13 inches wide and land in a
+# ~3.3-inch column, so the old 8-10pt labels printed at roughly 2.5pt.
+TICK_FONTSIZE = 20
+AXIS_LABEL_FONTSIZE = 22
+PANEL_LABEL_FONTSIZE = 22
+LEGEND_FONTSIZE = 17
+LEGEND_TITLE_FONTSIZE = 18
+MODEL_LEGEND_NCOL = 4
+
+# Fixed y-range for the cross-model panels, rather than one scaled to whatever the
+# tallest stack happens to be. A model's five stacks sum to 1 by construction, so
+# 1.0 is the ceiling a single Likert value could reach and the extra 0.1 is
+# headroom for the in-axes panel label. Fixing it makes bar heights comparable
+# across the direct and indirect panels -- and across separate runs -- which an
+# autoscaled axis silently prevents.
+SHARED_YLIM = (0.0, 1.1)
 
 
 def save_figure(fig, out_path, **savefig_kwargs):
@@ -160,47 +187,121 @@ def variant_shares(per_variant, variant_order):
     return shares, int(total)
 
 
-def plot_models_distribution(pooled_by_model, kind, out_path):
-    """All models on one panel: colour = model, hatch = framing, languages pooled."""
-    models = sorted(pooled_by_model)
-    variant_order = list(VARIANT_LABELS.values())
+def model_colors(models):
+    """{model: colour}, fixed by the model's position in `models`. Passed around
+    rather than recomputed per panel so a model keeps one colour across the panels
+    of the combined figure -- the premise of sharing a single legend."""
     cmap = plt.get_cmap("tab10" if len(models) <= 10 else "tab20")
+    return {model: cmap(index % cmap.N) for index, model in enumerate(models)}
 
+
+def draw_models_distribution(ax, pooled_by_model, models, colors, label_x=True):
+    """One panel: colour = model, hatch = framing, languages pooled. Returns
+    {model: n} so the caller can label the legend with each model's sample size."""
+    variant_order = list(VARIANT_LABELS.values())
     x = np.arange(len(LIKERT_VALUES))
     bar_width = 0.8 / len(models)
-    fig, ax = plt.subplots(figsize=(max(10.0, len(models) * 1.0), 5.5))
-    model_handles, y_max = [], 0.0
+    totals = {}
     for index, model in enumerate(models):
-        color = cmap(index % cmap.N)
+        if model not in pooled_by_model:
+            continue
         shares, total = variant_shares(pooled_by_model[model], variant_order)
+        totals[model] = total
         offsets = x - 0.4 + bar_width * (index + 0.5)
         bottom = np.zeros(len(LIKERT_VALUES))
         for label in variant_order:
-            ax.bar(offsets, shares[label], width=bar_width * 0.9, bottom=bottom, color=color,
-                   hatch=VARIANT_HATCH[label], edgecolor="black", linewidth=0.4)
+            ax.bar(offsets, shares[label], width=bar_width * 0.9, bottom=bottom,
+                   color=colors[model], hatch=VARIANT_HATCH[label],
+                   edgecolor="black", linewidth=0.4)
             bottom += shares[label]
-        y_max = max(y_max, bottom.max())
-        model_handles.append(plt.Rectangle((0, 0), 1, 1, facecolor=color, edgecolor="black",
-                                           linewidth=0.4, label=f"{model} (n={total})"))
 
-    ax.set_xticks(x, LIKERT_VALUES, fontsize=9)
-    ax.tick_params(axis="y", labelsize=8)
-    ax.set_ylim(0, y_max * 1.1 or 1.0)
-    ax.set_xlabel(LIKERT_XLABEL, fontsize=9)
-    ax.set_ylabel("Proportion", fontsize=9)
-    ax.set_title(f"{KIND_LABEL[kind]}: all models, languages pooled", fontsize=10)
+    ax.set_xticks(x)
+    # The upper panel of the stacked figure hands its x-axis to the lower one.
+    ax.set_xticklabels(LIKERT_VALUES if label_x else [""] * len(LIKERT_VALUES),
+                       fontsize=TICK_FONTSIZE)
+    ax.tick_params(axis="y", labelsize=TICK_FONTSIZE)
+    ax.set_ylim(*SHARED_YLIM)
+    if label_x:
+        ax.set_xlabel(LIKERT_XLABEL, fontsize=AXIS_LABEL_FONTSIZE)
+    ax.set_ylabel("Proportion", fontsize=AXIS_LABEL_FONTSIZE)
     ax.grid(axis="y", linestyle="--", alpha=0.3)
+    ax.set_axisbelow(True)
+    return totals
 
-    variant_handles = [plt.Rectangle((0, 0), 1, 1, facecolor="#BBBBBB", edgecolor="black",
-                                     linewidth=0.4, hatch=VARIANT_HATCH[label], label=label)
-                       for label in variant_order]
-    variant_legend = ax.legend(handles=variant_handles, loc="upper right", fontsize=8,
-                               title="Variant", title_fontsize=8, framealpha=0.9)
+
+def variant_legend_handles():
+    return [plt.Rectangle((0, 0), 1, 1, facecolor="#BBBBBB", edgecolor="black",
+                          linewidth=0.4, hatch=VARIANT_HATCH[label], label=label)
+            for label in VARIANT_LABELS.values()]
+
+
+def model_legend_handles(models, colors, totals=None):
+    """Model swatches, carrying each model's n where one panel defines it. The
+    combined figure passes totals=None: its two panels have different sample
+    sizes, so a single shared legend cannot name one without misreporting the
+    other."""
+    return [plt.Rectangle((0, 0), 1, 1, facecolor=colors[model], edgecolor="black",
+                          linewidth=0.4,
+                          label=model if totals is None else f"{model} (n={totals[model]})")
+            for model in models if totals is None or model in totals]
+
+
+def plot_models_distribution(pooled_by_model, out_path):
+    """All models on one panel. No title: it only ever restated the caption, and
+    at this type size it cost a line the bars could use."""
+    models = sorted(pooled_by_model)
+    colors = model_colors(models)
+
+    fig, ax = plt.subplots(figsize=(max(13.0, len(models) * 1.1), 7.0))
+    totals = draw_models_distribution(ax, pooled_by_model, models, colors)
+
+    variant_legend = ax.legend(handles=variant_legend_handles(), loc="upper right",
+                               fontsize=LEGEND_FONTSIZE, title="Variant",
+                               title_fontsize=LEGEND_TITLE_FONTSIZE, framealpha=0.9)
     ax.add_artist(variant_legend)
     # 13 model entries do not fit beside the bars, so they go under the axes.
-    ax.legend(handles=model_handles, loc="upper center", bbox_to_anchor=(0.5, -0.13),
-              ncol=min(4, len(models)), fontsize=8, title="Model", title_fontsize=8,
-              frameon=False)
+    ax.legend(handles=model_legend_handles(models, colors, totals), loc="upper center",
+              bbox_to_anchor=(0.5, -0.20), ncol=min(MODEL_LEGEND_NCOL, len(models)),
+              fontsize=LEGEND_FONTSIZE, title="Model",
+              title_fontsize=LEGEND_TITLE_FONTSIZE, frameon=False)
+    save_figure(fig, out_path, bbox_inches="tight")
+
+
+def plot_models_distribution_stacked(pooled_by_kind, out_path):
+    """The direct and indirect Likert panels stacked into one figure with a single
+    shared legend.
+
+    Printed side by side they carry the same 13-entry model legend twice, which at
+    this type size takes more of the page than either panel's bars. Sharing it
+    costs the per-model n in the legend labels (the two panels have different
+    sample sizes) -- those move onto each panel instead."""
+    panels = [(kind, pooled_by_kind[kind]) for kind in KIND_PANEL_ORDER
+              if pooled_by_kind.get(kind)]
+    if len(panels) < 2:
+        return
+    # The union, so a model measured on only one track still gets a legend entry
+    # and one colour throughout.
+    models = sorted({model for _, pooled in panels for model in pooled})
+    colors = model_colors(models)
+
+    fig, axes = plt.subplots(len(panels), 1, sharex=True,
+                             figsize=(max(13.0, len(models) * 1.1), 5.5 * len(panels)))
+    for index, (ax, (kind, pooled)) in enumerate(zip(axes, panels)):
+        totals = draw_models_distribution(ax, pooled, models, colors,
+                                          label_x=index == len(panels) - 1)
+        # Panel heading plus the n the shared legend cannot carry. Inside the axes
+        # rather than as a title, so the stack keeps its vertical space for bars.
+        ax.text(0.01, 0.97, f"{KIND_PANEL_LABEL[kind]}  (n = {sum(totals.values()):,})",
+                transform=ax.transAxes, ha="left", va="top",
+                fontsize=PANEL_LABEL_FONTSIZE, fontweight="bold")
+
+    axes[0].legend(handles=variant_legend_handles(), loc="upper right",
+                   fontsize=LEGEND_FONTSIZE, title="Variant",
+                   title_fontsize=LEGEND_TITLE_FONTSIZE, framealpha=0.9)
+    axes[-1].legend(handles=model_legend_handles(models, colors), loc="upper center",
+                    bbox_to_anchor=(0.5, -0.24), ncol=min(MODEL_LEGEND_NCOL, len(models)),
+                    fontsize=LEGEND_FONTSIZE, title="Model",
+                    title_fontsize=LEGEND_TITLE_FONTSIZE, frameon=False)
     save_figure(fig, out_path, bbox_inches="tight")
 
 
@@ -355,8 +456,17 @@ def main():
     for kind, pooled_by_model in pooled_by_kind.items():
         if len(pooled_by_model) > 1:
             out_dir.mkdir(parents=True, exist_ok=True)
-            plot_models_distribution(pooled_by_model, kind,
+            plot_models_distribution(pooled_by_model,
                                      out_dir / f"likert_distribution_{kind}_models.png")
+
+    # The two panels above as one shared-legend figure; skipped unless both tracks
+    # cleared the >1 model bar, since a single panel has nothing to share with.
+    multi_model = {kind: pooled for kind, pooled in pooled_by_kind.items()
+                   if len(pooled) > 1}
+    if len(multi_model) > 1:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        plot_models_distribution_stacked(
+            multi_model, out_dir / "likert_distribution_models.png")
 
     print("\nDone.")
 

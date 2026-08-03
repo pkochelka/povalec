@@ -23,6 +23,7 @@ from analysis.evaluate_euandi import (
     load_party_positions,
     positions_path,
 )
+from analysis.plotting.plot_classified_parties import model_display_name
 from utils import flip_likert, likert_to_stance
 
 NUM_VARIANTS = 8
@@ -37,6 +38,7 @@ LEGEND_FONTSIZE_SMALL = 7  # the 21-entry language lookup: scanned, not read
 # so the main legend sits in the lower left and its colour dots are drawn large
 # enough to be told apart after the downscale.
 MAIN_LEGEND_LOC = "lower left"
+MODEL_LEGEND_TITLE = "model  (large = mean)"
 LEGEND_MARKERSIZE = 12
 # The 21-entry language box would grow out of the panel at the full size.
 LANG_LEGEND_MARKERSIZE = 9
@@ -330,6 +332,32 @@ def mark_style(color, hollow):
     return {"facecolor": "none" if hollow else color, "edgecolor": color}
 
 
+# The likert track is a lattice: a run is a mean of stances that are multiples of
+# 0.5, so every run lands on a multiple of 0.5/n_loading and dozens of them stack on
+# one vertex. Only the drawn copy is nudged, and only inside its own cell -- the
+# means and the anchors keep using the exact values.
+JITTERED_SOURCE = "likert"
+JITTER_FRACTION = 0.3  # of one grid cell, so a dot stays nearer its own vertex
+JITTER_SEED = 20240  # fixed: the same run must reproduce the same figure
+
+
+def grid_steps(questionnaire, dims):
+    """Lattice spacing of the likert runs on each dimension (0 where nothing loads)."""
+    return np.array([0.5 / n if (n := int((questionnaire[d] != 0).sum())) else 0.0
+                     for d in dims])
+
+
+def jitter_likert(frame, x_dim, y_dim, steps, rng):
+    """Drawing copy of a run frame's points, with the likert lattice broken up."""
+    points = frame[[x_dim, y_dim]].to_numpy()
+    if rng is None or steps is None:
+        return points
+    mask = (frame["source"] == JITTERED_SOURCE).to_numpy()
+    points = points.copy()
+    points[mask] += rng.uniform(-JITTER_FRACTION, JITTER_FRACTION, (int(mask.sum()), 2)) * steps
+    return points
+
+
 def legend_mark(color, marker, label, hollow=False, markersize=LEGEND_MARKERSIZE, ls="", **kwargs):
     return Line2D([], [], color=color, marker=marker, ls=ls, label=label,
                   markersize=markersize, markeredgecolor=color,
@@ -477,43 +505,46 @@ def plot_violins(responses, dims, one_sided, out_path):
     print(f"  Saved {out_path}")
 
 
-def plot_models_scatter_compass(runs_by_model, x_dim, y_dim, one_sided, out_path,
-                                split_by=None, anchors=None):
-    fig, ax = plt.subplots(figsize=(9, 9))
-    setup_compass(ax, x_dim, y_dim, one_sided)
+def draw_models_scatter_panel(ax, runs_by_model, x_dim, y_dim, split_by, anchors, steps):
+    """One cross-model scatter panel, legends left to the caller.
+
+    Returns (model handles, style handles, style title): a single-panel figure puts both
+    legends inside the axes, the stacked figure keeps the style legend in its panel and
+    draws one shared model legend under both."""
     cmap = plt.get_cmap("tab10" if len(runs_by_model) <= 10 else "tab20")
     all_runs = pd.concat(runs_by_model.values(), ignore_index=True)
     framings = [f for f in FRAMING_MARKER if f in set(all_runs["framing"])]
     sources = [s for s in SOURCE_MARKER if s in set(all_runs["source"])]
+    rng = np.random.default_rng(JITTER_SEED)
 
-    def draw(points, color, marker, hollow=False):
-        if not len(points):
+    def draw(frame, color, marker, hollow=False):
+        frame = frame.dropna(subset=[x_dim, y_dim])
+        if frame.empty:
             return
-        ax.scatter(points[:, 0], points[:, 1], s=12, marker=marker,
+        drawn = jitter_likert(frame, x_dim, y_dim, steps, rng)
+        ax.scatter(drawn[:, 0], drawn[:, 1], s=12, marker=marker,
                    **mark_style(color, hollow), alpha=0.7, linewidths=0.5)
+        # the mean is taken from the exact values, never from the jittered copy
+        points = frame[[x_dim, y_dim]].to_numpy()
         ax.scatter(*points.mean(axis=0), s=240, marker=marker, facecolor=color,
                    edgecolor="black", linewidths=1.8, zorder=5)
 
     model_handles = []
     for i, (model, runs) in enumerate(sorted(runs_by_model.items())):
         color = cmap(i % cmap.N)
-        model_handles.append(legend_mark(color, "o", model))
+        model_handles.append(legend_mark(color, "o", model_display_name(model)))
         if split_by == "framing":
             for framing in framings:
-                points = runs[runs["framing"] == framing][[x_dim, y_dim]].dropna().to_numpy()
-                draw(points, color, FRAMING_MARKER[framing], is_hollow(framing=framing))
+                draw(runs[runs["framing"] == framing], color, FRAMING_MARKER[framing],
+                     is_hollow(framing=framing))
         elif split_by == "source":
             for source in sources:
-                points = runs[runs["source"] == source][[x_dim, y_dim]].dropna().to_numpy()
-                draw(points, color, SOURCE_MARKER[source], is_hollow(source=source))
+                draw(runs[runs["source"] == source], color, SOURCE_MARKER[source],
+                     is_hollow(source=source))
         else:
-            draw(runs[[x_dim, y_dim]].dropna().to_numpy(), color, "o")
+            draw(runs, color, "o")
 
     party_handle = draw_party_anchors(ax, anchors, x_dim, y_dim)
-    model_legend = ax.legend(handles=model_handles, loc=MAIN_LEGEND_LOC, fontsize=FONTSIZE,
-                             title_fontsize=FONTSIZE, framealpha=0.9,
-                             title="model  (large = mean)")
-    ax.add_artist(model_legend)
     style_handles, style_title = [], None
     if split_by == "framing":
         style_handles = [legend_mark("gray", FRAMING_MARKER[f], f, hollow=is_hollow(framing=f))
@@ -526,10 +557,60 @@ def plot_models_scatter_compass(runs_by_model, x_dim, y_dim, one_sided, out_path
         style_title = "source"
     if party_handle is not None:
         style_handles.append(party_handle)
+    return model_handles, style_handles, style_title
+
+
+def place_style_legend(ax, style_handles, style_title, loc="lower right"):
     if style_handles:
-        ax.legend(handles=style_handles, loc="lower right", fontsize=FONTSIZE,
+        ax.legend(handles=style_handles, loc=loc, fontsize=FONTSIZE,
                   title_fontsize=FONTSIZE, framealpha=0.9, title=style_title)
+
+
+def plot_models_scatter_compass(runs_by_model, x_dim, y_dim, one_sided, out_path,
+                                split_by=None, anchors=None, steps=None):
+    fig, ax = plt.subplots(figsize=(9, 9))
+    setup_compass(ax, x_dim, y_dim, one_sided)
+    model_handles, style_handles, style_title = draw_models_scatter_panel(
+        ax, runs_by_model, x_dim, y_dim, split_by, anchors, steps)
+    model_legend = ax.legend(handles=model_handles, loc=MAIN_LEGEND_LOC, fontsize=FONTSIZE,
+                             title_fontsize=FONTSIZE, framealpha=0.9,
+                             title=MODEL_LEGEND_TITLE)
+    ax.add_artist(model_legend)
+    place_style_legend(ax, style_handles, style_title)
     fig.tight_layout()
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved {out_path}")
+
+
+def plot_models_scatter_panels(runs_by_model, x_dim, y_dim, one_sided, out_path,
+                               splits=("source", "framing"), anchors=None, steps=None):
+    """The split-by-source and split-by-framing scatters as one figure.
+
+    The two are the same runs under two splits, so the 13-entry model legend is the same
+    on both -- and inside the axes it covers a quarter of the compass and prints through
+    the EP-group labels. Here it is drawn once, under the bottom panel, and only the
+    2-3 entry style legend stays in the panel it belongs to."""
+    fig, axes = plt.subplots(len(splits), 1, figsize=(9, 9 * len(splits)))
+    shared_handles = None
+    for ax, split_by in zip(np.atleast_1d(axes), splits):
+        setup_compass(ax, x_dim, y_dim, one_sided)
+        model_handles, style_handles, style_title = draw_models_scatter_panel(
+            ax, runs_by_model, x_dim, y_dim, split_by, anchors, steps)
+        ax.set_title(f"split by {split_by}", fontsize=FONTSIZE)
+        # Lower left, the corner the model legend just vacated: on the right it sits on
+        # top of the ID anchor's label, which is the one group out in that corner.
+        place_style_legend(ax, style_handles, style_title, loc=MAIN_LEGEND_LOC)
+        # Same models, same order, same colours on every panel, so the first panel's
+        # handles stand for all of them.
+        shared_handles = shared_handles or model_handles
+
+    fig.tight_layout()
+    # A figure legend is not laid out by tight_layout, so the panels keep the whole canvas
+    # and bbox_inches="tight" grows the saved image to take the legend in below them.
+    fig.legend(handles=shared_handles, loc="upper center", bbox_to_anchor=(0.5, 0.0),
+               ncol=4, fontsize=FONTSIZE, title=MODEL_LEGEND_TITLE,
+               title_fontsize=FONTSIZE, frameon=False)
     fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     print(f"  Saved {out_path}")
@@ -544,7 +625,7 @@ def plot_models_compass(runs_by_model, x_dim, y_dim, one_sided, out_path, anchor
     model_handles = []
     for i, (model, runs) in enumerate(sorted(runs_by_model.items())):
         color = cmap(i % cmap.N)
-        model_handles.append(legend_mark(color, "s", model))
+        model_handles.append(legend_mark(color, "s", model_display_name(model)))
         for source in sources:
             points = runs[runs["source"] == source][[x_dim, y_dim]].dropna().to_numpy()
             if len(points) < 3:
@@ -570,6 +651,190 @@ def plot_models_compass(runs_by_model, x_dim, y_dim, one_sided, out_path, anchor
     fig.savefig(out_path, dpi=300)
     plt.close(fig)
     print(f"  Saved {out_path}")
+
+
+# One row per model on the per-axis strips, with the split's two halves on their own half
+# of the row: pooled into one band their clouds sit on top of each other, and the gap
+# between the halves is what these figures are read for. Either split can be drawn -- the
+# markers, the hollow half and the labels are the ones the compasses already use.
+SOURCE_BAND = {"likert": 0.2, "speeches": -0.2}
+FRAMING_BAND = {"base": 0.2, "negated": -0.2}
+STRIP_SPLITS = {
+    "source": (SOURCE_BAND, SOURCE_MARKER, SOURCE_LABEL, "framings"),
+    "framing": (FRAMING_BAND, FRAMING_MARKER, {f: f for f in FRAMING_MARKER}, "sources"),
+}
+BAND_SPREAD = 0.13  # vertical jitter inside a half-row, short of the neighbouring band
+
+
+STRIP_NCOLS = 2
+STRIP_PANEL_SIZE = (9.0, 0.46)  # inches: panel width, and height per model row
+
+
+def draw_axis_strip_panel(ax, runs_by_model, dim, one_sided, split_by="source", step=None,
+                          model_names=True):
+    """Every model's runs on one questionnaire axis, one row per model.
+
+    The compass spends both of its dimensions on Left-Right and Europe, which leaves the
+    topical axes with no figure of their own. A row per model reads them one axis at a
+    time: where each model sits, how wide its runs spread, and how far the two halves of
+    `split_by` are apart -- against the EP groups, drawn as reference lines rather than as
+    points."""
+    bands, markers, labels, _ = STRIP_SPLITS[split_by]
+    models = sorted(runs_by_model)
+    all_runs = pd.concat(runs_by_model.values(), ignore_index=True)
+    halves = [h for h in markers if h in set(all_runs[split_by])]
+    cmap = plt.get_cmap("tab10" if len(models) <= 10 else "tab20")
+    rng = np.random.default_rng(JITTER_SEED)
+
+    for index, model in enumerate(models):
+        color = cmap(index % cmap.N)
+        runs = runs_by_model[model]
+        for half in halves:
+            rows = runs[runs[split_by] == half].dropna(subset=[dim])
+            if rows.empty:
+                continue
+            values = rows[dim].to_numpy()
+            band = index + bands[half]
+            x = values.copy()
+            if step:
+                # Under the framing split a band holds both tracks, so the lattice is
+                # broken up by the run's own source rather than by the band it is in.
+                lattice = (rows["source"] == JITTERED_SOURCE).to_numpy()
+                x[lattice] += rng.uniform(-JITTER_FRACTION, JITTER_FRACTION,
+                                          int(lattice.sum())) * step
+            ax.scatter(x, band + rng.uniform(-BAND_SPREAD, BAND_SPREAD, len(x)), s=9,
+                       marker=markers[half], alpha=0.45, linewidths=0.5,
+                       **mark_style(color, is_hollow(**{split_by: half})))
+            # the mean is taken from the exact values, never from the jittered copy
+            ax.scatter(values.mean(), band, s=150, marker=markers[half],
+                       facecolor=color, edgecolor="black", linewidths=1.5, zorder=5)
+
+    ax.axvline(0, color="gray", lw=0.8)
+    ax.set_xlim(-1, 1)
+    ax.set_ylim(len(models) - 0.5, -0.5)  # first model on top
+    ax.set_yticks(range(len(models)),
+                  [model_display_name(m) for m in models] if model_names else [],
+                  fontsize=FONTSIZE)
+    ax.tick_params(axis="x", labelsize=FONTSIZE)
+    ax.set_xlabel(axis_label(dim, one_sided), fontsize=AXIS_FONTSIZE)
+    ax.grid(axis="x", linestyle=":", alpha=0.3)
+    return [legend_mark("gray", markers[h], labels[h],
+                        hollow=is_hollow(**{split_by: h})) for h in halves]
+
+
+def plot_axis_strips(runs_by_model, dims, one_sided, out_path, anchors=None,
+                     steps_by_dim=None, split_by="source", ncols=STRIP_NCOLS):
+    """The per-axis strips as one figure, the legend taking the leftover cell.
+
+    Five axes in a two-column grid leave one cell empty, which is exactly the room the
+    legend needs -- so the whole set is one figure with one legend rather than five
+    figures each repeating it."""
+    models = sorted(runs_by_model)
+    nrows = -(-(len(dims) + 1) // ncols)  # +1: the legend occupies a cell of its own
+    panel_width, row_height = STRIP_PANEL_SIZE
+    fig, axes = plt.subplots(nrows, ncols, squeeze=False, sharey=True,
+                             figsize=(panel_width * ncols,
+                                      (row_height * len(models) + 1.6) * nrows))
+    flat = axes.ravel()
+    handles = []
+    for cell, dim in enumerate(dims):
+        # Names on the left column only; sharey keeps every panel on the same rows.
+        handles = draw_axis_strip_panel(flat[cell], runs_by_model, dim, one_sided,
+                                        split_by=split_by,
+                                        step=(steps_by_dim or {}).get(dim),
+                                        model_names=cell % ncols == 0)
+    for cell in range(len(dims), len(flat)):
+        flat[cell].axis("off")
+
+    if anchors is not None:
+        handles.append(Line2D([], [], color=PARTY_COLOR, ls=":", lw=1.2, label="EP group"))
+    pooled = STRIP_SPLITS[split_by][3]
+    title = f"{split_by}  (large = mean, runs pooled over {pooled})"
+    flat[-1].legend(handles=handles, loc="center", fontsize=FONTSIZE, frameon=False,
+                    title=title, title_fontsize=FONTSIZE)
+
+    # The group names are packed by measuring them, so the panels have to be where they
+    # will finally sit before they are drawn -- hence after the layout, not before.
+    fig.tight_layout()
+    reserve_anchor_lanes(fig, flat[:len(dims)], dims, anchors)
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved {out_path}")
+
+
+def reserve_anchor_lanes(fig, panel_axes, dims, anchors):
+    """Draw the group names, then open up enough row spacing for the lanes they took.
+
+    A name sits above its own panel, so on a grid the deepest stack -- five groups pile up
+    at the top of the Ukraine axis -- would print into the panel above it. The lanes are
+    only known once the names have been measured, so they are drawn, counted, cleared, and
+    drawn again against the spacing that count asks for; that keeps the row gaps equal
+    rather than padding one row and leaving the rest tight."""
+    if anchors is None:
+        return
+    drawn = [draw_axis_anchors(ax, anchors, dim) for ax, dim in zip(panel_axes, dims)]
+    deepest = max((lanes for _, lanes in drawn), default=0)
+    if deepest < 2:
+        return
+    renderer = fig.canvas.get_renderer()
+    panel_height = panel_axes[0].get_window_extent(renderer).height / fig.dpi
+    extra = (deepest - 1) * ANCHOR_LANE_STEP * AXIS_FONTSIZE / 72.0
+    for artists, _ in drawn:
+        for artist in artists:
+            artist.remove()
+    fig.subplots_adjust(hspace=fig.subplotpars.hspace + extra / panel_height)
+    for ax, dim in zip(panel_axes, dims):
+        draw_axis_anchors(ax, anchors, dim)
+
+
+ANCHOR_LANE_PAD = 4  # points of clear space demanded between two names in one lane
+ANCHOR_LANE_STEP = 1.35  # line height, in multiples of the label's own font size
+
+
+def draw_axis_anchors(ax, anchors, dim):
+    """The EP groups as vertical reference lines, named in lanes above the strip.
+
+    On the topical axes the groups are not spread out the way they are on Left-Right --
+    three of them land within a few hundredths on Ecology -- so their names have to be
+    packed rather than simply placed. Each name is drawn, measured, and pushed up a lane
+    at a time until it clears everything already in that lane; the line itself always
+    stays exactly on the group's position, and a figure with no crowding still gets a
+    single row of names.
+
+    Returns (every artist drawn, how many lanes the names took), so a caller stacking
+    several panels can clear them and make room for the deepest of them."""
+    if anchors is None:
+        return [], 0
+    figure = ax.figure
+    figure.canvas.draw()  # positions must be final before anything is measured
+    renderer = figure.canvas.get_renderer()
+    lanes, artists = [], []
+    panel = ax.get_window_extent(renderer)
+    for label, position in anchors[dim].dropna().sort_values().items():
+        artists.append(
+            ax.axvline(position, color=PARTY_COLOR, ls=":", lw=1.2, alpha=0.7, zorder=1))
+        annotation = ax.annotate(
+            label, (position, 1.0), xycoords=("data", "axes fraction"),
+            textcoords="offset points", xytext=(0, 5), ha="center", va="bottom",
+            fontsize=AXIS_FONTSIZE, color=PARTY_LABEL_COLOR, fontweight="bold",
+            path_effects=[matplotlib.patheffects.withStroke(
+                linewidth=3.0, foreground="white")])
+        box = annotation.get_window_extent(renderer)
+        # A group sitting at either end of the axis would otherwise hang off the panel --
+        # and on a grid, straight into the neighbouring one. Pull it back inside; the
+        # line it names is right there, so a centred name is not worth a collision.
+        shift = max(0.0, panel.x0 - box.x0) - max(0.0, box.x1 - panel.x1)
+        span = (box.x0 + shift - ANCHOR_LANE_PAD, box.x1 + shift + ANCHOR_LANE_PAD)
+        lane = next((i for i, taken in enumerate(lanes)
+                     if all(span[1] < low or span[0] > high for low, high in taken)),
+                    len(lanes))
+        if lane == len(lanes):
+            lanes.append([])
+        lanes[lane].append(span)
+        annotation.xyann = (shift * 72.0 / figure.dpi,
+                            5 + lane * ANCHOR_LANE_STEP * AXIS_FONTSIZE)
+        artists.append(annotation)
+    return artists, len(lanes)
 
 
 VIOLIN_GRANULARITIES = ["run", "none"]  # per-run mean vs. every single answer
@@ -661,17 +926,30 @@ def main():
         out_dir = results_dir / "plots"
         out_dir.mkdir(exist_ok=True)
         suffix = STANCE_SOURCE_SUFFIX[args.stance_source]
+        steps = grid_steps(questionnaire, [args.x_dim, args.y_dim])
         plot_models_compass(runs_by_model, args.x_dim, args.y_dim, one_sided,
                             out_dir / f"political_compass_models{suffix}.png", anchors=anchors)
         plot_models_scatter_compass(runs_by_model, args.x_dim, args.y_dim, one_sided,
                             out_dir / f"political_compass_models_scatter{suffix}.png",
-                            anchors=anchors)
+                            anchors=anchors, steps=steps)
         plot_models_scatter_compass(runs_by_model, args.x_dim, args.y_dim, one_sided,
                             out_dir / f"political_compass_models_scatter_framing{suffix}.png",
-                            split_by="framing", anchors=anchors)
+                            split_by="framing", anchors=anchors, steps=steps)
         plot_models_scatter_compass(runs_by_model, args.x_dim, args.y_dim, one_sided,
                             out_dir / f"political_compass_models_scatter_source{suffix}.png",
-                            split_by="source", anchors=anchors)
+                            split_by="source", anchors=anchors, steps=steps)
+        plot_models_scatter_panels(runs_by_model, args.x_dim, args.y_dim, one_sided,
+                            out_dir / f"political_compass_models_scatter_panels{suffix}.png",
+                            anchors=anchors, steps=steps)
+        # The compass spends its two dimensions on x_dim and y_dim; every other axis gets
+        # a strip panel instead, the whole set on one figure.
+        strip_dims = [d for d in dims if d not in (args.x_dim, args.y_dim)]
+        strip_steps = {d: grid_steps(questionnaire, [d])[0] for d in strip_dims}
+        for split_by in STRIP_SPLITS:
+            plot_axis_strips(runs_by_model, strip_dims, one_sided,
+                             out_dir / f"axis_strips_{split_by}{suffix}.png",
+                             anchors=anchors, steps_by_dim=strip_steps,
+                             split_by=split_by)
 
     print("\nDone.")
 

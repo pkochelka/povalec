@@ -46,14 +46,36 @@ SKIP_MODEL_SUBSTRINGS = ()
 # Models dropped from the per-question figure only (they stay in every other output).
 PER_QUESTION_PLOT_EXCLUDE = ()
 
-# The per-question figure goes into the thesis at column width, so it is typed like the
-# per-language figures in plotting/plot_argmax_shares.py: sizes chosen so the labels are
-# still legible after the reduction, not sizes that look right on the saved PNG.
-PER_QUESTION_TICK_FONTSIZE = 24
-PER_QUESTION_AXIS_LABEL_FONTSIZE = 32
-PER_QUESTION_LEGEND_FONTSIZE = 22
+# Both thesis figures go in at column width, so they are typed like the per-language
+# figures in plotting/plot_argmax_shares.py: sizes chosen so the labels are still legible
+# after the reduction, not sizes that look right on the saved PNG. What survives the
+# reduction is the RATIO of type to figure width, so the widths below are as much a part
+# of the type size as the point sizes are -- the old per-question figure ran to 28 inches,
+# which left its 24pt labels printing at under 3pt.
+PER_QUESTION_TICK_FONTSIZE = 30
+PER_QUESTION_AXIS_LABEL_FONTSIZE = 34
+PER_QUESTION_LEGEND_FONTSIZE = 24
 PER_QUESTION_LEGEND_TITLE_FONTSIZE = 26
-PER_QUESTION_VALUE_FONTSIZE = 16
+PER_QUESTION_VALUE_FONTSIZE = 20
+# Inches per proposition, and the floor for a short questionnaire. At 30 propositions
+# this is a ~15.5in figure: a P-label no longer fits horizontally in one bar's width at
+# 30pt, so the tick labels are rotated upright (see plot_refusal_per_question).
+PER_QUESTION_WIDTH_PER_ITEM = 0.45
+PER_QUESTION_MIN_WIDTH = 15.0
+PER_QUESTION_HEIGHT = 9.5
+PER_QUESTION_LEGEND_NCOL = 4
+PER_QUESTION_VALUE_HEADROOM = 1.22
+
+# The hard-vs-semantic breakdown: fewer bars, so it can be both narrower and typed a
+# little smaller than the per-question figure and still print at the same size.
+BREAKDOWN_TICK_FONTSIZE = 22
+BREAKDOWN_AXIS_LABEL_FONTSIZE = 26
+BREAKDOWN_LEGEND_FONTSIZE = 20
+BREAKDOWN_VALUE_FONTSIZE = 16
+BREAKDOWN_WIDTH_PER_MODEL = 0.8
+BREAKDOWN_MIN_WIDTH = 9.0
+BREAKDOWN_HEIGHT = 8.0
+BREAKDOWN_VALUE_HEADROOM = 1.3
 
 REFUSED_REASON_PREFIXES = ("REFUSED",)
 FAILED_REASON_VALUES = {"FAILED"}
@@ -361,9 +383,11 @@ def plot_refusal_per_question(per_question_model, question_totals, output_path):
 
     # Type sized as in plot_argmax_shares' per-language figures: the figure is scaled to a
     # LaTeX column whatever it measures, so what matters is the type-to-width ratio. The
-    # width follows from the tick size instead -- 30 propositions at this size need ~0.85in
-    # each before the "P30" labels start to touch.
-    fig, ax = plt.subplots(figsize=(max(18, 0.85 * len(questions) + 3), 12.0))
+    # width is therefore kept down rather than let out per proposition, and the labels that
+    # no longer fit in one bar's width are turned upright instead.
+    fig, ax = plt.subplots(figsize=(
+        max(PER_QUESTION_MIN_WIDTH, PER_QUESTION_WIDTH_PER_ITEM * len(questions) + 2),
+        PER_QUESTION_HEIGHT))
     bottom = np.zeros(len(questions))
     for model in models:
         heights = contribution[model].to_numpy()
@@ -372,23 +396,32 @@ def plot_refusal_per_question(per_question_model, question_totals, output_path):
         bottom += heights
 
     aggregate = (kept_totals["n_refusal"] / kept_totals["n_total"]).reindex(questions).to_numpy()
+    # Upright, like the tick labels: one bar is ~37pt wide at this figure size and a
+    # horizontal "0.11" at 20pt is wider than that.
     for x, value in zip(positions, aggregate):
         if value > 0.002:
             ax.text(x, value + 0.003, f"{value:.2f}", ha="center", va="bottom",
-                    fontsize=PER_QUESTION_VALUE_FONTSIZE)
+                    fontsize=PER_QUESTION_VALUE_FONTSIZE, rotation=90)
 
-    ax.set_xticks(positions, [f"P{q + 1}" for q in questions], rotation=0,
+    ax.set_xticks(positions, [f"P{q + 1}" for q in questions], rotation=90,
                   fontsize=PER_QUESTION_TICK_FONTSIZE)
     ax.tick_params(axis="y", labelsize=PER_QUESTION_TICK_FONTSIZE)
     ax.set_xlabel("EU&I proposition", fontsize=PER_QUESTION_AXIS_LABEL_FONTSIZE)
     ax.set_ylabel("Refusal rate", fontsize=PER_QUESTION_AXIS_LABEL_FONTSIZE)
     ax.set_xlim(-0.7, len(questions) - 0.3)
+    # Headroom for the upright value labels, which would otherwise be drawn outside the
+    # frame -- the bars are short and the labels are not.
+    ax.set_ylim(0, float(np.nanmax(aggregate)) * PER_QUESTION_VALUE_HEADROOM or 1.0)
     ax.grid(axis="y", linestyle="--", alpha=0.4)
-    ax.legend(title="Model", loc="upper center", bbox_to_anchor=(0.5, -0.14),
+    ax.set_axisbelow(True)
+    # Fewer columns than before: the entries are unchanged but each is now set at 24pt,
+    # and six of them across no longer fit the narrower figure. The offset has to clear
+    # the upright P-labels AND the x-axis label beneath them, both of which grew.
+    ax.legend(title="Model", loc="upper center", bbox_to_anchor=(0.5, -0.27),
               fontsize=PER_QUESTION_LEGEND_FONTSIZE,
-              title_fontsize=PER_QUESTION_LEGEND_TITLE_FONTSIZE, ncol=6, framealpha=0.9)
-    fig.tight_layout()
-    fig.savefig(output_path, dpi=150)
+              title_fontsize=PER_QUESTION_LEGEND_TITLE_FONTSIZE,
+              ncol=min(PER_QUESTION_LEGEND_NCOL, len(models)), framealpha=0.9)
+    fig.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  Saved {output_path}")
 
@@ -463,25 +496,41 @@ def plot_hard_vs_semantic_per_model(overall_df, output_path):
     per_model = per_model.sort_values("model")
 
     positions = np.arange(len(per_model))
-    fig, ax = plt.subplots(figsize=(max(6, 1.2 * len(per_model) + 2), 5))
+    fig, ax = plt.subplots(figsize=(
+        max(BREAKDOWN_MIN_WIDTH, BREAKDOWN_WIDTH_PER_MODEL * len(per_model) + 2),
+        BREAKDOWN_HEIGHT))
     ax.bar(positions, per_model["hard_rate"], color="#4C72B0", edgecolor="black",
            linewidth=0.4, label="Hard (REFUSED / FAILED / null)")
+    # Shortened from "Semantic ('As an AI, I have no opinion'-like)": at 20pt the full
+    # wording makes the legend wider than a third of the figure.
     ax.bar(positions, per_model["semantic_rate"], bottom=per_model["hard_rate"],
            color="#DD8452", edgecolor="black", linewidth=0.4,
-           label="Semantic ('As an AI, I have no opinion'-like)")
+           label="Semantic ('no opinion'-like)")
 
-    for x, (hard_rate, semantic_rate) in enumerate(zip(per_model["hard_rate"], per_model["semantic_rate"])):
-        total = hard_rate + semantic_rate
-        ax.text(x, total + 0.002, f"{total:.3f}", ha="center", va="bottom", fontsize=8)
+    totals = per_model["hard_rate"] + per_model["semantic_rate"]
+    for x, total in enumerate(totals):
+        ax.text(x, total + 0.002, f"{total:.3f}", ha="center", va="bottom",
+                fontsize=BREAKDOWN_VALUE_FONTSIZE, rotation=90)
 
-    ax.set_xticks(positions, per_model["model"], rotation=20, ha="right", fontsize=9)
-    ax.set_ylabel("Refusal rate")
-    ax.set_title("Hard vs semantic refusals per model (all languages and variants pooled)",
-                 fontsize=11, pad=8)
+    # Steeper than the old 20 degrees: at 22pt a name like "mistral-medium-3.5" is wider
+    # than the bar it belongs to, so a shallow rotation runs it into its neighbour.
+    ax.set_xticks(positions, per_model["model"], rotation=40, ha="right",
+                  fontsize=BREAKDOWN_TICK_FONTSIZE)
+    ax.tick_params(axis="y", labelsize=BREAKDOWN_TICK_FONTSIZE)
+    ax.set_ylabel("Refusal rate", fontsize=BREAKDOWN_AXIS_LABEL_FONTSIZE)
+    # Headroom for the upright value labels, which are as tall as a short bar at this
+    # type size and would otherwise be drawn outside the frame.
+    ax.set_ylim(0, float(totals.max()) * BREAKDOWN_VALUE_HEADROOM or 1.0)
+    # No title: it restated the caption, and at this type size it cost a line the bars
+    # could use.
     ax.grid(axis="y", linestyle="--", alpha=0.4)
-    ax.legend(loc="upper right", fontsize=9, framealpha=0.9)
+    ax.set_axisbelow(True)
+    # Below the axes rather than "upper right": at 20pt the two entries reach a third of
+    # the way across and covered both the tallest bar and its value label.
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.48),
+              fontsize=BREAKDOWN_LEGEND_FONTSIZE, ncol=2, framealpha=0.9)
     fig.tight_layout()
-    fig.savefig(output_path, dpi=150)
+    fig.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  Saved {output_path}")
 

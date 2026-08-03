@@ -5,6 +5,7 @@ from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
+import matplotlib.patheffects
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -16,11 +17,19 @@ sys.path.insert(0, str(_ANALYSIS_DIR))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from evaluate_euandi import EP_GROUP_BY_PARTY
-from plot_political_bias import covariance_ellipse, load_questionnaire, setup_compass
+from plot_political_bias import (
+    LEGEND_MARKERSIZE,
+    MAIN_LEGEND_LOC,
+    covariance_ellipse,
+    load_questionnaire,
+    setup_compass,
+)
 
 EP_GROUP_ORDER = ["GUE/NGL", "S&D", "Greens/EFA", "ALDE", "PPE", "ECR", "ID", "Other"]
 EP_GROUP_COLOR = {
-    "GUE/NGL": "#8b0000", "S&D": "#e8112d", "Greens/EFA": "#3eb049", "ALDE": "#f6b40e",
+    # GUE/NGL magenta rather than dark red, to separate it from S&D as PARTY_COLORS in
+    # plot_classified_parties.py does -- one group keeps one colour across the figures.
+    "GUE/NGL": "#8E1B6B", "S&D": "#e8112d", "Greens/EFA": "#3eb049", "ALDE": "#f6b40e",
     "PPE": "#3a86c8", "ECR": "#0a4ea3", "ID": "#1b1f3b", "Other": "#888888",
 }
 
@@ -61,7 +70,7 @@ def aggregate_ep_groups(positions, dims):
     return means.reset_index()
 
 
-def plot_ep_group_compass(positions, group_means, x_dim, y_dim, one_sided, title, out_path):
+def plot_ep_group_compass(positions, group_means, x_dim, y_dim, one_sided, out_path):
     fig, ax = plt.subplots(figsize=(9, 9))
     setup_compass(ax, x_dim, y_dim, one_sided)
 
@@ -78,13 +87,15 @@ def plot_ep_group_compass(positions, group_means, x_dim, y_dim, one_sided, title
             continue
         ax.scatter(gx, gy, s=420, color=color, edgecolor="black", linewidth=0.8, zorder=4)
         ax.annotate(f"{group} (n={int(row['n_parties'])})", (gx, gy), xytext=(8, 8),
-                    textcoords="offset points", fontsize=11, color=color, fontweight="bold")
+                    textcoords="offset points", fontsize=11, color=color, fontweight="bold",
+                    path_effects=[matplotlib.patheffects.withStroke(
+                        linewidth=3.5, foreground="white")], zorder=9)
 
-    handles = [Line2D([], [], color=EP_GROUP_COLOR[g], marker="o", ls="", label=g) for g in present]
-    ax.legend(handles=handles, loc="lower left", fontsize=8, title="EP group", framealpha=0.9)
-    ax.set_title(title, fontsize=11, pad=8)
+    handles = [Line2D([], [], color=EP_GROUP_COLOR[g], marker="o", ls="", label=g,
+                      markersize=LEGEND_MARKERSIZE) for g in present]
+    ax.legend(handles=handles, loc=MAIN_LEGEND_LOC, fontsize=8, title="EP group", framealpha=0.9)
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
+    fig.savefig(out_path, dpi=300)
     plt.close(fig)
     print(f"  Saved {out_path}")
 
@@ -113,7 +124,6 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     plot_ep_group_compass(
         positions, group_means, args.x_dim, args.y_dim, one_sided,
-        f"EP-group political compass ({args.x_dim} × {args.y_dim})",
         out_dir / f"ep_group_compass_{args.x_dim}_{args.y_dim}.png",
     )
     print("\nDone.")

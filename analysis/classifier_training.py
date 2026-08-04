@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Train a single mmBERT EU-party classifier that is robust to class imbalance.
 
+Runs on the ECR+ID-collapsed split track (data/EuroParl Custom/collapsed), whose
+train.parquet keeps the natural, imbalanced priors while dev/test come out uniform
+across parties by construction -- exactly the setup this loss is written for.
+
 Train is heavily imbalanced, but dev/test are uniform across parties (and
 language-stratified). Logit-adjusted cross-entropy subtracts the train log-priors
 during the loss, so the model is optimised for a uniform label distribution: at
@@ -52,8 +56,8 @@ from analysis.europarl_classification import (
 
 MODEL_NAME = "jhu-clsp/mmBERT-base"
 MODEL_SLUG = MODEL_NAME.split("/")[-1]
-DATA_DIR = os.path.join(PROJECT_ROOT, "data", "EuroParl Custom", "balanced")
-OUTPUT_DIR = f"{MODEL_SLUG}-logitadj-balanced"
+DATA_DIR = os.path.join(PROJECT_ROOT, "data", "EuroParl Custom", "collapsed")
+OUTPUT_DIR = f"{MODEL_SLUG}-logitadj-collapsed"
 MAX_LEN = 512
 SEED = 42
 MAX_EPOCHS = 6
@@ -143,8 +147,18 @@ def logit_adjustment_for(dataset, num_labels, device):
     )
 
 
-def prepare_training_data(data_dir, tokenizer):
-    raw_splits = {name: load_split(name, data_dir) for name in ("train", "dev", "test")}
+def prepare_training_data(data_dir, tokenizer, train_split="train"):
+    """Load the three splits and tokenize them.
+
+    `train_split` names the file the train set comes from: "train" keeps the
+    natural priors (for the logit-adjusted loss here), "train_balanced" the
+    party- and language-balanced downsample (for the plain-CE trainers).
+    """
+    raw_splits = {
+        "train": load_split(train_split, data_dir),
+        "dev": load_split("dev", data_dir),
+        "test": load_split("test", data_dir),
+    }
 
     label_list = sorted(raw_splits["train"][PARTY_COLUMN].unique().tolist())
     label2id, id2label = build_label_maps(label_list)

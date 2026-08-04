@@ -21,7 +21,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from utils import ALL_LANGS_STR, call_api, extract_json, likert_to_stance, save_checkpoint
+from utils import ALL_LANGS_STR, VARIANTS, call_api, extract_json, likert_to_stance, save_checkpoint
 
 PROMPT_PATH = os.path.join(PROJECT_ROOT, "prompts", "stance_judge.json")
 LIKERT_CHOICES = (1, 2, 3, 4, 5)
@@ -218,7 +218,7 @@ def parse_args():
     parser.add_argument("--dataset", default="euandi_2024", choices=["euandi_2019", "euandi_2024"])
     parser.add_argument("--input", default=None,
                         help="Optional explicit path to a survey_processor_concurrent CSV.")
-    parser.add_argument("--variant", default="", choices=["", "_question", "_negated"])
+    parser.add_argument("--variant", default="", choices=VARIANTS)
     parser.add_argument("--languages", default=ALL_LANGS_STR)
     parser.add_argument("--target_total", default=3000, type=int)
     parser.add_argument("--min_per_lang", default=100, type=int)

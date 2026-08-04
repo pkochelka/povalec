@@ -1,34 +1,35 @@
 #!/usr/bin/env python3
 """Train an mmBERT EU-party classifier on the balanced ECR+ID-collapsed track.
 
-Same setup as classifier_training_for_balanced, but over the 6 collapsed
-parties: train is data/EuroParl Custom/collapsed/train_balanced.parquet
-(party- and language-balanced, ECR and ID merged into "ECR+ID"), dev and test
-are the uniform collapsed splits from the same directory. All three splits are
-uniform across parties, so the model is trained with plain cross-entropy, and
-dev and test are scored through the identical plain argmax(logits) path -- no
-bias or temperature correction. That keeps the two numbers directly comparable
-to each other and to the non-collapsed balanced model (which reports the same
-way): on a balanced train the label prior is already uniform, so argmax(logits)
-is Bayes-optimal for the uniform dev/test and a prior-shift correction is neither
+Over the 6 collapsed parties: train is
+data/EuroParl Custom/collapsed/train_balanced.parquet (party- and
+language-balanced, ECR and ID merged into "ECR+ID"), dev and test are the uniform
+collapsed splits from the same directory. All three splits are uniform across
+parties, so the model is trained with plain cross-entropy, and dev and test are
+scored through the identical plain argmax(logits) path -- no bias or temperature
+correction. That keeps the two numbers directly comparable to each other: on a
+balanced train the label prior is already uniform, so argmax(logits) is
+Bayes-optimal for the uniform dev/test and a prior-shift correction is neither
 needed nor principled.
+
+The sibling classifier_training.py trains the same 6 classes on the same track
+with logit-adjusted CE off the natural-prior collapsed/train.parquet instead.
 """
 import json
 import os
 import sys
 
-from datasets import ClassLabel, Dataset, DatasetDict
+import numpy as np
 from dotenv import load_dotenv
-from transformers import AutoTokenizer, DataCollatorWithPadding, EarlyStoppingCallback, Trainer
+from sklearn.metrics import f1_score
+from transformers import AutoTokenizer, EarlyStoppingCallback, Trainer
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
 from analysis.europarl_classification import (
-    PARTY_COLUMN,
-    attach_labels,
-    build_label_maps,
-    load_split,
+    classification_report_text,
+    per_language_f1_report,
 )
 from analysis.classifier_training import (
     BEST_METRIC,
@@ -39,59 +40,30 @@ from analysis.classifier_training import (
     MODEL_SLUG,
     SEED,
     LanguageAwareMetrics,
-    TrainingData,
     build_model,
+    prepare_training_data,
     release,
     select_device,
     training_arguments,
 )
-from analysis.classifier_training_for_balanced import predict_labels, report_split
 
 DATA_DIR = os.path.join(PROJECT_ROOT, "data", "EuroParl Custom", "collapsed")
 OUTPUT_DIR = f"{MODEL_SLUG}-balanced-collapsed"
 
 
-def prepare_training_data(data_dir, tokenizer):
-    raw_splits = {
-        "train": load_split("train_balanced", data_dir),
-        "dev": load_split("dev", data_dir),
-        "test": load_split("test", data_dir),
-    }
+def predict_labels(trainer, dataset, languages, metrics_fn):
+    metrics_fn.current_languages = languages
+    output = trainer.predict(dataset)
+    return output.label_ids, np.argmax(output.predictions, axis=-1)
 
-    label_list = sorted(raw_splits["train"][PARTY_COLUMN].unique().tolist())
-    label2id, id2label = build_label_maps(label_list)
-    num_labels = len(label_list)
-    print(f"{num_labels} classes: {label2id}")
 
-    splits = {name: attach_labels(df, label2id) for name, df in raw_splits.items()}
-    print("Train class counts:\n", splits["train"]["labels"].value_counts().sort_index().to_dict())
-    print("Train languages:\n",    splits["train"]["language"].value_counts().to_dict())
-
-    dataset = DatasetDict({
-        "train":      Dataset.from_pandas(splits["train"], preserve_index=False),
-        "validation": Dataset.from_pandas(splits["dev"],   preserve_index=False),
-        "test":       Dataset.from_pandas(splits["test"],  preserve_index=False),
-    })
-    for split in dataset:
-        dataset[split] = dataset[split].cast_column("labels", ClassLabel(num_classes=num_labels))
-    tokenized = dataset.map(
-        lambda batch: tokenizer(batch["text"], truncation=True, max_length=MAX_LEN),
-        batched=True,
-        remove_columns=["text", "language"],
-    )
-
-    return TrainingData(
-        train=tokenized["train"],
-        dev=tokenized["validation"],
-        test=tokenized["test"],
-        collator=DataCollatorWithPadding(tokenizer=tokenizer),
-        label2id=label2id,
-        id2label=id2label,
-        num_labels=num_labels,
-        target_names=[id2label[i] for i in range(num_labels)],
-        dev_langs=splits["dev"]["language"].to_numpy(),
-        test_langs=splits["test"]["language"].to_numpy(),
-    )
+def report_split(name, y_true, y_pred, languages, target_names):
+    f1 = f1_score(y_true, y_pred, average="macro", zero_division=0)
+    overall = classification_report_text(y_true, y_pred, target_names)
+    summary, per_language = per_language_f1_report(y_true, y_pred, languages, target_names, note=name)
+    print(f"\n=== {name.upper()} (f1_macro={f1:.4f}) ===\n" + overall + summary)
+    print("\n".join(per_language))
+    return f1, overall, summary, per_language
 
 
 def train_and_evaluate(data, tokenizer, hf_token, device):
@@ -157,7 +129,7 @@ def main():
     hf_token = os.getenv("HF_TOKEN")
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, token=hf_token)
-    data = prepare_training_data(DATA_DIR, tokenizer)
+    data = prepare_training_data(DATA_DIR, tokenizer, train_split="train_balanced")
 
     best_epoch, dev, test = train_and_evaluate(data, tokenizer, hf_token, device)
 

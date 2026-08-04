@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 
-VAA_CSV_PATTERN = re.compile(r"^vaa(?P<variant>|_negated|_question)_(?P<langs>[a-z,]+)\.csv$")
+VAA_CSV_PATTERN = re.compile(r"^vaa(?P<variant>|_negated)_(?P<langs>[a-z,]+)\.csv$")
 
 
 def find_vaa_csvs(model_dir: Path) -> dict[str, Path]:
@@ -21,8 +21,6 @@ def find_vaa_csvs(model_dir: Path) -> dict[str, Path]:
         variant_key = match.group("variant") or "base"
         if variant_key == "_negated":
             variant_key = "negated"
-        elif variant_key == "_question":
-            variant_key = "question"
         found[variant_key] = path
     return found
 

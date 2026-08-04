@@ -29,18 +29,9 @@ the languages where it is plentiful (en/de/fr), which makes language a leaky cue
 for party -- the exact confound a party classifier should not be able to use.
 The shared quota costs rows only when no single party is the floor in every
 language; it is otherwise free.
-
---with-translations instead builds ONLY balanced_train_with_translations.parquet:
-the same merge-then-split produces the collapsed train, then originals and cache
-translations are balanced as separate strata, so every party contributes the
-same, maximal number of original rows AND the same, maximal number of translated
-rows (each stratum's target is its min count across parties). Rows carry a
-boolean `translated` provenance column.
 """
 
 import argparse
-import json
-import re
 import sys
 from pathlib import Path
 
@@ -50,24 +41,20 @@ import pandas as pd
 pd.options.future.infer_string = False
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from utils import write_parquet_chunked
+from utils import water_fill, write_parquet_chunked
 from split_preprocessed_data import split_dataframe
 
 DATA_DIR = PROJECT_ROOT / "data" / "EuroParl Custom"
 DEFAULT_INPUT_DIR = DATA_DIR / "cleaned"
 DEFAULT_OUTPUT_DIR = DATA_DIR / "collapsed"
-DEFAULT_CACHE = DATA_DIR / "augmented" / "translations.cache.json"
 
 COLUMNS = ["date", "EU Party", "text", "language", "speaker"]
 PARTY_COLUMN = "EU Party"
 MERGE_PARTIES = ("ECR", "ID")
 MERGED_LABEL = "ECR+ID"
-
-# augment_translations plans distinct same-speaker-same-day speeches as
-# `group#r<rank>`; the suffix must be stripped to resolve the source group.
-RANK_SUFFIX = re.compile(r"#r\d+$")
 
 
 def build_merged_splits(input_dir, seed):
@@ -91,74 +78,6 @@ def build_merged_splits(input_dir, seed):
 
     train, dev, test = split_dataframe(pool, seed=seed)
     return {"train": train, "dev": dev, "test": test}
-
-
-def reconstruct_augmented(train, cache_path):
-    """Rebuild augmented rows from the translation cache, keeping only
-    train-origin groups.
-
-    Cache keys are `group|||language`, where group is `speaker_date` with an
-    optional `#r<rank>` suffix; metadata (party, date, speaker) is inherited
-    from the source group, so relabelled parties carry over. Dropping keys
-    whose group is absent from train removes dev/test-origin translations
-    (leakage) and orphans in one check.
-    """
-    with open(cache_path, encoding="utf-8") as f:
-        cache = json.load(f)
-
-    group = train["speaker"].astype(str) + "_" + train["date"].astype(str)
-    meta = train.assign(group=group).drop_duplicates("group").set_index("group")
-    party_of = meta[PARTY_COLUMN].to_dict()
-    date_of = meta["date"].to_dict()
-    speaker_of = meta["speaker"].to_dict()
-
-    rows = []
-    dropped = 0
-    for key, value in cache.items():
-        grp, language = key.rsplit("|||", 1)
-        grp = RANK_SUFFIX.sub("", grp)
-        if grp not in party_of:
-            dropped += 1
-            continue
-        # New cache stores {"text", "model"}; legacy stored a bare string.
-        text = value["text"] if isinstance(value, dict) else value
-        rows.append((date_of[grp], party_of[grp], text, language, speaker_of[grp]))
-
-    aug = pd.DataFrame(rows, columns=COLUMNS)
-    aug["date"] = pd.to_datetime(aug["date"])
-    print(f"Cache: {len(cache):,} entries -> {len(aug):,} train-origin rows "
-          f"({dropped:,} dropped as dev/test/orphan)")
-    return aug
-
-
-def water_fill(capacities, total):
-    """Distribute `total` over languages, equal shares capped at each capacity.
-
-    Returns {language: allocation}. Languages that cannot meet the equal share
-    are taken in full; the freed-up deficit is re-spread over the rest until the
-    full `total` is placed (assumes sum(capacities) >= total).
-    """
-    alloc = dict.fromkeys(capacities, 0)
-    active = [lang for lang, cap in capacities.items() if cap > 0]
-    remaining = min(total, sum(capacities.values()))
-
-    while remaining > 0 and active:
-        share = remaining // len(active)
-        if share == 0:
-            # Hand out the final remainder one row at a time, fullest cells first.
-            for lang in sorted(active, key=lambda x: capacities[x] - alloc[x], reverse=True):
-                if remaining == 0:
-                    break
-                alloc[lang] += 1
-                remaining -= 1
-            break
-        for lang in list(active):
-            give = min(share, capacities[lang] - alloc[lang])
-            alloc[lang] += give
-            remaining -= give
-            if alloc[lang] >= capacities[lang]:
-                active.remove(lang)
-    return alloc
 
 
 def shared_alloc(df, target):
@@ -189,56 +108,6 @@ def balance_party(pdf, target, rng, alloc=None):
     return work[work["_rank"] < work["_quota"]].drop(columns=["_tie", "_rank", "_quota"])
 
 
-def build_translated_balanced(args, rng):
-    """Build balanced_train_with_translations.parquet: originals and cache
-    translations balanced as separate strata, each to its own maximal common
-    per-party count (the stratum's min across parties)."""
-    splits = build_merged_splits(args.input_dir, args.seed)
-    train = splits["train"][COLUMNS]
-    print(f"train: {len(train):,} rows, parties after collapse: "
-          f"{train[PARTY_COLUMN].value_counts().to_dict()}")
-
-    augmented = reconstruct_augmented(train, args.cache)
-
-    combined = pd.concat([train.assign(translated=False),
-                          augmented.assign(translated=True)], ignore_index=True)
-    before = len(combined)
-    # keep="first" + originals-first concat order: originals win collisions.
-    combined = combined.drop_duplicates(subset=["text"]).reset_index(drop=True)
-    print(f"Text dedup: {before:,} -> {len(combined):,} rows")
-
-    parts = []
-    for translated, stratum in combined.groupby("translated"):
-        label = "translated" if translated else "original"
-        counts = stratum[PARTY_COLUMN].value_counts()
-        target = int(counts.min())
-        print(f"\n{label} per-party counts:")
-        for party in counts.sort_values().index:
-            print(f"  {party}: {counts[party]:,}")
-        alloc = None if args.free_language_mix else shared_alloc(stratum, target)
-        if alloc is not None:
-            target = sum(alloc.values())
-        print(f"{label} target per party: {target:,}")
-        for party in sorted(counts.index):
-            parts.append(balance_party(
-                stratum[stratum[PARTY_COLUMN] == party], target, rng, alloc))
-
-    balanced = pd.concat(parts, ignore_index=True)
-    balanced = balanced.sample(frac=1, random_state=args.seed).reset_index(drop=True)
-
-    print(f"\nBalanced train with translations: {len(balanced):,} rows")
-    print("Party x origin balance:")
-    print(balanced.groupby([PARTY_COLUMN, "translated"], observed=True)
-          .size().unstack(fill_value=0).to_string())
-    print("\nLanguage balance (overall):")
-    print(balanced["language"].value_counts().to_string())
-    print(f"\nDate range kept: {balanced['date'].min()} .. {balanced['date'].max()}")
-
-    path = args.output_dir / "balanced_train_with_translations.parquet"
-    write_parquet_chunked(balanced[COLUMNS + ["translated"]], path)
-    print(f"Saved balanced_train_with_translations -> {path}")
-
-
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input-dir", type=Path, default=DEFAULT_INPUT_DIR)
@@ -249,12 +118,6 @@ def parse_args():
                         help="Water-fill each party's language quota independently (legacy). "
                              "Default shares one quota across parties so every party gets the "
                              "identical language profile.")
-    parser.add_argument("--with-translations", action="store_true",
-                        help="Build ONLY balanced_train_with_translations.parquet (originals and "
-                             "cache translations balanced as separate strata); the four standard "
-                             "outputs are left untouched.")
-    parser.add_argument("--cache", type=Path, default=DEFAULT_CACHE,
-                        help="Translation cache for --with-translations.")
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 
@@ -263,10 +126,6 @@ def main():
     args = parse_args()
     rng = np.random.default_rng(args.seed)
     args.output_dir.mkdir(parents=True, exist_ok=True)
-
-    if args.with_translations:
-        build_translated_balanced(args, rng)
-        return
 
     splits = build_merged_splits(args.input_dir, args.seed)
     for name in ("train", "dev", "test"):

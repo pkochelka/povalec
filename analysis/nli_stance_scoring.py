@@ -11,7 +11,7 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils import ALL_LANGS_STR
+from utils import ALL_LANGS_STR, VARIANTS
 
 DEFAULT_NLI_MODEL = "MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7"
 ENTAILMENT_LOGIT_INDEX = 0
@@ -119,7 +119,7 @@ def parse_args():
     parser.add_argument("--llm", default="qwen3.5-122b")
     parser.add_argument("--dataset", default="euandi_2024", choices=["euandi_2019", "euandi_2024"])
     parser.add_argument("--input", default=None)
-    parser.add_argument("--variant", default="_negated", choices=["", "_question", "_negated"])
+    parser.add_argument("--variant", default="_negated", choices=VARIANTS)
     parser.add_argument("--languages", default=ALL_LANGS_STR)
     parser.add_argument("--batch_size", default=16, type=int)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")

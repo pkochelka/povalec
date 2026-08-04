@@ -7,36 +7,38 @@ import threading
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils import ALL_LANGS_STR
+from utils import ALL_LANGS_STR, VARIANTS
 
-VARIANTS = ["", "_negated"]
 LANGUAGES = ALL_LANGS_STR
-MAX_RETRIES = 2
-MAX_WORKERS = 20
+MAX_RETRIES = 1
+MAX_WORKERS = 40
 # Per-key worker count for the second provider. The actual pool fans out to
 # this many workers for *each* configured API key (KEY1, KEY2, ... in .env.local),
 # so total concurrency is MAX_WORKERS_SECOND_PROVIDER * number_of_keys.
-MAX_WORKERS_SECOND_PROVIDER = 20
+MAX_WORKERS_SECOND_PROVIDER = 4
 DATASETS = [#"euandi_2019",
     "euandi_2024"]
 
 MODELS = [
     #{"model": "gemma4:12b",      "model_dir":"gemma-4-12b", "second_provider": False},
     #{"model": "google/gemini-3.5-flash",      "model_dir":"gemini3.5-flash", "second_provider": False},    
-    {"model": "gemma4",      "model_dir":"gemma-4-31b", "second_provider": True},
+    #{"model": "x-ai/grok-4.5",      "model_dir":"grok-4.5", "second_provider": False},    
+    #{"model": "openai/gpt-5.6-luna", "model_dir": "gpt-5.6-luna", "second_provider": False},
+    {"model": "kimi-k3",      "model_dir":"kimi-k3", "second_provider": True},
+    #{"model": "gemma4",      "model_dir":"gemma-4-31b", "second_provider": True},
     #{"model": "phi4:14b-q8_0",      "model_dir":"phi-4-14b", "second_provider": True},
     #{"model": "gemma4:31b-it-q8_0",      "model_dir":"gemma-4-31b-it", "second_provider": False},
     #{"model": "deepseek/deepseek-v4-pro",      "model_dir":"deepseek-v4-pro", "second_provider": False},
     #{"model": "mistralai/mistral-small-2603",      "model_dir":"mistral-small-2603", "second_provider": False},
     #{"model": "x-ai/grok-4.3",      "model_dir":"grok-4.3", "second_provider": False},
 
-    {"model": "deepseek-v4-pro-thinking", "model_dir": "deepseek-v4-pro", "second_provider": True},
-    {"model": "glm-5.2", "model_dir": "glm-5.2", "second_provider": True},
-    {"model": "mistral-medium-3.5", "model_dir": "mistral-medium-3.5", "second_provider": True},
+    #{"model": "deepseek-v4-pro-thinking", "model_dir": "deepseek-v4-pro", "second_provider": True},
+    #{"model": "glm-5.2", "model_dir": "glm-5.2", "second_provider": True},
+    #{"model": "mistral-medium-3.5", "model_dir": "mistral-medium-3.5", "second_provider": True},
     #{"model": "command-a", "model_dir": "command-a", "second_provider": True},
-    {"model": "qwen3.5-122b",              "model_dir": "qwen3.5-122b",  "second_provider": True},
-    {"model": "kimi-k2.7", "model_dir": "kimi-k2.7", "second_provider": True},
-    {"model": "gpt-oss-120b", "model_dir": "gpt-oss-120b", "second_provider": True},
+    #{"model": "qwen3.5-122b",              "model_dir": "qwen3.5-122b",  "second_provider": True},
+    #{"model": "kimi-k2.7", "model_dir": "kimi-k2.7", "second_provider": True},
+    #{"model": "gpt-oss-120b", "model_dir": "gpt-oss-120b", "second_provider": True},
 ]
 
 _DIR = os.path.dirname(os.path.abspath(__file__))

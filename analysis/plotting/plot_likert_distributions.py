@@ -14,14 +14,10 @@ _ANALYSIS_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ANALYSIS_DIR.parent))
 sys.path.insert(0, str(_ANALYSIS_DIR))
 
-from utils import flip_likert
+from utils import VARIANTS, VARIANT_LABELS, flip_likert
 from sample_speeches_for_labeling import STANCE_BIN_EDGES
+from analysis.plotting.plot_classified_parties import model_display_name
 
-# The "_question" framing is generated but unused downstream, so it is not read
-# here at all: leaving it in would put a third of every stack's height behind a
-# variant nothing else in the analysis reports on.
-VARIANTS = ["", "_negated"]
-VARIANT_LABELS = {"": "base", "_negated": "negated"}
 VARIANT_COLORS = {"base": "#2CA02C", "negated": "#D62728"}
 # On the cross-model panel the colour is spent on the model, so the framing split
 # has to be carried by the texture instead.
@@ -239,10 +235,16 @@ def model_legend_handles(models, colors, totals=None):
     """Model swatches, carrying each model's n where one panel defines it. The
     combined figure passes totals=None: its two panels have different sample
     sizes, so a single shared legend cannot name one without misreporting the
-    other."""
+    other.
+
+    `models` are result-directory names throughout -- they key the colours and the
+    pooled shares -- and only the legend text becomes the official name."""
+    def label(model):
+        name = model_display_name(model)
+        return name if totals is None else f"{name} (n={totals[model]})"
+
     return [plt.Rectangle((0, 0), 1, 1, facecolor=colors[model], edgecolor="black",
-                          linewidth=0.4,
-                          label=model if totals is None else f"{model} (n={totals[model]})")
+                          linewidth=0.4, label=label(model))
             for model in models if totals is None or model in totals]
 
 

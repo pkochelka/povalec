@@ -11,7 +11,7 @@ from transformers import AutoModel, AutoModelForSequenceClassification, AutoToke
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils import ALL_LANGS_STR, likert_to_stance
+from utils import ALL_LANGS_STR, VARIANTS, likert_to_stance
 from analysis.refusal_analysis import (
     DEFAULT_EMBED_MODEL as DEFAULT_REFUSAL_EMBED_MODEL,
     DEFAULT_SIM_THRESHOLD as DEFAULT_REFUSAL_SIM_THRESHOLD,
@@ -316,7 +316,7 @@ def parse_args():
     parser.add_argument("--dataset", default="euandi_2024", choices=["euandi_2019", "euandi_2024"])
     parser.add_argument("--input", default=None,
                         help="Optional explicit path to a survey_processor_concurrent CSV.")
-    parser.add_argument("--variant", default="", choices=["", "_question", "_negated"])
+    parser.add_argument("--variant", default="", choices=VARIANTS)
     parser.add_argument("--languages", default=ALL_LANGS_STR)
     parser.add_argument("--batch_size", default=8, type=int)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")

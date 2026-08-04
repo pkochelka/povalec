@@ -12,19 +12,11 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
-from utils import ALL_LANGS_STR
+from utils import ALL_LANGS_STR, FAILED_REASON_VALUES, REFUSED_REASON_PREFIXES, SOURCE_INPUT_FILENAME, SOURCE_TEXT_COLUMN_PREFIX, VARIANTS
 
 DEFAULT_CROSSENCODER_DIR = os.path.join(PROJECT_ROOT, "mmbert-small-stance-crossencoder")
 DEFAULT_MAX_TOKEN_LENGTH = 512
 
-REFUSED_REASON_PREFIXES = ("REFUSED",)
-FAILED_REASON_VALUES = {"FAILED"}
-
-SOURCE_TEXT_COLUMN_PREFIX = {"speeches": "answer", "reasons": "reason"}
-SOURCE_INPUT_FILENAME = {
-    "speeches": "speeches_{langs}{variant}.csv",
-    "reasons": "{langs}{variant}.csv",
-}
 
 
 def load_crossencoder(model_dir, device):
@@ -150,7 +142,7 @@ def parse_args():
     parser.add_argument("--dataset", default="euandi_2024", choices=["euandi_2019", "euandi_2024"])
     parser.add_argument("--input", default=None)
     parser.add_argument("--source", default="speeches", choices=["speeches", "reasons"])
-    parser.add_argument("--variant", default="", choices=["", "_question", "_negated"])
+    parser.add_argument("--variant", default="", choices=VARIANTS)
     parser.add_argument("--languages", default=ALL_LANGS_STR)
     parser.add_argument("--batch_size", default=64, type=int)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")

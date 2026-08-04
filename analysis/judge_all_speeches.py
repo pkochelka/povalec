@@ -48,7 +48,7 @@ def find_speech_file(model_dir, negated):
     scored/classified/llm_stance (those are derived) nor the question framing."""
     for path in sorted(glob.glob(os.path.join(model_dir, "speeches_*.csv"))):
         name = os.path.basename(path)
-        if any(tag in name for tag in ("_scored", "_classified", "_question", "_llm_stance")):
+        if any(tag in name for tag in ("_scored", "_classified", "_llm_stance")):
             continue
         if ("_negated" in name) == negated:
             return path

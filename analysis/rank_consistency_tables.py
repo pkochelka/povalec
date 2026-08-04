@@ -84,6 +84,7 @@ from scipy.stats import chi2, rankdata
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from analysis.evaluate_euandi import DEFAULT_POSITIONS, POSITION_CHOICES
+from analysis.plotting.plot_classified_parties import model_display_name
 from analysis.plotting.plot_ep_group_rank_boxplots import (
     CELL_KEYS,
     LANGS,
@@ -1216,52 +1217,80 @@ def matrix_cells(methods, by_framing):
     is the base framing, the LOWER the negated one. Each triangle is computed
     from its own framing's runs -- pooling them first would average two
     rankings that, for Indirect, are close to opposite. "n/a" marks a pair the
-    job is missing a method for (e.g. --allow-partial-models)."""
+    job is missing a method for (e.g. --allow-partial-models).
+
+    A grid entry is the (correlation text, significance marker) pair rather than
+    one joined string, so each renderer can mark the coefficient up on its own
+    terms -- LaTeX wraps it in \\Corr and leaves the star outside."""
     labels = [MATRIX_LABEL[method] for method in methods]
     grid = []
     for row in range(len(methods)):
         cells = []
         for col in range(len(methods)):
             if row == col:
-                cells.append("1.0")
+                cells.append(("1.0", ""))
                 continue
             framing = MATRIX_FRAMINGS[0] if row < col else MATRIX_FRAMINGS[1]
             job, values, sampled = by_framing[framing]
             local = method_pair_lookup(job).get(frozenset((methods[row], methods[col])))
             if local is None:
-                cells.append("n/a")
+                cells.append(("n/a", ""))
                 continue
             key = "rho_lang" if "rho_lang" in values else "rho"
-            cells.append(f"{format_correlation(values[key][local])}"
-                        f"{rho_marker(sampled, key, local)}")
+            cells.append((format_correlation(values[key][local]),
+                          rho_marker(sampled, key, local)))
         grid.append(cells)
     return labels, labels, grid
 
 
+NOT_AVAILABLE = "n/a"
+
+
+def latex_correlation_cell(text, marker):
+    """\\Corr{<rho>} so the document can style every coefficient at once (shading
+    by magnitude, say) from one macro. The significance star stays outside the
+    braces: it qualifies the coefficient, it is not part of the number. "n/a" is
+    not a coefficient, so it is left bare."""
+    return text + marker if text == NOT_AVAILABLE else f"\\Corr{{{text}}}{marker}"
+
+
+def markdown_correlation_cell(text, marker):
+    return text + marker
+
+
 def matrix_title(model_scope):
-    return "All models" if model_scope == POOLED else model_scope
+    """Table heading: the model's official name, as the figures write it."""
+    return "All models" if model_scope == POOLED else model_display_name(model_scope)
 
 
 def slug(text):
     return re.sub(r"[^0-9a-zA-Z]+", "-", text).strip("-").lower()
 
 
-def matrix_summary_sentence(methods, by_framing, draws):
+def matrix_summary_sentence(methods, by_framing, draws, explain=True):
     """The closing lines: every whole-set figure the pairwise matrix cannot show --
     Kendall's W, ICC(3,1) and the top-1 share over all the methods at once, per
     framing. All three are computed here anyway (pair_metrics), and a reader who has
     only the table in front of them should not have to go to the per-model table or
-    the CSV for the two that were previously dropped."""
+    the CSV for the two that were previously dropped.
+
+    `explain=False` drops the sentence defining W / ICC / top-1: the per-model
+    tables are a block of a dozen otherwise identical captions, so the
+    definitions are stated once, on the pooled table they all sit under."""
     def metrics(framing):
         observed, sampled = by_framing[framing][1], by_framing[framing][2]
         return (f"$W$ {format_metric(observed, sampled, 'w')}, "
                 f"ICC {format_metric(observed, sampled, 'icc')}, "
                 f"top-1 {format_metric(observed, sampled, 'top1', percent=True)}")
 
+    jointly = " jointly" if explain else ""
+    sentence = (f"Over all {len(methods)} methods{jointly}, base framing: "
+                f"{metrics('base')}; negated: {metrics('negated')}.")
+    if not explain:
+        return sentence
     steps = ", ".join(f"{100 * (step + 1) // len(methods)}"
                       for step in range(len(methods)))
-    return (f"Over all {len(methods)} methods jointly, base framing: "
-            f"{metrics('base')}; negated: {metrics('negated')}. "
+    return (f"{sentence} "
             f"$W$ is the concordance of the {len(methods)} orderings (1 = identical, "
             f"0 = unrelated); ICC is ICC(3,1), consistency form, over the methods' "
             f"z-scored rank profiles, so a method whose raw scale is compressed is "
@@ -1270,13 +1299,31 @@ def matrix_summary_sentence(methods, by_framing, draws):
             f"methods can only be {steps}\\%.")
 
 
+def matrix_caption(spec, methods, model_scope, by_framing, draws):
+    """The pooled table carries the full explanation of what the matrix and the
+    summary figures are; the per-model tables that follow it repeat only their
+    own numbers, since a reader meets the explanation once and then wants the
+    dozen model tables to be scannable."""
+    title = latex_escape(matrix_title(model_scope))
+    if model_scope == POOLED:
+        return (f"\\textbf{{{title}.}} {spec['caption']} "
+                f"{matrix_summary_sentence(methods, by_framing, draws)}")
+    return (f"\\textbf{{{title}.}} "
+            f"{matrix_summary_sentence(methods, by_framing, draws, explain=False)}")
+
+
+def matrix_label_slug(model_scope):
+    """Slug from the DIRECTORY name, not the display title -- the title now
+    carries the official model name ("Kimi K2.7 Code"), and cross-references in
+    the thesis should not move because a model's marketing name gained a word."""
+    return "all-models" if model_scope == POOLED else slug(model_scope)
+
+
 def render_matrix_latex(spec, methods, model_scope, by_framing, draws, provenance):
     """One small booktabs table per model: methods x methods, base framing in the
     upper triangle and negated in the lower."""
     row_labels, col_labels, grid = matrix_cells(methods, by_framing)
-    title = matrix_title(model_scope)
-    caption = (f"\\textbf{{{title}.}} {spec['caption']} "
-              f"{matrix_summary_sentence(methods, by_framing, draws)}")
+    caption = matrix_caption(spec, methods, model_scope, by_framing, draws)
     alignment = "l" + "r" * len(col_labels)
     lines = [f"% {line}" for line in provenance]
     lines += [
@@ -1290,10 +1337,11 @@ def render_matrix_latex(spec, methods, model_scope, by_framing, draws, provenanc
         r"    \midrule",
     ]
     for row_label, cells in zip(row_labels, grid):
-        lines.append("    " + " & ".join([latex_escape(row_label), *cells]) + r" \\")
+        rendered = [latex_correlation_cell(text, marker) for text, marker in cells]
+        lines.append("    " + " & ".join([latex_escape(row_label), *rendered]) + r" \\")
     lines += [r"    \bottomrule", r"  \end{tabular}",
              f"  \\caption{{{caption}}}",
-             f"  \\label{{{spec['label']}-{slug(title)}}}",
+             f"  \\label{{{spec['label']}-{matrix_label_slug(model_scope)}}}",
              r"\end{table}"]
     return "\n".join(lines)
 
@@ -1301,7 +1349,8 @@ def render_matrix_latex(spec, methods, model_scope, by_framing, draws, provenanc
 def render_matrix_markdown(methods, model_scope, by_framing, draws):
     row_labels, col_labels, grid = matrix_cells(methods, by_framing)
     header = ["", *col_labels]
-    body = [[row_label, *(markdown_cell(cell) for cell in cells)]
+    body = [[row_label, *(markdown_cell(markdown_correlation_cell(text, marker))
+                          for text, marker in cells)]
             for row_label, cells in zip(row_labels, grid)]
     widths = [max(len(str(row[index])) for row in [header, *body])
              for index in range(len(header))]

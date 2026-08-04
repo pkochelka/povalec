@@ -29,14 +29,14 @@ from transformers import (
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
-from utils import ALL_LANGS_STR, likert_to_stance, load_dataframe
+from utils import ALL_LANGS_STR, VARIANTS, likert_to_stance, load_dataframe
 
 MODEL_NAME = "jhu-clsp/mmBERT-small"
 MODEL_SLUG = MODEL_NAME.split("/")[-1]
 DATA_DIR = os.path.join(PROJECT_ROOT, "data", "euandi_2024_results")
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, f"{MODEL_SLUG}-stance-regressor")
-SOURCE_MODELS = ["kimi-k2.6", "deepseek-v4-pro"]
-PARAPHRASE_SUFFIXES = ["", "_question", "_negated"]
+SOURCE_MODELS = ["kimi-k2.7", "deepseek-v4-pro"]
+PARAPHRASE_SUFFIXES = VARIANTS
 OOD_LABEL_PATH = os.path.join(DATA_DIR, "stance_speeches_to_label.csv")
 OOD_META_PATH = os.path.join(DATA_DIR, "stance_speeches_to_label_meta.csv")
 
@@ -76,7 +76,7 @@ def select_device():
 
 
 def melt_pairs(frame, model):
-    frame.columns = [c.replace("_question", "").replace("_negated", "") for c in frame.columns]
+    frame.columns = [c.replace("_negated", "") for c in frame.columns]
     reasons, choices = {}, {}
     for column in frame.columns:
         reason_match = REASON_PATTERN.match(column)

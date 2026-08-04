@@ -36,10 +36,9 @@ from transformers import AutoModel, AutoTokenizer
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils import ALL_LANGS
+from analysis.plotting.plot_classified_parties import model_display_name
+from utils import ALL_LANGS, FAILED_REASON_VALUES, REFUSED_REASON_PREFIXES, VARIANTS, VARIANT_LABELS
 
-VARIANTS = ["", "_negated"]
-VARIANT_LABELS = {"": "base", "_negated": "negated"}
 
 SKIP_MODEL_SUBSTRINGS = ()
 
@@ -77,8 +76,6 @@ BREAKDOWN_MIN_WIDTH = 9.0
 BREAKDOWN_HEIGHT = 8.0
 BREAKDOWN_VALUE_HEADROOM = 1.3
 
-REFUSED_REASON_PREFIXES = ("REFUSED",)
-FAILED_REASON_VALUES = {"FAILED"}
 
 DEFAULT_EMBED_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_SIM_THRESHOLD = 0.62
@@ -99,14 +96,14 @@ REFUSAL_TEMPLATES = [
 ]
 
 LIKERT_FILENAME_PATTERN = re.compile(
-    r"^(?P<langs>[a-z]{2}(?:,[a-z]{2})*)(?P<variant>|_negated|_question)\.csv$"
+    r"^(?P<langs>[a-z]{2}(?:,[a-z]{2})*)(?P<variant>|_negated)\.csv$"
 )
 SPEECHES_FILENAME_PATTERN = re.compile(
-    r"^speeches_(?P<langs>[a-z]{2}(?:,[a-z]{2})*)(?P<variant>|_negated|_question)\.csv$"
+    r"^speeches_(?P<langs>[a-z]{2}(?:,[a-z]{2})*)(?P<variant>|_negated)\.csv$"
 )
-REASON_COLUMN_PATTERN = re.compile(r"^reason_(?P<lang>[a-z]{2})(?P<variant>|_negated|_question)_v(?P<idx>\d+)$")
-CHOICE_COLUMN_PATTERN = re.compile(r"^choice_(?P<lang>[a-z]{2})(?P<variant>|_negated|_question)_v(?P<idx>\d+)$")
-ANSWER_COLUMN_PATTERN = re.compile(r"^answer_(?P<lang>[a-z]{2})(?P<variant>|_negated|_question)_v(?P<idx>\d+)$")
+REASON_COLUMN_PATTERN = re.compile(r"^reason_(?P<lang>[a-z]{2})(?P<variant>|_negated)_v(?P<idx>\d+)$")
+CHOICE_COLUMN_PATTERN = re.compile(r"^choice_(?P<lang>[a-z]{2})(?P<variant>|_negated)_v(?P<idx>\d+)$")
+ANSWER_COLUMN_PATTERN = re.compile(r"^answer_(?P<lang>[a-z]{2})(?P<variant>|_negated)_v(?P<idx>\d+)$")
 ORIGINAL_TEXT_PATTERN = re.compile(r"^original_text_(?P<lang>[a-z]{2})$")
 
 
@@ -391,8 +388,10 @@ def plot_refusal_per_question(per_question_model, question_totals, output_path):
     bottom = np.zeros(len(questions))
     for model in models:
         heights = contribution[model].to_numpy()
+        # Keyed by the result directory throughout; only the legend entry is the
+        # model's official name, the way the figure's maker writes it.
         ax.bar(positions, heights, bottom=bottom, color=color_by_model[model],
-               edgecolor="black", linewidth=0.3, label=model)
+               edgecolor="black", linewidth=0.3, label=model_display_name(model))
         bottom += heights
 
     aggregate = (kept_totals["n_refusal"] / kept_totals["n_total"]).reindex(questions).to_numpy()
@@ -512,10 +511,12 @@ def plot_hard_vs_semantic_per_model(overall_df, output_path):
         ax.text(x, total + 0.002, f"{total:.3f}", ha="center", va="bottom",
                 fontsize=BREAKDOWN_VALUE_FONTSIZE, rotation=90)
 
-    # Steeper than the old 20 degrees: at 22pt a name like "mistral-medium-3.5" is wider
-    # than the bar it belongs to, so a shallow rotation runs it into its neighbour.
-    ax.set_xticks(positions, per_model["model"], rotation=40, ha="right",
-                  fontsize=BREAKDOWN_TICK_FONTSIZE)
+    # Steeper than the old 20 degrees: at 22pt a name like "Mistral Medium 3.5" is wider
+    # than the bar it belongs to, so a shallow rotation runs it into its neighbour. The
+    # bars stay ordered and coloured by the result directory; only the label is the
+    # model's official name.
+    ax.set_xticks(positions, [model_display_name(model) for model in per_model["model"]],
+                  rotation=40, ha="right", fontsize=BREAKDOWN_TICK_FONTSIZE)
     ax.tick_params(axis="y", labelsize=BREAKDOWN_TICK_FONTSIZE)
     ax.set_ylabel("Refusal rate", fontsize=BREAKDOWN_AXIS_LABEL_FONTSIZE)
     # Headroom for the upright value labels, which are as tall as a short bar at this

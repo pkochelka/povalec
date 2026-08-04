@@ -18,11 +18,11 @@ import pandas as pd
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
-from utils import ALL_LANGS_STR, load_dataframe
+from utils import ALL_LANGS_STR, VARIANTS, load_dataframe, water_fill
 
 DATA_DIR = os.path.join(PROJECT_ROOT, "data", "euandi_2024_results")
 SOURCE_MODELS = ["kimi-k2.7", "deepseek-v4-pro", "glm-5.2"]
-PARAPHRASE_SUFFIXES = ["", "_negated"]
+PARAPHRASE_SUFFIXES = VARIANTS
 TARGET_SAMPLES = 160
 STANCE_BIN_EDGES = [-1.0, -0.6, -0.2, 0.2, 0.6, 1.0001]
 SEED = 42
@@ -36,7 +36,7 @@ ORIGINAL_PATTERN = re.compile(r"^original_text_(?P<lang>[a-z]{2})$")
 
 
 def normalize_columns(columns):
-    return [c.replace("_question", "").replace("_negated", "") for c in columns]
+    return [c.replace("_negated", "") for c in columns]
 
 
 def melt_speeches(frame, model, paraphrase):
@@ -121,30 +121,6 @@ def stratified_sample(pool):
     sample.insert(0, "id", [f"sp{i:04d}" for i in range(len(sample))])
     print("Sampled per NLI-stance bin:\n", sample["bin"].value_counts().sort_index().to_dict())
     return sample
-
-
-def water_fill(capacities, total):
-    """Distribute `total` over keys, equal shares capped at each capacity (see
-    preprocessing/build_collapsed_splits.py for the same routine over languages)."""
-    alloc = dict.fromkeys(capacities, 0)
-    active = [key for key, cap in capacities.items() if cap > 0]
-    remaining = min(total, sum(capacities.values()))
-    while remaining > 0 and active:
-        share = remaining // len(active)
-        if share == 0:
-            for key in sorted(active, key=lambda k: capacities[k] - alloc[k], reverse=True):
-                if remaining == 0:
-                    break
-                alloc[key] += 1
-                remaining -= 1
-            break
-        for key in list(active):
-            give = min(share, capacities[key] - alloc[key])
-            alloc[key] += give
-            remaining -= give
-            if alloc[key] >= capacities[key]:
-                active.remove(key)
-    return alloc
 
 
 def stratified_sample_by_language(pool, languages, target_samples, seed=SEED):

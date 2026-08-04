@@ -11,7 +11,17 @@ from dotenv import load_dotenv
 
 load_dotenv(".env.local")
 
-BASE_URL = os.environ["BASE_URL"].rstrip("/")
+# Resolved on first call, not at import. `from utils import <anything>` runs this
+# module via the package __init__, so reading os.environ["BASE_URL"] here made every
+# script in the repo -- including ones that never touch the API -- fail at import
+# time when .env.local was absent. Missing config is now an error where it matters.
+def _base_url() -> str:
+    url = os.getenv("BASE_URL")
+    if not url:
+        raise RuntimeError("BASE_URL is not set (put it in .env.local)")
+    return url.rstrip("/")
+
+
 AUTH_TOKEN = os.getenv("AUTH_TOKEN")
 
 _BASE_URL2 = os.getenv("BASE_URL2", "").rstrip("/")
@@ -110,7 +120,7 @@ def call_api(
     user_message: str,
     model_id: str,
     *,
-    max_tokens: int = 6144,
+    max_tokens: int = 8096,
     temperature: float = 0.0,
     second_provider: bool = False,
     enable_thinking: bool | None = None,
@@ -129,7 +139,7 @@ def call_api(
         base_url = _BASE_URL2
         headers = _make_headers(_current_second_provider_key())
     else:
-        base_url = BASE_URL
+        base_url = _base_url()
         headers = _HEADERS
 
     payload = {

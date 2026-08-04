@@ -14,6 +14,8 @@ from scipy.stats import spearmanr
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from utils import FALLBACK_PARTY_COLOR, PARTY_COLORS, PARTY_DISPLAY_ORDER, VARIANT_LABELS
+
 from analysis.evaluate_euandi import (
     DEFAULT_POSITIONS, POSITION_CHOICES, load_party_positions, positions_path,
 )
@@ -21,7 +23,7 @@ from analysis.vaa_agreement_ci import (
     agreement_matrices, bootstrap_group_means, stance_frame_for,
 )
 
-VARIANT_SUFFIX_TO_LABEL = {"": "base", "_negated": "negated", "_question": "question"}
+VARIANT_SUFFIX_TO_LABEL = VARIANT_LABELS
 VARIANT_LABEL_TO_SUFFIX = {label: suffix for suffix, label in VARIANT_SUFFIX_TO_LABEL.items()}
 VARIANT_LABEL_ORDER = ["base", "negated", "question"]
 SOURCE_LABELS = ["speeches", "reasons"]
@@ -35,40 +37,25 @@ VAA_SOURCE_FOR_CLASSIFIER_SOURCE = {"speeches": "vaa_speeches", "reasons": "vaa_
 STANCE_SOURCE_FOR_CLASSIFIER_SOURCE = {"speeches": "speeches", "reasons": "likert"}
 
 SPEECHES_CLASSIFIED_PATTERN = re.compile(
-    r"^speeches_[a-z]{2}(?:,[a-z]{2})*(?P<variant>|_negated|_question)_classified\.csv$"
+    r"^speeches_[a-z]{2}(?:,[a-z]{2})*(?P<variant>|_negated)_classified\.csv$"
 )
 REASONS_CLASSIFIED_PATTERN = re.compile(
-    r"^(?!speeches_)[a-z]{2}(?:,[a-z]{2})*(?P<variant>|_negated|_question)_classified\.csv$"
+    r"^(?!speeches_)[a-z]{2}(?:,[a-z]{2})*(?P<variant>|_negated)_classified\.csv$"
 )
 VAA_LIKERT_PATTERN = re.compile(
-    r"^vaa(?P<variant>|_negated|_question)_(?P<languages>[a-z]{2}(?:,[a-z]{2})*)\.csv$"
+    r"^vaa(?P<variant>|_negated)_(?P<languages>[a-z]{2}(?:,[a-z]{2})*)\.csv$"
 )
 VAA_SPEECHES_PATTERN = re.compile(
-    r"^vaa_speeches(?P<variant>|_negated|_question)_(?P<languages>[a-z]{2}(?:,[a-z]{2})*)\.csv$"
+    r"^vaa_speeches(?P<variant>|_negated)_(?P<languages>[a-z]{2}(?:,[a-z]{2})*)\.csv$"
 )
 
 PREDICTED_PARTY_COLUMN_PATTERN = re.compile(
-    r"^predicted_party_(?P<language>[a-z]{2})(?P<variant>|_negated|_question)_v(?P<variant_idx>\d+)$"
+    r"^predicted_party_(?P<language>[a-z]{2})(?P<variant>|_negated)_v(?P<variant_idx>\d+)$"
 )
 PARTY_PROBABILITY_COLUMN_PATTERN = re.compile(
-    r"^party_prob_(?P<party_slug>.+?)_(?P<language>[a-z]{2})(?P<variant>|_negated|_question)_v(?P<variant_idx>\d+)$"
+    r"^party_prob_(?P<party_slug>.+?)_(?P<language>[a-z]{2})(?P<variant>|_negated)_v(?P<variant_idx>\d+)$"
 )
 
-PARTY_DISPLAY_ORDER = ["GUE/NGL", "S&D", "Greens/EFA", "ALDE", "PPE", "ECR", "ID", "ECR+ID"]
-PARTY_COLORS = {
-    # The group's own colour is a dark red, which sits a shade away from S&D's -- the two
-    # were indistinguishable wherever they are drawn side by side. Pushed towards magenta
-    # instead: still a red of the left, but separated (protanopic dE 4.0 -> 17.0).
-    "GUE/NGL":    "#8E1B6B",
-    "S&D":        "#E2061D",
-    "Greens/EFA": "#5DA13F",
-    "ALDE":       "#FAD22D",
-    "PPE":        "#3399FF",
-    "ECR":        "#0054A5",
-    "ID":         "#2B3856",
-    "ECR+ID":     "#164B75",
-}
-FALLBACK_PARTY_COLOR = "#888888"
 
 MEAN_PROBABILITY_LABEL = "Mean probability"
 MEAN_AGREEMENT_LABEL = "Mean VAA agreement"
@@ -104,6 +91,23 @@ FOOTNOTE_FONTSIZE = 11
 # corner and stay there.
 LEGEND_BELOW = dict(loc="upper center", fontsize=LEGEND_FONTSIZE,
                     title_fontsize=LEGEND_TITLE_FONTSIZE, framealpha=0.9)
+
+# The three-panel figure is three panels tall but no wider than a one-panel one, so it
+# is reduced harder than any other figure here to fit a column -- and its legend, the
+# one thing that is not drawn at panel scale, came out well under the body text around
+# it. plot_argmax_shares.py sets its legends at roughly its own tick size for the same
+# reason; this brings the shared legend past it (25pt against 20pt ticks). The offset
+# goes with it: the legend hangs from the bottom panel's axes, so a fraction of ONE
+# panel's height, and the old -0.30 left a gap the size of the tick labels twice over.
+COMBINED_LEGEND_SCALE = 1.35
+COMBINED_LEGEND_OFFSET = -0.19
+
+# Marks and gaps trimmed well in from matplotlib's defaults, which spend some 4.8 em per
+# entry on the handle and the column gap alone. The entries are colour swatches next to a
+# model name, so the mark carries no shape worth 2 em; what the trim buys is the fourth
+# column, which at this type size would not otherwise fit the figure's width.
+COMBINED_LEGEND_STYLE = dict(loc="upper center", framealpha=0.9, handlelength=1.4,
+                             handletextpad=0.5, columnspacing=1.2, borderpad=0.5)
 
 # The width the constants above are calibrated against. One figure here -- the
 # per-model box panel -- sizes itself by (parties x models) and runs to 26 inches
@@ -568,16 +572,17 @@ GROUP_WIDTH = 0.86
 
 # The result directories are named for the API model id (see answer_generation/
 # generate_all.py); a figure is read as prose, so it names the model the way its maker
-# writes it -- including gpt-oss, which is lowercase by OpenAI's own styling. Anything
-# not listed falls through to the directory name, so a new model dir still plots.
+# writes it -- except gpt-oss, whose lowercase house styling reads as a typo beside a
+# dozen capitalised names. Anything not listed falls through to the directory name, so
+# a new model dir still plots.
 MODEL_DISPLAY_NAME = {
     "deepseek-v4-pro": "DeepSeek V4 Pro",
     "gemini3.5-flash": "Gemini 3.5 Flash",
     "gemma-4-12b": "Gemma 4 12B",
     "gemma-4-31b": "Gemma 4 31B",
     "glm-5.2": "GLM-5.2",
-    "gpt-5.6-luna": "GPT-5.6 Luna",
-    "gpt-oss-120b": "gpt-oss-120b",
+    "gpt-5.6-luna": "GPT 5.6-Luna",
+    "gpt-oss-120b": "GPT OSS 120B",
     "granite-4.1-8b": "Granite 4.1 8B",
     "grok-4.5": "Grok 4.5",
     "kimi-k2.7": "Kimi K2.7 Code",
@@ -737,11 +742,47 @@ def draw_models_party_boxes(ax, replicates_per_model, parties, models, model_cma
     ax.set_axisbelow(True)
 
 
-def model_legend_handles(models, model_cmap):
+def model_legend_handles(models, model_cmap, label_for=str):
     """Patches matching the box faces, so a box panel (which has no bar artists to
     label) can carry the same legend a bar panel draws for itself."""
     return [Patch(facecolor=model_cmap(index), edgecolor="black", linewidth=0.7,
-                  alpha=0.85, label=model) for index, model in enumerate(models)]
+                  alpha=0.85, label=label_for(model)) for index, model in enumerate(models)]
+
+
+def fitted_legend(ax, handles, fontsize, header_fontsize, bbox_to_anchor, ncol,
+                  smallest_fontsize):
+    """The legend at `ncol` columns, set as large as it can be without running past the
+    figure's own width -- `fontsize` if it fits, stepped down towards `smallest_fontsize`
+    if it does not.
+
+    A legend wider than the figure is not clipped: `bbox_inches="tight"` widens the saved
+    image to hold it while the panels keep the width they were laid out with, so an
+    overlong legend row silently shrinks the panels to a band down the middle of the
+    page. Measuring is the only way to know -- a legend shrink-wraps its text, so its
+    width depends on the model names it happens to be drawing. The column count is what
+    is held fixed rather than the type size: the columns are what make the legend read as
+    a grid against the panels above it, and a column lost costs a whole row of height."""
+    renderer = ax.figure.canvas.get_renderer()
+    figure_width_px = ax.figure.get_figwidth() * ax.figure.dpi
+    header_ratio = header_fontsize / fontsize
+    while True:
+        legend = ax.legend(handles=handles, ncol=ncol, fontsize=fontsize,
+                           bbox_to_anchor=bbox_to_anchor, **COMBINED_LEGEND_STYLE)
+        legend.get_texts()[0].set_fontsize(fontsize * header_ratio)
+        if legend.get_window_extent(renderer).width <= figure_width_px:
+            return legend
+        if fontsize <= smallest_fontsize:
+            return legend
+        legend.remove()
+        fontsize = max(smallest_fontsize, fontsize - 0.5)
+
+
+def legend_header_handle(title):
+    """An entry with nothing drawn for it, so a legend's title can sit in the first
+    cell of its grid rather than on a row of its own above it -- a row that on a
+    figure this tall is the difference between the legend reading with the panels
+    and reading as a block under them."""
+    return Patch(alpha=0.0, linewidth=0.0, label=title)
 
 
 def plot_models_agreement_and_source_panels(replicates_per_model, values_per_model_per_source,
@@ -795,9 +836,18 @@ def plot_models_agreement_and_source_panels(replicates_per_model, values_per_mod
     # Hung off the bottom panel, so the offset is measured against one panel's height
     # rather than the whole stack's. The handles are built rather than collected: the
     # box panel labels nothing, and the bar panels each label only the models they drew.
-    axes[-1].legend(handles=model_legend_handles(models, model_cmap),
-                    bbox_to_anchor=(0.5, -0.30), ncol=min(len(models), MODEL_LEGEND_NCOL),
-                    title="model", **LEGEND_BELOW)
+    # "model" is a handle-less entry rather than the legend's title, which puts it in
+    # the grid's top-left cell with the first entry of every other column beside it.
+    fitted_legend(
+        axes[-1],
+        [legend_header_handle("model")]
+        + model_legend_handles(models, model_cmap, model_display_name),
+        fontsize=LEGEND_FONTSIZE * COMBINED_LEGEND_SCALE,
+        header_fontsize=LEGEND_TITLE_FONTSIZE * COMBINED_LEGEND_SCALE,
+        bbox_to_anchor=(0.5, COMBINED_LEGEND_OFFSET),
+        ncol=min(len(models) + 1, MODEL_LEGEND_NCOL),
+        smallest_fontsize=LEGEND_FONTSIZE,
+    )
     save_figure(fig, output_path, bbox_inches="tight")
 
 
@@ -1257,7 +1307,6 @@ def language_party_matrix_from_vaa(vaa_csvs):
             continue
         normalized = (
             df["language"]
-            .str.replace("_question", "", regex=False)
             .str.replace("_negated", "", regex=False)
         )
         frames.append(pd.DataFrame({

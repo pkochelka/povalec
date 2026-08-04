@@ -8,7 +8,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils import ALL_LANGS_STR, flip_likert, likert_to_stance
+from utils import ALL_LANGS_STR, VARIANTS, flip_likert, likert_to_stance
 
 PARTY_POSITIONS_PATH = "data/euandi_2024_data/euandi_2024_parties.jsonl"
 GROUP_POSITIONS_PATH = "data/euandi_2024_data/euandi_2024_group_positions.jsonl"
@@ -99,7 +99,9 @@ def agreement_by_ep_group(
     if collapse_ecr_id:
         # Pool the national parties of both groups before averaging, matching
         # the collapsed ECR+ID classifier label. EP_GROUP_BY_PARTY itself must
-        # stay 7-group: the multilabel trainers rely on separate ECR/ID rows.
+        # stay 7-group and the collapse stay here, per caller: the compasses
+        # (plot_party_compass, plot_party_axis_compass) read the mapping
+        # directly and plot ECR and ID as separate groups.
         party_df["ep_group"] = party_df["ep_group"].replace({"ECR": "ECR+ID", "ID": "ECR+ID"})
     merged = party_df.merge(stance_df[["statement_idx", *stance_cols]], on="statement_idx")
 
@@ -166,7 +168,7 @@ def evaluate_speeches(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_dir", default="qwen3.5-122b")
-    parser.add_argument("--variant", default="", choices=["", "_question", "_negated"])
+    parser.add_argument("--variant", default="", choices=VARIANTS)
     parser.add_argument("--languages", default=ALL_LANGS_STR)
     parser.add_argument("--dataset", default="euandi_2024", choices=["euandi_2019", "euandi_2024"])
     parser.add_argument("--source", default="likert", choices=["likert", "speeches"])

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Evaluate the trained mmBERT EU-party classifier on the uniform test split.
+"""Evaluate the trained mmBERT EU-party classifier on a uniform eval split.
 
-Loads the saved model + manifest, runs argmax(logits) inference on test.parquet
-(the same inference rule classify_speeches.py uses), and reports:
+Defaults to the production ECR+ID-collapsed checkpoint and its own collapsed split
+track. Loads the saved model + manifest, runs argmax(logits) inference on
+<data_dir>/<split>.parquet (the same inference rule classify_speeches.py uses),
+and reports:
   * the confusion matrix (counts and row-normalised recall),
   * the true vs. predicted class histogram — the view that tells whether a class
     (e.g. PPE) is over-predicted where the ground truth is uniform, i.e. residual
@@ -37,8 +39,10 @@ from analysis.europarl_classification import (
     per_language_f1_report,
 )
 
-DEFAULT_MODEL_DIR = os.path.join(PROJECT_ROOT, "mmBERT-base-balanced-train-first")
-DEFAULT_DATA_DIR = os.path.join(PROJECT_ROOT, "data", "EuroParl Custom")
+# The model and the split track have to match: a 6-class collapsed checkpoint fed the
+# 7-party splits would silently drop every ECR and ID row via load_split(keep_labels=).
+DEFAULT_MODEL_DIR = os.path.join(PROJECT_ROOT, "mmBERT-base-balanced-collapsed")
+DEFAULT_DATA_DIR = os.path.join(PROJECT_ROOT, "data", "EuroParl Custom", "collapsed")
 
 
 def load_model(model_dir, device):

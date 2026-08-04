@@ -873,7 +873,7 @@ def stacked_language_panels(languages_by_model, panel_model_dirs, dataset_plots_
 
     `ylim` is expected to be the limit of THESE models rather than of the whole run, so
     the panels are not stretched to a height neither of them reaches; see main()."""
-    panels = [(model_dir.name, languages_by_model[model_dir])
+    panels = [(model_display_name(model_dir), languages_by_model[model_dir])
               for model_dir in panel_model_dirs if languages_by_model.get(model_dir)]
     if len(panels) < 2:
         print(f"  only {len(panels)} model(s) for the stacked per-language panels, skipping.")
@@ -1531,6 +1531,10 @@ def plot_cross_model_argmax_shares(shares_by_model, dataset_plots_dir, ylim):
             # prints -- empty. A single-method scope keeps the run-wide `ylim`, which is
             # what makes it comparable with the per-model figures.
             None if method is None else ylim,
+            # The series are keyed by result-directory name, since that is what the
+            # colour lookup and the share indexing use; the legend shows the official
+            # name instead, as every other figure does.
+            series_labels=pcp.MODEL_DISPLAY_NAME,
             layout=CROSS_MODEL_LAYOUT)
 
 

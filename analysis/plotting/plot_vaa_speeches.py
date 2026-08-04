@@ -1,10 +1,15 @@
 import argparse
 import re
+import sys
 from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
 import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from utils import VARIANT_LABELS
 
 from plot_vaa_per_language import (
     party_order_and_colors,
@@ -19,9 +24,8 @@ from plot_vaa_variants_grouped import (
 )
 
 VAA_SPEECHES_PATTERN = re.compile(
-    r"^vaa_speeches(?P<variant>|_negated|_question)_(?P<langs>[a-z,]+)\.csv$"
+    r"^vaa_speeches(?P<variant>|_negated)_(?P<langs>[a-z,]+)\.csv$"
 )
-VARIANT_LABELS = {"": "base", "_negated": "negated", "_question": "question"}
 
 
 def find_speech_vaa_csvs(model_dir: Path) -> dict[str, Path]:

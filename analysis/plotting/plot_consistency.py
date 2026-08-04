@@ -15,7 +15,7 @@ from scipy.stats import pearsonr
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from utils import LIKERT_MAX, LIKERT_MIDPOINT, flip_likert, likert_to_stance
+from utils import LIKERT_MAX, LIKERT_MIDPOINT, VARIANT_LABELS, flip_likert, likert_to_stance
 
 
 RED_WHITE_GREEN = mcolors.LinearSegmentedColormap.from_list(
@@ -125,7 +125,6 @@ def compute_consistency_matrices(
 def save_heatmap(
     matrix: np.ndarray,
     languages: list[str],
-    title: str,
     colorbar_label: str,
     out_path: Path,
     cmap,
@@ -142,7 +141,6 @@ def save_heatmap(
     ax.set_xticklabels(languages, rotation=45, ha="right", fontsize=8)
     ax.set_yticks(range(n_q))
     ax.set_yticklabels([f"Q{i+1}" for i in range(n_q)], fontsize=8)
-    ax.set_title(title, fontsize=11, pad=8)
     if annotate:
         for i in range(n_q):
             for j in range(n_l):
@@ -151,7 +149,7 @@ def save_heatmap(
                     ax.text(j, i, f"{v:.2f}", ha="center", va="center",
                             fontsize=5.5, color="black")
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
+    fig.savefig(out_path, dpi=300)
     plt.close(fig)
     print(f"  Saved {out_path.relative_to(out_path.parents[3])}")
 
@@ -159,7 +157,6 @@ def save_heatmap(
 def save_boxplot_by_language(
     matrix: np.ndarray,
     languages: list[str],
-    title: str,
     ylabel: str,
     out_path: Path,
     ymin: float | None = None,
@@ -172,18 +169,16 @@ def save_boxplot_by_language(
                medianprops=dict(color="navy", linewidth=1.5))
     ax.set_xticklabels(languages, rotation=45, ha="right", fontsize=8)
     ax.set_ylabel(ylabel)
-    ax.set_title(title, fontsize=11, pad=8)
     if ymin is not None or ymax is not None:
         ax.set_ylim(ymin, ymax)
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
+    fig.savefig(out_path, dpi=300)
     plt.close(fig)
     print(f"  Saved {out_path.relative_to(out_path.parents[3])}")
 
 
 def save_boxplot_by_question(
     matrix: np.ndarray,
-    title: str,
     ylabel: str,
     out_path: Path,
     ymin: float | None = None,
@@ -198,11 +193,10 @@ def save_boxplot_by_question(
                medianprops=dict(color="navy", linewidth=1.5))
     ax.set_xticklabels(question_labels, rotation=45, ha="right", fontsize=8)
     ax.set_ylabel(ylabel)
-    ax.set_title(title, fontsize=11, pad=8)
     if ymin is not None or ymax is not None:
         ax.set_ylim(ymin, ymax)
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
+    fig.savefig(out_path, dpi=300)
     plt.close(fig)
     print(f"  Saved {out_path.relative_to(out_path.parents[3])}")
 
@@ -210,7 +204,7 @@ def save_boxplot_by_question(
 def process_model(model_dir: Path) -> None:
     print(f"\nProcessing: {model_dir.name}")
 
-    variant_specs = [("", "base"), ("_negated", "negated"), ("_question", "question")]
+    variant_specs = list(VARIANT_LABELS.items())
     answers_per_variant: list[dict[str, np.ndarray]] = []
 
     for suffix, label in variant_specs:
@@ -232,7 +226,6 @@ def process_model(model_dir: Path) -> None:
 
     save_heatmap(
         fraction_mat, languages,
-        title=f"{model_dir.name} – Fraction of most-frequent answer",
         colorbar_label="Fraction of most-frequent answer",
         out_path=out_dir / "language_fraction_consistency.png",
         cmap="RdYlGn", vmin=0.2, vmax=1.0,
@@ -240,7 +233,6 @@ def process_model(model_dir: Path) -> None:
 
     save_heatmap(
         mean_mat, languages,
-        title=f"{model_dir.name} – Mean answer (−1 disagree → +1 agree)",
         colorbar_label="Mean answer",
         out_path=out_dir / "language_mean_consistency.png",
         cmap=RED_WHITE_GREEN, vmin=-1.0, vmax=1.0,
@@ -248,7 +240,6 @@ def process_model(model_dir: Path) -> None:
 
     save_heatmap(
         variance_mat, languages,
-        title=f"{model_dir.name} – Variance of answers (−1 to +1 scale)",
         colorbar_label="Variance",
         out_path=out_dir / "language_variance_consistency.png",
         cmap="YlOrRd", vmin=0.0, vmax=1.0,
@@ -256,7 +247,6 @@ def process_model(model_dir: Path) -> None:
 
     save_heatmap(
         correlation_mat, languages,
-        title=f"{model_dir.name} – Mean pairwise Pearson r between variant answer vectors",
         colorbar_label="Mean pairwise Pearson r",
         out_path=out_dir / "language_correlation_consistency.png",
         cmap="RdYlGn", vmin=-1.0, vmax=1.0,
@@ -264,7 +254,6 @@ def process_model(model_dir: Path) -> None:
 
     save_boxplot_by_language(
         fraction_mat, languages,
-        title=f"{model_dir.name} – Fraction of most-frequent answer per language (distribution over questions)",
         ylabel="Fraction of most-frequent answer",
         out_path=out_dir / "boxplot_fraction_by_language.png",
         ymin=0.2, ymax=1.0,
@@ -272,7 +261,6 @@ def process_model(model_dir: Path) -> None:
 
     save_boxplot_by_question(
         fraction_mat,
-        title=f"{model_dir.name} – Fraction of most-frequent answer per question (distribution over languages)",
         ylabel="Fraction of most-frequent answer",
         out_path=out_dir / "boxplot_fraction_by_question.png",
         ymin=0.2, ymax=1.0,
@@ -280,7 +268,6 @@ def process_model(model_dir: Path) -> None:
 
     save_boxplot_by_language(
         correlation_mat, languages,
-        title=f"{model_dir.name} – Mean pairwise Pearson r per language (distribution over questions)",
         ylabel="Mean pairwise Pearson r",
         out_path=out_dir / "boxplot_correlation_by_language.png",
         ymin=-1.0, ymax=1.0,
@@ -288,7 +275,6 @@ def process_model(model_dir: Path) -> None:
 
     save_boxplot_by_question(
         correlation_mat,
-        title=f"{model_dir.name} – Mean pairwise Pearson r per question (distribution over languages)",
         ylabel="Mean pairwise Pearson r",
         out_path=out_dir / "boxplot_correlation_by_question.png",
         ymin=-1.0, ymax=1.0,
@@ -296,7 +282,6 @@ def process_model(model_dir: Path) -> None:
 
     save_boxplot_by_question(
         mean_mat,
-        title=f"{model_dir.name} – Mean answer per question (distribution over languages)",
         ylabel="Mean answer (−1 disagree → +1 agree)",
         out_path=out_dir / "boxplot_mean_by_question.png",
         ymin=-1.0, ymax=1.0,

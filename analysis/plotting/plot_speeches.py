@@ -16,11 +16,9 @@ _ANALYSIS_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ANALYSIS_DIR.parent))
 sys.path.insert(0, str(_ANALYSIS_DIR))
 
-from utils import likert_to_stance
+from utils import VARIANTS, VARIANT_LABELS, likert_to_stance
 from evaluate_euandi import detect_likert_languages, likert_means_per_statement
 
-VARIANTS = [("", "base"), ("_negated", "negated"), ("_question", "question")]
-VARIANT_LABELS = dict(VARIANTS)
 DESIRED_ALPHA = 0.7
 PAIRWISE_R_LABEL = "Mean pairwise Pearson r"
 RED_WHITE_GREEN = mcolors.LinearSegmentedColormap.from_list(
@@ -170,7 +168,7 @@ def rows_without_nan(matrix: np.ndarray) -> list[np.ndarray]:
 
 def plot_speech_consistency(model_dir: Path, out_dir: Path) -> None:
     arrays_per_variant: list[dict[str, np.ndarray]] = []
-    for suffix, label in VARIANTS:
+    for suffix, label in VARIANT_LABELS.items():
         csv_path = find_scored_csv(model_dir, suffix)
         if csv_path is None:
             print(f"  No scored {label} speeches found, skipping that variant.")
@@ -207,7 +205,7 @@ def plot_speech_consistency(model_dir: Path, out_dir: Path) -> None:
 
 
 CRONBACH_SPEECH_PATTERN = re.compile(
-    r"^cronbach_speeches(?P<variant>|_negated|_question)_(?P<langs>[a-z,]+)\.csv$"
+    r"^cronbach_speeches(?P<variant>|_negated)_(?P<langs>[a-z,]+)\.csv$"
 )
 
 

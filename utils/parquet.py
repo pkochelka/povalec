@@ -3,6 +3,8 @@ import pyarrow.parquet as pq
 
 
 def write_parquet_chunked(df, path, chunk_size=100_000):
+    """Write `df` to `path` in row-group chunks, so a multi-GB frame never has to be
+    materialised as one arrow table."""
     writer = None
     try:
         for start in range(0, len(df), chunk_size):

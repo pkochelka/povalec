@@ -19,8 +19,9 @@ pyarrow>=14
 torch>=2.2
 transformers>=4.46
 accelerate>=1.1.0
-peft>=0.17          # LoRA fine-tuning in analysis/train_ideo_encoder.py
 datasets>=2.19
+# Not imported directly: sentencepiece and protobuf are the tokenizer backends
+# transformers loads at runtime for the mmBERT / XLM-R style models used here.
 sentencepiece>=0.2.0
 protobuf>=4.21
 
@@ -30,19 +31,23 @@ httpx>=0.27
 python-dotenv>=1.0
 tqdm>=4.66
 
-# --- EU&I / RDF parsing and CLI ---
+# --- EU&I scraping ---
 beautifulsoup4>=4.12
-rdflib>=7.0
-jsonargparse>=4.27
 
-# --- Dataset preprocessing only ---
-# Used solely by "data/EuroParl Custom/{downloads,lid}.py"; the analysis,
-# training and inference scripts do not import these. They are the main
-# portability hazards across Python versions, so install them only if you are
-# rebuilding the dataset:
-#   - fasttext builds from C++ source and lacks official wheels for recent
-#     Python; on 3.12+ prefer the prebuilt 'fasttext-wheel'.
-#   - trankit pins older transformers/torch and may downgrade them; consider a
-#     separate environment if it conflicts with the versions above.
+# --- Corpus rebuild only ---
+# Needed only to rebuild "data/EuroParl Custom" from scratch via
+# preprocessing/{fetch_raw_data,europarl_rdf_query,europarl_lid_filter}.py.
+# The analysis, training and inference scripts do not import them.
+#   - huggingface_hub also arrives with datasets/transformers above; listed
+#     here because fetch_raw_data.py imports it directly.
+#   - rdflib is used solely by europarl_rdf_query.py.
+rdflib>=7.0
+huggingface_hub>=0.24
+#
+# fastText is needed by europarl_lid_filter.py alone, and is the main
+# portability hazard here, so it is left commented out. The script accepts
+# either binding: 'fasttext-wheel' is prebuilt through 3.12, 'fasttext-predict'
+# is prediction-only with 3.13 wheels, and plain 'fasttext' builds from C++
+# source. None of them installs on 3.14 yet - run that one step on 3.10-3.13.
 # fasttext-wheel>=0.9.2
-# trankit>=1.1.0
+# fasttext-predict>=0.9.2

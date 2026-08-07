@@ -2,9 +2,10 @@
 Strip European Parliament political-group / party names out of the speech text.
 
 Reads  data/EuroParl Custom/{train,dev,test}.parquet
-Writes data/EuroParl Custom/{train,dev,test}_cleaned.parquet
+Writes data/EuroParl Custom/cleaned/{train,dev,test}.parquet
 and prints, per split, how many name occurrences were removed for each of the
-seven canonical EP groups.
+seven canonical EP groups. The `cleaned/` subdirectory, same filenames, is what
+build_collapsed_splits.py and analysis/plotting/plot_speech_counts.py read.
 
 Why this exists
 ---------------
@@ -59,6 +60,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 DATA_DIR = Path("data/EuroParl Custom")
+OUT_DIR = DATA_DIR / "cleaned"      # what build_collapsed_splits.py reads
 SPLITS = ["train", "dev", "test"]
 TEXT_COL = "text"
 PAR_CHUNK = 4_000            # rows per task handed to a worker process
@@ -359,10 +361,11 @@ def _clean_chunk(texts: list) -> tuple[list, Counter]:
 
 def process_split(split: str) -> Counter:
     src = DATA_DIR / f"{split}.parquet"
-    dst = DATA_DIR / f"{split}_cleaned.parquet"
+    dst = OUT_DIR / f"{split}.parquet"
     if not src.exists():
         print(f"[skip] {src} not found")
         return Counter()
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     counts: Counter = Counter()
     reader = pq.ParquetFile(src)
@@ -401,7 +404,7 @@ def process_split(split: str) -> Counter:
             writer.close()
 
     total = sum(counts.values())
-    print(f"\n[{split}] {rows:,} rows  ->  {dst.name}  "
+    print(f"\n[{split}] {rows:,} rows  ->  {dst}  "
           f"({total:,} name occurrences removed)")
     width = max(len(g) for g in CANON)
     for g in CANON:

@@ -70,14 +70,61 @@ basis.
 ### Classifier track
 
 ```text
+preprocessing/fetch_raw_data.py           # download the three corpora + lid.176.bin
+preprocessing/europarl_rdf_query.py       # LinkedEP *.ttl -> multi-europarl.csv
+preprocessing/europarl_lid_filter.py      # -> multi-europarl-lang_id.csv   [fastText]
 preprocessing/preprocess_data.py          # EuroParl + ParlEE + EU Debates -> parquet
 preprocessing/split_preprocessed_data.py  # group-disjoint, class-balanced splits
-preprocessing/clean_party_names.py        # strip self-identifying group names from text
+preprocessing/clean_party_names.py        # strip group names -> cleaned/{split}.parquet
 preprocessing/build_collapsed_splits.py   # merge ECR+ID, re-split from scratch
 analysis/classifier_training.py                        # logit-adjusted CE, natural priors
 analysis/classifier_training_for_balanced_collapsed.py # plain CE, balanced train
 analysis/test_classifier.py                            # confusion matrix, per-class F1
 ```
+
+`preprocessing/run_preprocessing.py` runs those seven in order, skipping any step whose
+outputs already exist:
+
+```bash
+python preprocessing/run_preprocessing.py --dry-run          # plan + commands, runs nothing
+python preprocessing/run_preprocessing.py --languages en de  # rehearse on two dumps
+python preprocessing/run_preprocessing.py                    # the real thing
+python preprocessing/run_preprocessing.py --from lid-filter  # resume after a failure
+```
+
+`--only`, `--skip`, `--to`, `--force` and `--extra 'step:args'` (passthrough to one
+script) shape the run.
+
+**Python version.** Everything runs on 3.10-3.14 except `europarl_lid_filter.py`, which
+needs a fastText binding: `fasttext-wheel` has wheels through 3.12, `fasttext-predict`
+through 3.13, and neither builds on 3.14 without a C++ toolchain. The driver probes for a
+binding and refuses to start rather than failing three steps in; point that one step at
+another interpreter with `--fasttext-python <path>` and keep the rest on your normal one.
+
+`fetch_raw_data.py` pulls ~9 GB; run it with `--dry-run` first, and `--source` /
+`--languages` to fetch a subset. Downloads resume and are checksum-verified.
+The RDF query is the expensive step: it loads every Turtle dump into one
+`rdflib.Graph`, so use `--languages` when testing.
+
+#### Data sources
+
+| Corpus | Provenance | Licence |
+| --- | --- | --- |
+| ParlEE EP plenary speeches (2009-2019) | Harvard Dataverse, DOI [10.7910/DVN/VOPK0E](https://doi.org/10.7910/DVN/VOPK0E) | see the Dataverse record |
+| EU Debates (2009-2023) | HF [`coastalcph/eu_debates`](https://huggingface.co/datasets/coastalcph/eu_debates), Chalkidis & Brandl (2024) | CC-BY-NC-SA-4.0 |
+| LinkedEP / Talk of Europe | DANS, DOI [10.17026/dans-x62-ew3m](https://doi.org/10.17026/dans-x62-ew3m), van Aggelen et al. (2016) | CC0-1.0 |
+| fastText `lid.176.bin` | Joulin et al. (2016), Meta AI | CC-BY-SA-3.0 |
+
+`europarl_rdf_query.py` and `europarl_lid_filter.py` are adapted from
+**Paul Lerner's** [21-EuroParl](https://github.com/PaulLerner/21-EuroParl)
+(Lerner and Yvon, 2025) — he is the original author of both steps. His code is
+MIT-licensed; the notice is reproduced in `preprocessing/LICENSE.21-EuroParl`
+and each file's docstring records what we changed.
+
+**We stop where his pipeline continues.** Upstream, the multiparallel CSV goes on
+to bertalign sentence alignment and `merge_align.ipynb`. We skip both and keep
+every speech, at speech granularity, in `multi-europarl-lang_id.csv`: the party
+classifier wants volume and natural per-language coverage, not alignment.
 
 ### Stance track
 

@@ -71,7 +71,6 @@ class ClassifierConfig:
     model: str
     prompt_template: str
     descriptions: dict
-    second_provider: bool
     max_tokens: int
 
 
@@ -128,7 +127,6 @@ def classify_speech(text, config):
             response = call_api(
                 prompt,
                 config.model,
-                second_provider=config.second_provider,
                 max_tokens=config.max_tokens,
             )
             choice = response["choices"][0]
@@ -242,7 +240,6 @@ def parse_args():
     parser.add_argument("--output_dir", default=DEFAULT_OUTPUT_DIR, type=Path)
     parser.add_argument("--max_workers", default=10, type=int)
     parser.add_argument("--limit", default=None, type=int)
-    parser.add_argument("--second_provider", default=True, action="store_true")
     parser.add_argument("--max_tokens", default=1000, type=int)
     parser.add_argument("--seed", default=42, type=int)
     return parser.parse_args()
@@ -256,7 +253,6 @@ def main():
         model=args.model,
         prompt_template=spec["prompt"],
         descriptions=spec["label_descriptions"],
-        second_provider=args.second_provider,
         max_tokens=args.max_tokens,
     )
 

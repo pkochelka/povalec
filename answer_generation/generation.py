@@ -17,7 +17,7 @@ import argparse
 import json
 import os
 import sys
-from concurrent.futures import as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Callable
 
@@ -26,7 +26,7 @@ import pandas as pd
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 
-from utils import ALL_LANGS_STR, VARIANTS, make_pool, save_checkpoint
+from utils import ALL_LANGS_STR, VARIANTS, save_checkpoint
 
 CHECKPOINT_EVERY = 100
 
@@ -40,7 +40,7 @@ class Track:
     primary: str
     # prompt-file path -> {language: [unit, ...]}
     load_units: Callable[[str], dict]
-    # (statement, unit, model, second_provider) -> {column_prefix: value}
+    # (statement, unit, model) -> {column_prefix: value}
     call: Callable[..., dict]
     # Which statements jsonl this track reads for a given variant.
     statements_file: Callable[[str], str]
@@ -82,7 +82,7 @@ def _still_failed(existing, track, keys):
 
 
 def generate(track, df, model, variant, units, languages, dataset,
-             model_dir=None, max_workers=8, second_provider=False):
+             model_dir=None, max_workers=8):
     """Full run: every (statement, language, prompt variant) cell, resumable."""
     model_dir = model_dir or model
     path = output_path(track, dataset, model_dir, languages, variant)
@@ -114,12 +114,12 @@ def generate(track, df, model, variant, units, languages, dataset,
     else:
         already_done = 0
 
-    with make_pool(max_workers, second_provider) as pool:
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {}
         for (i, _language, j), (statement, unit, lang_variant) in tasks.items():
             if i in results and f"{track.primary}_{lang_variant}_v{j}" in results[i]:
                 continue
-            future = pool.submit(track.call, statement, unit, model, second_provider)
+            future = pool.submit(track.call, statement, unit, model)
             futures[future] = (i, j, lang_variant, statement)
 
         for completed, future in enumerate(as_completed(futures), already_done + 1):
@@ -143,7 +143,7 @@ def generate(track, df, model, variant, units, languages, dataset,
 
 
 def patch(track, df, model, variant, units, languages, dataset,
-          model_dir=None, max_workers=8, second_provider=False):
+          model_dir=None, max_workers=8):
     """Refill only the cells that came back empty, in place."""
     model_dir = model_dir or model
     path = output_path(track, dataset, model_dir, languages, variant)
@@ -168,9 +168,9 @@ def patch(track, df, model, variant, units, languages, dataset,
         return
 
     print(f"Patching {len(tasks)} {track.failure_noun} responses in {path}", flush=True)
-    with make_pool(max_workers, second_provider) as pool:
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {
-            pool.submit(track.call, statement, unit, model, second_provider): key
+            pool.submit(track.call, statement, unit, model): key
             for key, (statement, unit) in tasks.items()
         }
         for completed, future in enumerate(as_completed(futures), 1):
@@ -187,7 +187,7 @@ def patch(track, df, model, variant, units, languages, dataset,
 
 
 def overwrite_changed(track, df, model, variant, units, languages, dataset,
-                      model_dir=None, max_workers=8, second_provider=False, dry_run=False):
+                      model_dir=None, max_workers=8, dry_run=False):
     """Regenerate, in place, only the cells whose statement text changed since the
     file was written -- i.e. rows whose statement was rewritten. Detected by
     comparing the stored original_text_<lang_variant> against the current statements
@@ -230,9 +230,9 @@ def overwrite_changed(track, df, model, variant, units, languages, dataset,
     if dry_run:
         return
 
-    with make_pool(max_workers, second_provider) as pool:
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {
-            pool.submit(track.call, statement, unit, model, second_provider):
+            pool.submit(track.call, statement, unit, model):
                 (key, statement, original_col)
             for key, (statement, unit, original_col) in tasks.items()
         }
@@ -261,7 +261,6 @@ def parse_args(track):
                         default=os.path.join(_ROOT, "prompts", track.default_prompts), type=str)
     parser.add_argument("--dataset", default="euandi_2024", type=str,
                         choices=["euandi_2019", "euandi_2024"])
-    parser.add_argument("--second_provider", action="store_true")
     parser.add_argument("--patch", action="store_true",
                         help="Regenerate only the failed/refused responses in an existing "
                              "output and patch them in place.")
@@ -290,7 +289,7 @@ def main(track):
     common = dict(
         df=df, model=args.model, variant=args.variant, units=units, languages=languages,
         dataset=args.dataset, model_dir=args.model_dir or args.model,
-        max_workers=args.max_workers, second_provider=args.second_provider,
+        max_workers=args.max_workers,
     )
     if args.overwrite_changed:
         overwrite_changed(track, dry_run=args.dry_run, **common)

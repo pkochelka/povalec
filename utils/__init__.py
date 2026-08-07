@@ -1,12 +1,7 @@
 from .utils import save_checkpoint, extract_json, load_dataframe
 from .sampling import water_fill
 from .parquet import write_parquet_chunked
-from .api_caller import (
-    call_api,
-    make_pool,
-    second_provider_num_keys,
-    SECOND_PROVIDER_WORKERS_PER_KEY,
-)
+from .api_caller import call_api
 from .likert import (
     LIKERT_MIN,
     LIKERT_MAX,

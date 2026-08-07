@@ -41,8 +41,6 @@ pip install -r requirements.txt
 ```ini
 BASE_URL=     # OpenAI-compatible endpoint
 AUTH_TOKEN=   # optional bearer token
-BASE_URL2=    # optional second provider
-KEY1=         # KEY1..KEYn: second-provider keys, one worker pool pinned per key
 ```
 
 `HF_TOKEN` (read from `~/.env.local`) is only needed to train classifiers. Scripts bootstrap

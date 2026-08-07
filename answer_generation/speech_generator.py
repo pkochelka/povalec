@@ -29,15 +29,14 @@ def load_units(path: str) -> dict[str, list]:
         return json.load(f)
 
 
-def call_speech(statement, unit, model, second_provider=False):
+def call_speech(statement, unit, model):
     task = unit
     prompt = f'{task}\n"{statement}"\n'
     for attempt in range(MAX_RETRIES):
         try:
             # Thinking off: the budget is for the speech, not an internal deliberation
             # that can exhaust max_tokens before any content is emitted.
-            response = call_api(prompt, model, second_provider=second_provider,
-                                enable_thinking=False)
+            response = call_api(prompt, model, enable_thinking=False)
             choice = response["choices"][0]
             content = choice["message"]["content"]
             if content:

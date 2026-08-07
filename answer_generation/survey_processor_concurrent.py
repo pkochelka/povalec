@@ -35,13 +35,13 @@ def load_units(path: str) -> dict[str, list]:
     }
 
 
-def call_survey(statement, unit, model, second_provider=False):
+def call_survey(statement, unit, model):
     template, options = unit
     prompt = template.format(question=statement, options=options)
     last_content = None
     for attempt in range(MAX_RETRIES):
         try:
-            response = call_api(prompt, model, second_provider=second_provider)
+            response = call_api(prompt, model)
             content = response["choices"][0]["message"]["content"]
             if content is None:
                 finish_reason = response["choices"][0].get("finish_reason")

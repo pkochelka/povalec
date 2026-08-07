@@ -124,7 +124,7 @@ def judge_pool(model, track, prompt_template, args):
     with ThreadPoolExecutor(max_workers=args.max_workers) as executor:
         futures = {
             executor.submit(judge_one, row["statement_text"], row["answer_text"],
-                            args.judge_model, prompt_template, args.second_provider): index
+                            args.judge_model, prompt_template): index
             for index, row in pool.iterrows() if index not in choices
         }
         for done, future in enumerate(as_completed(futures), 1):
@@ -151,7 +151,6 @@ def judge_pool(model, track, prompt_template, args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--judge_model", default="deepseek-v4-pro")
-    parser.add_argument("--second_provider", default=True, action="store_true")
     parser.add_argument("--models", default=",".join(DEFAULT_MODELS),
                         help="Comma-separated model dirs to judge.")
     parser.add_argument("--tracks", default="speeches,reasons",

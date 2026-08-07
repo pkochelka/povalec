@@ -122,12 +122,12 @@ def stratified_sample(observations, target_total, min_per_lang, seed):
     return sample
 
 
-def judge_one(statement, reason, model, prompt_template, second_provider, max_retries=4):
+def judge_one(statement, reason, model, prompt_template, max_retries=4):
     prompt = prompt_template.format(statement=statement, text=reason[:MAX_REASON_CHARS])
     last_content = None
     for attempt in range(max_retries):
         try:
-            response = call_api(prompt, model, max_tokens=300, temperature=0.0, second_provider=second_provider)
+            response = call_api(prompt, model, max_tokens=300, temperature=0.0)
             content = response["choices"][0]["message"]["content"]
             if content is None:
                 raise ValueError(f"null content (finish_reason={response['choices'][0].get('finish_reason')!r})")
@@ -150,14 +150,14 @@ def load_checkpoint(path):
         return {int(k): v for k, v in json.load(f).items()}
 
 
-def run_judge(sample, model, prompt_template, second_provider, max_workers, checkpoint_path):
+def run_judge(sample, model, prompt_template, max_workers, checkpoint_path):
     choices = load_checkpoint(checkpoint_path)
     if choices:
         print(f"Resuming: {len(choices)}/{len(sample)} already judged", flush=True)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             executor.submit(judge_one, row["statement"], row["reason"],
-                            model, prompt_template, second_provider): index
+                            model, prompt_template): index
             for index, row in sample.iterrows() if index not in choices
         }
         for done, future in enumerate(as_completed(futures), 1):
@@ -223,7 +223,6 @@ def parse_args():
     parser.add_argument("--target_total", default=3000, type=int)
     parser.add_argument("--min_per_lang", default=100, type=int)
     parser.add_argument("--max_workers", default=4, type=int)
-    parser.add_argument("--second_provider", action="store_true")
     parser.add_argument("--top_discrepancies", default=100, type=int)
     return parser.parse_args()
 
@@ -253,7 +252,7 @@ def main():
     sample = stratified_sample(observations, args.target_total, args.min_per_lang, SEED)
     prompt_template = load_prompt()
     choices = run_judge(sample, args.judge_model, prompt_template,
-                        args.second_provider, args.max_workers, checkpoint_path)
+                        args.max_workers, checkpoint_path)
 
     paired = build_paired(sample, choices)
     paired.to_csv(paired_path, sep=";", index=False, encoding="utf-8-sig")

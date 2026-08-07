@@ -37,7 +37,6 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--prompt", default=DEFAULT_PROMPT)
     parser.add_argument("--judge_model", default="deepseek-v4-pro")
-    parser.add_argument("--second_provider", default=True, action="store_true")
     parser.add_argument("--labeled", default=LABELED)
     parser.add_argument("--meta", default=META)
     parser.add_argument("--max_workers", default=10, type=int)
@@ -57,7 +56,7 @@ def main():
     df["human_choice"] = stance_to_likert(df["choice"]).round().astype(int)
 
     print(f"Prompt   : {args.prompt}")
-    print(f"Judge    : {args.judge_model} (second_provider={args.second_provider})")
+    print(f"Judge    : {args.judge_model}")
     print(f"Speeches : {len(df)} annotated rows")
     if args.dry_run:
         row = df.iloc[0]
@@ -69,7 +68,7 @@ def main():
     with ThreadPoolExecutor(max_workers=args.max_workers) as ex:
         preds = list(ex.map(
             lambda r: judge_one(r["statement_text"], r["answer_text"],
-                                args.judge_model, prompt_template, args.second_provider),
+                                args.judge_model, prompt_template),
             [r for _, r in df.iterrows()]))
     df["llm_choice"] = preds
 

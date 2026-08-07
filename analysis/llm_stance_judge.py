@@ -101,12 +101,12 @@ def balanced_sample(pool):
     return sample
 
 
-def judge_one(statement, text, model, prompt_template, second_provider, max_retries=4):
+def judge_one(statement, text, model, prompt_template, max_retries=4):
     prompt = prompt_template.format(statement=statement, text=text[:MAX_TEXT_CHARS])
     last_content = None
     for attempt in range(max_retries):
         try:
-            response = call_api(prompt, model, max_tokens=300, temperature=0.0, second_provider=second_provider)
+            response = call_api(prompt, model, max_tokens=300, temperature=0.0)
             content = response["choices"][0]["message"]["content"]
             if content is None:
                 raise ValueError(f"null content (finish_reason={response['choices'][0].get('finish_reason')!r})")
@@ -132,7 +132,6 @@ def load_checkpoint(checkpoint_path):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--judge_model", default="kimi-k3")
-    parser.add_argument("--second_provider", default=True, action="store_true")
     parser.add_argument("--limit", default=40000, type=int,
                         help="Max speeches to label; default labels the whole pool.")
     parser.add_argument("--balanced", action="store_true",
@@ -198,7 +197,7 @@ def main():
         futures = {
             pool_executor.submit(
                 judge_one, row["statement_text"], row["answer_text"],
-                args.judge_model, prompt_template, args.second_provider,
+                args.judge_model, prompt_template,
             ): index
             for index, row in sample.iterrows() if index not in choices
         }

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import argparse
 import os
-import sys
 import json
 import numpy as np
 from scipy.sparse import hstack
@@ -9,8 +8,6 @@ from sklearn.feature_extraction.text import HashingVectorizer
 from sklearn.linear_model import SGDClassifier
 from sklearn.metrics import f1_score, accuracy_score
 from sklearn.utils.class_weight import compute_class_weight
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from analysis.europarl_classification import (
     PARTY_COLUMN,

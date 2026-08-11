@@ -1,6 +1,5 @@
 import argparse
 import re
-import sys
 from pathlib import Path
 
 import matplotlib
@@ -12,9 +11,8 @@ from matplotlib.cbook import boxplot_stats
 from matplotlib.patches import Patch
 from scipy.stats import spearmanr
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-from utils import FALLBACK_PARTY_COLOR, PARTY_COLORS, PARTY_DISPLAY_ORDER, VARIANT_LABELS
+from analysis.core import model_display_name
+from utils import FALLBACK_PARTY_COLOR, PARTY_COLORS, PARTY_DISPLAY_ORDER, VARIANT_LABELS, VARIANT_PATTERN
 
 from analysis.evaluate_euandi import (
     DEFAULT_POSITIONS, POSITION_CHOICES, load_party_positions, positions_path,
@@ -37,23 +35,23 @@ VAA_SOURCE_FOR_CLASSIFIER_SOURCE = {"speeches": "vaa_speeches", "reasons": "vaa_
 STANCE_SOURCE_FOR_CLASSIFIER_SOURCE = {"speeches": "speeches", "reasons": "likert"}
 
 SPEECHES_CLASSIFIED_PATTERN = re.compile(
-    r"^speeches_[a-z]{2}(?:,[a-z]{2})*(?P<variant>|_negated)_classified\.csv$"
+    r"^speeches_[a-z]{2}(?:,[a-z]{2})*" + VARIANT_PATTERN + r"_classified\.csv$"
 )
 REASONS_CLASSIFIED_PATTERN = re.compile(
-    r"^(?!speeches_)[a-z]{2}(?:,[a-z]{2})*(?P<variant>|_negated)_classified\.csv$"
+    r"^(?!speeches_)[a-z]{2}(?:,[a-z]{2})*" + VARIANT_PATTERN + r"_classified\.csv$"
 )
 VAA_LIKERT_PATTERN = re.compile(
-    r"^vaa(?P<variant>|_negated)_(?P<languages>[a-z]{2}(?:,[a-z]{2})*)\.csv$"
+    r"^vaa" + VARIANT_PATTERN + r"_(?P<languages>[a-z]{2}(?:,[a-z]{2})*)\.csv$"
 )
 VAA_SPEECHES_PATTERN = re.compile(
-    r"^vaa_speeches(?P<variant>|_negated)_(?P<languages>[a-z]{2}(?:,[a-z]{2})*)\.csv$"
+    r"^vaa_speeches" + VARIANT_PATTERN + r"_(?P<languages>[a-z]{2}(?:,[a-z]{2})*)\.csv$"
 )
 
 PREDICTED_PARTY_COLUMN_PATTERN = re.compile(
-    r"^predicted_party_(?P<language>[a-z]{2})(?P<variant>|_negated)_v(?P<variant_idx>\d+)$"
+    r"^predicted_party_(?P<language>[a-z]{2})" + VARIANT_PATTERN + r"_v(?P<variant_idx>\d+)$"
 )
 PARTY_PROBABILITY_COLUMN_PATTERN = re.compile(
-    r"^party_prob_(?P<party_slug>.+?)_(?P<language>[a-z]{2})(?P<variant>|_negated)_v(?P<variant_idx>\d+)$"
+    r"^party_prob_(?P<party_slug>.+?)_(?P<language>[a-z]{2})" + VARIANT_PATTERN + r"_v(?P<variant_idx>\d+)$"
 )
 
 
@@ -575,28 +573,6 @@ GROUP_WIDTH = 0.86
 # writes it -- except gpt-oss, whose lowercase house styling reads as a typo beside a
 # dozen capitalised names. Anything not listed falls through to the directory name, so
 # a new model dir still plots.
-MODEL_DISPLAY_NAME = {
-    "deepseek-v4-pro": "DeepSeek V4 Pro",
-    "gemini3.5-flash": "Gemini 3.5 Flash",
-    "gemma-4-12b": "Gemma 4 12B",
-    "gemma-4-31b": "Gemma 4 31B",
-    "glm-5.2": "GLM-5.2",
-    "gpt-5.6-luna": "GPT 5.6-Luna",
-    "gpt-oss-120b": "GPT OSS 120B",
-    "granite-4.1-8b": "Granite 4.1 8B",
-    "grok-4.5": "Grok 4.5",
-    "kimi-k2.7": "Kimi K2.7 Code",
-    "kimi-k3": "Kimi K3",
-    "mistral-medium-3.5": "Mistral Medium 3.5",
-    "qwen3.5-122b": "Qwen3.5 122B",
-}
-
-
-def model_display_name(name):
-    """Official name for a result directory, for figures. Takes a name or a Path."""
-    return MODEL_DISPLAY_NAME.get(getattr(name, "name", name), str(name))
-
-
 def draw_models_party_bars(ax, value_per_model, parties, models, model_cmap,
                            value_label, ylim, label_x=True, scale=1.0):
     """One grouped-bar panel: a bar per (party, model), colour-indexed by the

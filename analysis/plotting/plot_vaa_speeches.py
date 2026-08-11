@@ -1,30 +1,27 @@
 import argparse
 import re
-import sys
 from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from utils import VARIANT_LABELS, VARIANT_PATTERN
 
-from utils import VARIANT_LABELS
-
-from plot_vaa_per_language import (
+from analysis.plotting.plot_vaa_per_language import (
     party_order_and_colors,
     plot_party_ranking,
     plot_per_language_bars,
     plot_per_language_scatter,
 )
-from plot_vaa_variants_grouped import (
+from analysis.plotting.plot_vaa_variants_grouped import (
     plot_party_ranking_per_variant,
     plot_per_language_bars_per_variant,
     plot_party_sensitivity,
 )
 
 VAA_SPEECHES_PATTERN = re.compile(
-    r"^vaa_speeches(?P<variant>|_negated)_(?P<langs>[a-z,]+)\.csv$"
+    r"^vaa_speeches" + VARIANT_PATTERN + r"_(?P<langs>[a-z,]+)\.csv$"
 )
 
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Ask a frontier LLM how strongly each survey reason agrees with its statement.
 
-The judge (default kimi-k2.6) rates each reason text on the same 1-5 Likert
+The judge (default deepseek-v4-pro) rates each reason text on the same 1-5 Likert
 scale the generating model used for its own choice, so likert_to_stance maps
 both onto [-1, 1] and the judge stance can be correlated against the actual
 choice. Samples are stratified so every language gets at least min_per_lang
@@ -10,7 +10,6 @@ reasons, balanced across the five choice values and spread over many statements.
 import argparse
 import json
 import os
-import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -18,10 +17,10 @@ import numpy as np
 import pandas as pd
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, PROJECT_ROOT)
-sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from utils import ALL_LANGS_STR, VARIANTS, call_api, extract_json, likert_to_stance, save_checkpoint
+from utils import ALL_LANGS_STR, VARIANTS, call_api, extract_json, likert_to_stance, save_checkpoint, configure_stdout
+
+configure_stdout()
 
 PROMPT_PATH = os.path.join(PROJECT_ROOT, "prompts", "stance_judge.json")
 LIKERT_CHOICES = (1, 2, 3, 4, 5)
@@ -214,8 +213,8 @@ def parse_args():
     )
     parser.add_argument("--llm", default="deepseek-v4-pro",
                         help="Generating model whose reason/choice outputs are evaluated.")
-    parser.add_argument("--judge_model", default="kimi-k2.6")
-    parser.add_argument("--dataset", default="euandi_2024", choices=["euandi_2019", "euandi_2024"])
+    parser.add_argument("--judge_model", default="deepseek-v4-pro")
+    parser.add_argument("--dataset", default="euandi_2024", choices=["euandi_2024"])
     parser.add_argument("--input", default=None,
                         help="Optional explicit path to a survey_processor_concurrent CSV.")
     parser.add_argument("--variant", default="", choices=VARIANTS)

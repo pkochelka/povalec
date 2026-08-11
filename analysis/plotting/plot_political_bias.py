@@ -1,8 +1,6 @@
 import argparse
 import json
-import os
 import re
-import sys
 from pathlib import Path
 
 import matplotlib
@@ -15,16 +13,14 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Ellipse
 from scipy.stats import gaussian_kde
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-
 from analysis.evaluate_euandi import (
     DEFAULT_POSITIONS,
     POSITION_CHOICES,
     load_party_positions,
     positions_path,
 )
-from analysis.plotting.plot_classified_parties import model_display_name
-from utils import flip_likert, likert_to_stance
+from analysis.core import model_display_name
+from utils import VARIANT_PATTERN, flip_likert, likert_to_stance
 
 NUM_VARIANTS = 8
 NEUTRAL_LIKERT = 3
@@ -59,8 +55,8 @@ FRAMING_SOURCE_MARKER = {
 }
 SOURCE_LABEL = {"likert": "likert", "speeches": "open-ended"}
 LLM_SOURCE_LABEL = {"likert": "reasons (judged)", "speeches": "open-ended (judged)"}
-RESPONSE_CSV = re.compile(r"^(?P<langs>[a-z]{2}(?:,[a-z]{2})+)(?P<variant>|_negated)\.csv$")
-SPEECH_CSV = re.compile(r"^speeches_(?P<langs>[a-z]{2}(?:,[a-z]{2})+)(?P<variant>|_negated)_scored\.csv$")
+RESPONSE_CSV = re.compile(r"^(?P<langs>[a-z]{2}(?:,[a-z]{2})+)" + VARIANT_PATTERN + r"\.csv$")
+SPEECH_CSV = re.compile(r"^speeches_(?P<langs>[a-z]{2}(?:,[a-z]{2})+)" + VARIANT_PATTERN + r"_scored\.csv$")
 RUN_KEYS = ["language", "variant_idx", "framing", "source"]
 
 # --stance-source llm: take both tracks from the LLM stance judge instead of the

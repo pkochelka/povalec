@@ -13,7 +13,6 @@ loads with the same sign), which setup_compass flags on the axis label.
 """
 import argparse
 import json
-import sys
 from pathlib import Path
 
 import matplotlib
@@ -23,14 +22,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-_ANALYSIS_DIR = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_ANALYSIS_DIR.parent))
-sys.path.insert(0, str(_ANALYSIS_DIR))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from evaluate_euandi import EP_GROUP_BY_PARTY
-from plot_political_bias import load_questionnaire, setup_compass
-from plot_party_compass import EP_GROUP_ORDER, load_parties, party_stance_vector
+from utils import EP_GROUP_BY_PARTY
+from analysis.plotting.plot_political_bias import load_questionnaire, setup_compass
+from analysis.plotting.plot_party_compass import EP_GROUP_ORDER, load_parties, party_stance_vector
 
 STAR_SIZE = 520
 LABEL_FONTSIZE = 12

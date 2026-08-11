@@ -45,7 +45,6 @@ against the repository API and then skipped on re-runs unless --force is given.
 import argparse
 import hashlib
 import os
-import sys
 import zipfile
 from pathlib import Path
 
@@ -53,10 +52,8 @@ import requests
 from tqdm import tqdm
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from preprocess_data import LANG_NAME_TO_CODE
+from preprocessing.preprocess_data import LANG_NAME_TO_CODE
 
 DEFAULT_DATA_DIR = PROJECT_ROOT / "data"
 

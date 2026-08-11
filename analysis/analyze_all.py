@@ -4,12 +4,11 @@ import sys
 import os
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-# The progress lines carry check/cross marks; without this a redirected stdout falls
-# back to the console codepage on Windows and the run dies on the first success.
-sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+from utils import ALL_LANGS_STR, VARIANTS, configure_stdout
+from analysis.core import classified_name, responses_name, scored_name, speeches_name, vaa_name
+from analysis.core.positions import positions_path
 
-from utils import ALL_LANGS_STR, VARIANTS
+configure_stdout()
 
 LANGUAGES = ALL_LANGS_STR
 MAX_RETRIES = 1
@@ -35,22 +34,21 @@ def resolve_args(extra_args, positions, dataset):
            .replace(TABLES_PLACEHOLDER, _tables_dir(dataset))
         for arg in extra_args
     ]
-DATASETS = [#"euandi_2019",
-    "euandi_2024"]
+DATASETS = ["euandi_2024"]
 
 MODEL_DIRS = [
-    #"gemma-4-12b",
-    #"gemini3.5-flash",
-    #"grok-4.5",
-    #"gpt-5.6-luna",
-    #"granite-4.1-8b",
-    #"gemma-4-31b",
-    #"deepseek-v4-pro",
-    #"qwen3.5-122b",
-    #"gpt-oss-120b",
-    #"kimi-k2.7",
-    #"mistral-medium-3.5",
-    #"glm-5.2",
+    "gemma-4-12b",
+    "gemini3.5-flash",
+    "grok-4.5",
+    "gpt-5.6-luna",
+    "granite-4.1-8b",
+    "gemma-4-31b",
+    "deepseek-v4-pro",
+    "qwen3.5-122b",
+    "gpt-oss-120b",
+    "kimi-k2.7",
+    "mistral-medium-3.5",
+    "glm-5.2",
     "kimi-k3"
 ]
 
@@ -61,25 +59,46 @@ def _results_dir(dataset, model_dir):
     return os.path.join("data", f"{dataset}_results", model_dir)
 
 
+def _result(dataset, model_dir, filename):
+    return os.path.join(_results_dir(dataset, model_dir), filename)
+
+
+# Checkpoints are inputs too: retraining one has to invalidate everything scored with it.
+# That is the case this staleness check exists for -- the classifier was retrained and the
+# *_classified.csv files from the previous checkpoint were left in place for a week.
+CROSSENCODER_DIR = "mmbert-small-stance-crossencoder"
+CLASSIFIER_DIR = "mmBERT-base-balanced-collapsed"
+
+
+# Each entry is (script, directory, model-arg name, extra args, output, inputs).
+#
+# `output` and `inputs` are what should_skip() compares: a step re-runs when its output is
+# missing OR older than anything it derives from. Both are built with the shared filename
+# builders in analysis.core.paths, the same ones the scripts themselves write through, so
+# the driver cannot predict a path the child does not produce.
 PER_VARIANT_SCRIPTS = [
-    #("agreement_scoring.py", _DIR, "--llm", ["--source", "speeches"],
-    # lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"speeches_{LANGUAGES}{variant}_scored.csv")),
-    #("agreement_scoring.py", _DIR, "--llm", ["--source", "reasons"],
-    # lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"{LANGUAGES}{variant}_scored.csv")),
-    #("evaluate_cronbach_speeches.py", _DIR, "--model_dir", [],
-    # lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"cronbach_speeches{variant}_{LANGUAGES}.csv")),
+    ("agreement_scoring.py", _DIR, "--llm", ["--source", "speeches"],
+     lambda dataset, model_dir, variant: _result(dataset, model_dir, scored_name(LANGUAGES, variant, "speeches")),
+     lambda dataset, model_dir, variant, positions: [_result(dataset, model_dir, speeches_name(LANGUAGES, variant)), CROSSENCODER_DIR]),
+    ("agreement_scoring.py", _DIR, "--llm", ["--source", "reasons"],
+     lambda dataset, model_dir, variant: _result(dataset, model_dir, scored_name(LANGUAGES, variant, "reasons")),
+     lambda dataset, model_dir, variant, positions: [_result(dataset, model_dir, responses_name(LANGUAGES, variant)), CROSSENCODER_DIR]),
     ("evaluate_euandi.py", _DIR, "--model_dir", ["--collapse-ecr-id", "--positions", POSITIONS_PLACEHOLDER],
-     lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"vaa{variant}_{LANGUAGES}.csv")),
+     lambda dataset, model_dir, variant: _result(dataset, model_dir, vaa_name(LANGUAGES, variant, "reasons")),
+     lambda dataset, model_dir, variant, positions: [
+         _result(dataset, model_dir, responses_name(LANGUAGES, variant)), positions_path(positions)]),
     ("evaluate_euandi.py", _DIR, "--model_dir", ["--source", "speeches", "--collapse-ecr-id", "--positions", POSITIONS_PLACEHOLDER],
-     lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"vaa_speeches{variant}_{LANGUAGES}.csv")),
-    #("evaluate_cronbach.py", _DIR, "--model_dir", [],
-    # lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"cronbach{variant}_{LANGUAGES}.csv")),
-    #("classify_speeches.py", _DIR, "--llm",
-    # ["--source", "speeches", "--model_dir", "./mmBERT-base-balanced-collapsed"],
-    # lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"speeches_{LANGUAGES}{variant}_classified.csv")),
-    #("classify_speeches.py", _DIR, "--llm",
-    # ["--source", "reasons", "--model_dir", "./mmBERT-base-balanced-collapsed"],
-    # lambda dataset, model_dir, variant: os.path.join(_results_dir(dataset, model_dir), f"{LANGUAGES}{variant}_classified.csv")),
+     lambda dataset, model_dir, variant: _result(dataset, model_dir, vaa_name(LANGUAGES, variant, "speeches")),
+     lambda dataset, model_dir, variant, positions: [
+         _result(dataset, model_dir, scored_name(LANGUAGES, variant, "speeches")), positions_path(positions)]),
+    ("classify_speeches.py", _DIR, "--llm",
+     ["--source", "speeches", "--model_dir", "./mmBERT-base-balanced-collapsed"],
+     lambda dataset, model_dir, variant: _result(dataset, model_dir, classified_name(LANGUAGES, variant, "speeches")),
+     lambda dataset, model_dir, variant, positions: [_result(dataset, model_dir, speeches_name(LANGUAGES, variant)), CLASSIFIER_DIR]),
+    ("classify_speeches.py", _DIR, "--llm",
+     ["--source", "reasons", "--model_dir", "./mmBERT-base-balanced-collapsed"],
+     lambda dataset, model_dir, variant: _result(dataset, model_dir, classified_name(LANGUAGES, variant, "reasons")),
+     lambda dataset, model_dir, variant, positions: [_result(dataset, model_dir, responses_name(LANGUAGES, variant)), CLASSIFIER_DIR]),
 ]
 
 # (script, directory, extra args). Scripts that read the euandi positions take
@@ -87,18 +106,17 @@ PER_VARIANT_SCRIPTS = [
 _POSITIONS_ARGS = ["--positions", POSITIONS_PLACEHOLDER]
 
 PER_DATASET_PLOTTING_SCRIPTS = [
-    #("plot_vaa_per_language.py",      _PLOTTING_DIR, []),
+    ("plot_vaa_per_language.py",      _PLOTTING_DIR, []),
     ("plot_vaa_variants_grouped.py",  _PLOTTING_DIR, []),
     ("plot_vaa_speeches.py",          _PLOTTING_DIR, []),
-    #("plot_consistency.py",           _PLOTTING_DIR, []),
-    #("plot_speeches.py",              _PLOTTING_DIR, []),
+    ("plot_speeches.py",              _PLOTTING_DIR, []),
     # plot_political_bias.py spells the same choice --parties (it also accepts 'none').
     ("plot_political_bias.py",        _PLOTTING_DIR, ["--parties", POSITIONS_PLACEHOLDER]),
     ("plot_classified_parties.py",    _PLOTTING_DIR, _POSITIONS_ARGS),
     ("plot_topical_parties.py",       _PLOTTING_DIR, _POSITIONS_ARGS),
     ("plot_argmax_shares.py",         _PLOTTING_DIR, _POSITIONS_ARGS),
-    #("plot_party_axis_compass.py",    _PLOTTING_DIR, _POSITIONS_ARGS),
-    #("plot_likert_distributions.py",  _PLOTTING_DIR, []),
+    ("plot_party_axis_compass.py",    _PLOTTING_DIR, _POSITIONS_ARGS),
+    ("plot_likert_distributions.py",  _PLOTTING_DIR, []),
 ]
 
 # The table builders. They read the same vaa*.csv / scored CSVs as the plots, so they
@@ -107,15 +125,15 @@ PER_DATASET_PLOTTING_SCRIPTS = [
 _MODELS_ARG = ["--models", ",".join(MODEL_DIRS)]
 
 PER_DATASET_TABLE_SCRIPTS = [
-    #("rank_consistency_tables.py", _DIR, _POSITIONS_ARGS),
-    #("axis_position_tables.py", _DIR, _POSITIONS_ARGS),
-    #("vaa_agreement_ci.py", _DIR,
-    # [*_POSITIONS_ARGS, *_MODELS_ARG, "--collapse-ecr-id",
-    #  "--languages", LANGUAGES,
-    #  "--output", os.path.join(TABLES_PLACEHOLDER, "vaa_agreement_ci.md")]),
-    #("compare_position_bases.py", _DIR,
-    # [*_MODELS_ARG, "--collapse-ecr-id", "--languages", LANGUAGES,
-    #  "--output", os.path.join(TABLES_PLACEHOLDER, "position_bases_comparison.md")]),
+    ("rank_consistency_tables.py", _DIR, _POSITIONS_ARGS),
+    ("axis_position_tables.py", _DIR, _POSITIONS_ARGS),
+    ("vaa_agreement_ci.py", _DIR,
+     [*_POSITIONS_ARGS, *_MODELS_ARG, "--collapse-ecr-id",
+      "--languages", LANGUAGES,
+      "--output", os.path.join(TABLES_PLACEHOLDER, "vaa_agreement_ci.md")]),
+    ("compare_position_bases.py", _DIR,
+     [*_MODELS_ARG, "--collapse-ecr-id", "--languages", LANGUAGES,
+      "--output", os.path.join(TABLES_PLACEHOLDER, "position_bases_comparison.md")]),
 ]
 
 
@@ -153,8 +171,43 @@ def run_with_retries(cmd, label):
     print(f"✗ All retries exhausted for: {label}", flush=True)
 
 
-def should_skip(output_path, dataset, model_dir, variant, override):
-    return not override and os.path.exists(output_path(dataset, model_dir, variant))
+def newest_mtime(path):
+    """Modification time of a file, or of the newest file directly inside a directory.
+
+    Checkpoints are directories, and a retrained one keeps its directory mtime from
+    whenever it was created on some systems, so the files inside are what count.
+    """
+    if os.path.isdir(path):
+        times = [entry.stat().st_mtime for entry in os.scandir(path) if entry.is_file()]
+        return max(times) if times else None
+    return os.path.getmtime(path) if os.path.exists(path) else None
+
+
+def skip_reason(output_path, inputs, dataset, model_dir, variant, positions, override):
+    """Why this step can be skipped, or None if it must run.
+
+    Skipping used to be `os.path.exists(output)`, which never re-derived anything: a
+    regenerated CSV or a retrained checkpoint left every downstream artefact in place,
+    silently and indefinitely. A step now also has to be *newer* than its inputs.
+    """
+    if override:
+        return None
+    out = output_path(dataset, model_dir, variant)
+    out_mtime = newest_mtime(out)
+    if out_mtime is None:
+        return None
+
+    stale = []
+    for source in inputs(dataset, model_dir, variant, positions):
+        source_mtime = newest_mtime(source)
+        if source_mtime is None:
+            continue          # a missing input is the step's own problem to report
+        if source_mtime > out_mtime:
+            stale.append(os.path.basename(source.rstrip(os.sep)) or source)
+    if stale:
+        print(f"  Out of date -- newer input(s): {', '.join(stale)}", flush=True)
+        return None
+    return "output exists and is newer than its inputs"
 
 
 def selected(script, only):
@@ -165,16 +218,22 @@ def run_per_variant_scripts(override, only, positions):
     for dataset in DATASETS:
         for model_dir in MODEL_DIRS:
             for variant in VARIANTS:
-                for script, script_dir, model_arg_name, raw_args, output_path in PER_VARIANT_SCRIPTS:
+                for script, script_dir, model_arg_name, raw_args, output_path, inputs in PER_VARIANT_SCRIPTS:
                     if not selected(script, only):
                         continue
                     extra_args = resolve_args(raw_args, positions, dataset)
                     label = f"{script} {' '.join(extra_args)}: model={model_dir}, variant='{variant}', dataset='{dataset}'"
-                    if should_skip(output_path, dataset, model_dir, variant, override):
-                        print(f"Skipping (output exists): {label}", flush=True)
+                    reason = skip_reason(output_path, inputs, dataset, model_dir, variant,
+                                         positions, override)
+                    if reason:
+                        print(f"Skipping ({reason}): {label}", flush=True)
                         continue
+                    # The child scripts carry the same existence check, so a rerun of a
+                    # stale output has to tell them to overwrite it or they skip in turn.
+                    replacing = os.path.exists(output_path(dataset, model_dir, variant))
                     print(f"Running: {label}", flush=True)
-                    cmd = build_per_variant_cmd(script, script_dir, model_arg_name, extra_args, model_dir, variant, dataset, override)
+                    cmd = build_per_variant_cmd(script, script_dir, model_arg_name, extra_args,
+                                                model_dir, variant, dataset, override or replacing)
                     run_with_retries(cmd, label)
 
 

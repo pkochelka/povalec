@@ -2,50 +2,24 @@ import argparse
 import json
 import os
 import re
-import sys
 
 import pandas as pd
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from utils import ALL_LANGS_STR, VARIANTS, flip_likert, likert_to_stance
+# Re-exported: the positions basis moved to analysis.core.positions, but eleven modules
+# had already learned to ask evaluate_euandi for it.
+from analysis.core.paths import responses_name, scored_name, vaa_name
+from analysis.core.positions import (  # noqa: F401
+    DEFAULT_POSITIONS,
+    GROUP_POSITIONS_PATH,
+    PARTY_POSITIONS_PATH,
+    POSITION_CHOICES,
+    load_party_positions,
+    positions_path,
+)
 
-PARTY_POSITIONS_PATH = "data/euandi_2024_data/euandi_2024_parties.jsonl"
-GROUP_POSITIONS_PATH = "data/euandi_2024_data/euandi_2024_group_positions.jsonl"
 NUM_RESPONSE_VARIANTS = 8
 NEUTRAL_LIKERT = 3
-
-# Whose euandi answers stand for an EP group:
-#   ep-group   -- the europarty's own manifesto answers (country_iso == "eu"), one
-#                 position vector per group, nothing averaged across parties.
-#   national   -- the five countries' member parties in the same file, averaged.
-#   group-mean -- every national party that ran in 2024, averaged per group; built
-#                 from EUandI_2024_party_dataset.csv by build_group_positions.py.
-POSITION_CHOICES = ["ep-group", "national", "group-mean"]
-DEFAULT_POSITIONS = "ep-group"
-
-
-def positions_path(positions: str) -> str:
-    return GROUP_POSITIONS_PATH if positions == "group-mean" else PARTY_POSITIONS_PATH
-
-EP_GROUP_BY_PARTY = {
-    "EPP": "PPE", "ECR": "ECR", "PES": "S&D", "ALDE": "ALDE",
-    "EGP": "Greens/EFA", "ID": "ID", "PEL": "GUE/NGL",
-
-    "CDU": "PPE", "SPD": "S&D", "Grüne": "Greens/EFA", "FDP": "ALDE",
-    "AfD": "ID", "Linke": "GUE/NGL",
-
-    "RE": "ALDE", "RN": "ID", "PS": "S&D", "LFI": "GUE/NGL",
-    "EELV": "Greens/EFA", "LR": "PPE",
-
-    "FDI": "ECR", "Lega": "ID", "FI": "PPE", "PD": "S&D",
-    "M5S": "GUE/NGL", "AVS": "Greens/EFA", "AR": "ALDE",
-
-    "ND": "PPE", "PASOK": "S&D", "SYRIZA": "S&D", "EL": "ECR",
-
-    "PP": "PPE", "PSOE": "S&D", "Vox": "ECR",
-    "Sumar": "GUE/NGL", "Podemos": "GUE/NGL",
-}
 
 
 def detect_likert_languages(df: pd.DataFrame) -> list[str]:
@@ -70,24 +44,6 @@ def likert_means_per_statement(raw_df: pd.DataFrame, languages: list[str]) -> pd
     return means
 
 
-def load_party_positions(path: str, positions: str = DEFAULT_POSITIONS) -> pd.DataFrame:
-    records = []
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            obj = json.loads(line)
-            meta = {k: v for k, v in obj.items() if k != "responses"}
-            for response in obj.get("responses", []):
-                records.append({**meta, **response})
-
-    df = pd.DataFrame(records)
-    is_europarty = df["country_iso"] == "eu"
-    df = df[~is_europarty if positions == "national" else is_europarty].copy()
-    df["statement_idx"] = df["statement_idx"].astype(int)
-    df["statement"] = df["statement"].str.strip()
-    df["ep_group"] = df["short_name"].map(EP_GROUP_BY_PARTY)
-    return df
-
-
 def agreement_by_ep_group(
     stance_df: pd.DataFrame, languages: list[str], party_positions_path: str,
     collapse_ecr_id: bool = False, positions: str = DEFAULT_POSITIONS,
@@ -98,8 +54,8 @@ def agreement_by_ep_group(
           f"{party_df.groupby('ep_group')['short_name'].nunique().to_dict()}")
     if collapse_ecr_id:
         # Pool the national parties of both groups before averaging, matching
-        # the collapsed ECR+ID classifier label. EP_GROUP_BY_PARTY itself must
-        # stay 7-group and the collapse stay here, per caller: the compasses
+        # the collapsed ECR+ID classifier label. utils.EP_GROUP_BY_PARTY itself
+        # must stay 7-group and the collapse stay here, per caller: the compasses
         # (plot_party_compass, plot_party_axis_compass) read the mapping
         # directly and plot ECR and ID as separate groups.
         party_df["ep_group"] = party_df["ep_group"].replace({"ECR": "ECR+ID", "ID": "ECR+ID"})
@@ -170,7 +126,7 @@ def main() -> None:
     parser.add_argument("--model_dir", default="qwen3.5-122b")
     parser.add_argument("--variant", default="", choices=VARIANTS)
     parser.add_argument("--languages", default=ALL_LANGS_STR)
-    parser.add_argument("--dataset", default="euandi_2024", choices=["euandi_2019", "euandi_2024"])
+    parser.add_argument("--dataset", default="euandi_2024", choices=["euandi_2024"])
     parser.add_argument("--source", default="likert", choices=["likert", "speeches"])
     parser.add_argument("--collapse-ecr-id", action="store_true",
                         help="Merge the ECR and ID EP groups into one 'ECR+ID' group, "
@@ -183,12 +139,13 @@ def main() -> None:
     args = parser.parse_args()
 
     results_dir = f"data/{args.dataset}_results/{args.model_dir}"
+    source = "reasons" if args.source == "likert" else "speeches"
     if args.source == "likert":
-        input_path = f"{results_dir}/{args.languages}{args.variant}.csv"
-        output_path = f"{results_dir}/vaa{args.variant}_{args.languages}.csv"
+        input_name = responses_name(args.languages, args.variant)
     else:
-        input_path = f"{results_dir}/speeches_{args.languages}{args.variant}_scored.csv"
-        output_path = f"{results_dir}/vaa_speeches{args.variant}_{args.languages}.csv"
+        input_name = scored_name(args.languages, args.variant, source="speeches")
+    input_path = f"{results_dir}/{input_name}"
+    output_path = f"{results_dir}/{vaa_name(args.languages, args.variant, source)}"
 
     if os.path.exists(output_path) and not args.override:
         print(f"Output exists, skipping (use --override to recompute): {output_path}")

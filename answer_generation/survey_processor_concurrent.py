@@ -10,12 +10,7 @@ The run mechanics (fan-out, checkpointing, --patch, --overwrite_changed) live in
 generation.py and are shared with the indirect speeches track.
 """
 import json
-import os
-import sys
 import time
-
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, _ROOT)
 
 from utils import call_api, extract_json
 from answer_generation.generation import Track, main

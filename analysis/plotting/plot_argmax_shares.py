@@ -22,30 +22,27 @@ cell, and cells with a tie split their credit equally, so the shares still sum t
 """
 import argparse
 import itertools
-import sys
 from pathlib import Path
 from typing import NamedTuple
 
 import numpy as np
 import pandas as pd
 
-_ANALYSIS_DIR = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_ANALYSIS_DIR.parent))
-sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 
+from analysis.core import MODEL_DISPLAY_NAME, model_display_name
 from analysis.plotting import plot_classified_parties as pcp
 from analysis.plotting.plot_topical_parties import statement_rows_per_axis
-from analysis.evaluate_cronbach import AXES
 from analysis.evaluate_euandi import (
     DEFAULT_POSITIONS, POSITION_CHOICES, load_party_positions, positions_path,
 )
 from analysis.vaa_agreement_ci import stance_frame_for
-from utils.constants import ALL_LANGS
+from utils import ALL_LANGS, AXES, configure_stdout
+
+configure_stdout()
 
 # (method key, legend label, how the numbers are produced)
 METHODS = [
@@ -247,9 +244,6 @@ DEFAULT_TOPIC_PANEL_MODELS = ("granite-4.1-8b", "gemini3.5-flash")
 # grid_topic_panels.
 TOPIC_GRID_SHAPE = (6, 2)
 DEFAULT_TOPIC_GRID_EXCLUDED = DEFAULT_TOPIC_PANEL_MODELS
-# Panel titles for the stacked figures, from the one map every figure in the project
-# names its models by.
-model_display_name = pcp.model_display_name
 
 
 def classifier_long_frames(model_dir):
@@ -1534,7 +1528,7 @@ def plot_cross_model_argmax_shares(shares_by_model, dataset_plots_dir, ylim):
             # The series are keyed by result-directory name, since that is what the
             # colour lookup and the share indexing use; the legend shows the official
             # name instead, as every other figure does.
-            series_labels=pcp.MODEL_DISPLAY_NAME,
+            series_labels=MODEL_DISPLAY_NAME,
             layout=CROSS_MODEL_LAYOUT)
 
 

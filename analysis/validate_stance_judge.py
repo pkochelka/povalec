@@ -16,7 +16,6 @@ all three. Human is treated as ground truth throughout.
 """
 import argparse
 import os
-import sys
 
 import numpy as np
 import pandas as pd
@@ -24,10 +23,10 @@ from scipy.stats import pearsonr, spearmanr
 from sklearn.metrics import cohen_kappa_score, confusion_matrix
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, PROJECT_ROOT)
-sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from utils import likert_to_stance, stance_to_likert
+from utils import likert_to_stance, stance_to_likert, configure_stdout
+
+configure_stdout()
 
 DATA_DIR = os.path.join(PROJECT_ROOT, "data", "euandi_2024_results")
 LABELED = os.path.join(DATA_DIR, "stance_speeches_labeled_en-cz-sk-fr.csv")

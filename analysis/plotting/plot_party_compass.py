@@ -1,6 +1,5 @@
 import argparse
 import json
-import sys
 from pathlib import Path
 
 import matplotlib
@@ -11,13 +10,8 @@ import numpy as np
 import pandas as pd
 from matplotlib.lines import Line2D
 
-_ANALYSIS_DIR = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_ANALYSIS_DIR.parent))
-sys.path.insert(0, str(_ANALYSIS_DIR))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from evaluate_euandi import EP_GROUP_BY_PARTY
-from plot_political_bias import (
+from utils import EP_GROUP_BY_PARTY, FALLBACK_PARTY_COLOR, PARTY_DISPLAY_ORDER
+from analysis.plotting.plot_political_bias import (
     LEGEND_MARKERSIZE,
     MAIN_LEGEND_LOC,
     covariance_ellipse,
@@ -25,12 +19,16 @@ from plot_political_bias import (
     setup_compass,
 )
 
-EP_GROUP_ORDER = ["GUE/NGL", "S&D", "Greens/EFA", "ALDE", "PPE", "ECR", "ID", "Other"]
+# The compasses plot every group separately, so the collapsed ECR+ID bucket does not
+# apply here, and unmapped parties fall into "Other".
+EP_GROUP_ORDER = [g for g in PARTY_DISPLAY_ORDER if g != "ECR+ID"] + ["Other"]
 EP_GROUP_COLOR = {
-    # GUE/NGL magenta rather than dark red, to separate it from S&D as PARTY_COLORS in
-    # plot_classified_parties.py does -- one group keeps one colour across the figures.
+    # A second palette, deliberately: only GUE/NGL's magenta (which separates it from
+    # S&D) is shared with utils.PARTY_COLORS; the other six hexes are this figure
+    # family's own and differ from the bar/box figures'. Unifying them would change how
+    # every compass looks, so it is a standing choice rather than an oversight.
     "GUE/NGL": "#8E1B6B", "S&D": "#e8112d", "Greens/EFA": "#3eb049", "ALDE": "#f6b40e",
-    "PPE": "#3a86c8", "ECR": "#0a4ea3", "ID": "#1b1f3b", "Other": "#888888",
+    "PPE": "#3a86c8", "ECR": "#0a4ea3", "ID": "#1b1f3b", "Other": FALLBACK_PARTY_COLOR,
 }
 
 

@@ -10,15 +10,12 @@ the full set.
 """
 import argparse
 import os
-import sys
 
 import numpy as np
-import pandas as pd
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, PROJECT_ROOT)
 
 from analysis.stance_crossencoder_training import (
     OOD_SOURCE_MODELS, OUTPUT_DIR, MAX_LEN, load_pool, split_ood,

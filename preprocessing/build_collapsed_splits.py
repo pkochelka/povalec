@@ -32,7 +32,6 @@ language; it is otherwise free.
 """
 
 import argparse
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -41,11 +40,9 @@ import pandas as pd
 pd.options.future.infer_string = False
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from utils import water_fill, write_parquet_chunked
-from split_preprocessed_data import split_dataframe
+from preprocessing.split_preprocessed_data import split_dataframe
 
 DATA_DIR = PROJECT_ROOT / "data" / "EuroParl Custom"
 DEFAULT_INPUT_DIR = DATA_DIR / "cleaned"

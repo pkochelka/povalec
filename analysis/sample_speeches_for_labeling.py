@@ -10,13 +10,11 @@ cannot anchor the annotator.
 import argparse
 import os
 import re
-import sys
 
 import numpy as np
 import pandas as pd
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, PROJECT_ROOT)
 
 from utils import ALL_LANGS_STR, VARIANTS, load_dataframe, water_fill
 

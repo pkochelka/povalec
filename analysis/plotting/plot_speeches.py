@@ -1,6 +1,5 @@
 import argparse
 import re
-import sys
 from itertools import combinations
 from pathlib import Path
 
@@ -12,14 +11,9 @@ import numpy as np
 import pandas as pd
 from scipy.stats import pearsonr
 
-_ANALYSIS_DIR = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_ANALYSIS_DIR.parent))
-sys.path.insert(0, str(_ANALYSIS_DIR))
+from utils import VARIANT_LABELS, likert_to_stance
+from analysis.evaluate_euandi import detect_likert_languages, likert_means_per_statement
 
-from utils import VARIANTS, VARIANT_LABELS, likert_to_stance
-from evaluate_euandi import detect_likert_languages, likert_means_per_statement
-
-DESIRED_ALPHA = 0.7
 PAIRWISE_R_LABEL = "Mean pairwise Pearson r"
 RED_WHITE_GREEN = mcolors.LinearSegmentedColormap.from_list(
     "red_white_green", ["red", "white", "green"]
@@ -204,61 +198,6 @@ def plot_speech_consistency(model_dir: Path, out_dir: Path) -> None:
                  out_dir / "speech_boxplot_correlation_by_question.png", ylim=(-1.0, 1.0))
 
 
-CRONBACH_SPEECH_PATTERN = re.compile(
-    r"^cronbach_speeches(?P<variant>|_negated)_(?P<langs>[a-z,]+)\.csv$"
-)
-
-
-def load_speech_alphas(model_dir: Path) -> dict[str, pd.Series]:
-    alphas: dict[str, pd.Series] = {}
-    for path in model_dir.glob("cronbach_speeches*.csv"):
-        match = CRONBACH_SPEECH_PATTERN.match(path.name)
-        if not match:
-            continue
-        df = pd.read_csv(path)
-        if df.empty:
-            print(f"  {path.name} is empty, skipping.")
-            continue
-        alphas[VARIANT_LABELS[match.group("variant")]] = df.set_index("language")["cronbach_alpha"]
-    return dict(sorted(alphas.items()))
-
-
-def plot_cronbach_per_language(alphas: dict[str, pd.Series], out_path: Path) -> None:
-    languages = sorted(set().union(*(series.index for series in alphas.values())))
-    pivot = pd.DataFrame({label: series.reindex(languages) for label, series in alphas.items()})
-
-    n_variants = len(pivot.columns)
-    group_width = 0.85
-    bar_width = group_width / max(n_variants, 1)
-    x = np.arange(len(languages))
-    cmap = plt.get_cmap("tab10")
-
-    fig, ax = plt.subplots(figsize=(max(10, len(languages) * 0.9), 5.5))
-    for i, label in enumerate(pivot.columns):
-        offsets = x - group_width / 2 + bar_width * (i + 0.5)
-        ax.bar(offsets, pivot[label].values, width=bar_width, color=cmap(i % cmap.N),
-               edgecolor="black", linewidth=0.3, label=label)
-
-    ax.axhline(DESIRED_ALPHA, color="red", linestyle="--", linewidth=1.2, zorder=5)
-    ax.text(len(languages) - 0.5, DESIRED_ALPHA, f" desired ≥ {DESIRED_ALPHA}",
-            color="red", va="bottom", ha="right", fontsize=9)
-    ax.set_xticks(x, languages, fontsize=9)
-    ax.set_ylabel("Cronbach's α (across axes)")
-    ax.set_ylim(0.0, max(1.0, float(pivot.max().max()) + 0.05))
-    ax.grid(axis="y", linestyle="--", alpha=0.4)
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=min(n_variants, 6),
-              fontsize=8, framealpha=0.9)
-    save_figure(fig, out_path, bbox_inches="tight")
-
-
-def plot_speech_cronbach(model_dir: Path, out_dir: Path) -> None:
-    alphas = load_speech_alphas(model_dir)
-    if not alphas:
-        print("  No cronbach_speeches*.csv files found, skipping cronbach plot.")
-        return
-    plot_cronbach_per_language(alphas, out_dir / "cronbach_speeches_per_language.png")
-
-
 def load_likert_stance(model_dir: Path) -> pd.DataFrame | None:
     csv_path = find_likert_csv(model_dir)
     if csv_path is None:
@@ -382,7 +321,6 @@ def process_model(model_dir: Path) -> None:
     out_dir = model_dir / "plots"
     out_dir.mkdir(exist_ok=True)
     plot_speech_consistency(model_dir, out_dir)
-    plot_speech_cronbach(model_dir, out_dir)
     plot_speech_vs_likert(model_dir, out_dir)
 
 

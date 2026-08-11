@@ -10,12 +10,7 @@ The run mechanics (fan-out, checkpointing, --patch, --overwrite_changed) live in
 generation.py and are shared with the direct survey track.
 """
 import json
-import os
-import sys
 import time
-
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, _ROOT)
 
 from utils import call_api
 from answer_generation.generation import Track, main

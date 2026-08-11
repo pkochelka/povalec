@@ -17,19 +17,18 @@ skips finished (model, track) pairs and resumes an interrupted one.
 import argparse
 import glob
 import os
-import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, PROJECT_ROOT)
-sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from utils import ALL_LANGS_STR, likert_to_stance, load_dataframe, save_checkpoint
+from utils import ALL_LANGS_STR, likert_to_stance, load_dataframe, save_checkpoint, configure_stdout
 from analysis.sample_speeches_for_labeling import melt_speeches
 from analysis.llm_reason_stance_judge import collect_observations
 from analysis.llm_stance_judge import judge_one, load_prompt, load_checkpoint
+
+configure_stdout()
 
 DATA_DIR = os.path.join(PROJECT_ROOT, "data", "euandi_2024_results")
 DEFAULT_MODELS = [

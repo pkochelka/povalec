@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from plot_vaa_per_language import (
+from analysis.plotting.plot_vaa_per_language import (
     find_vaa_csvs,
     load_variant_dfs,
     party_order_and_colors,

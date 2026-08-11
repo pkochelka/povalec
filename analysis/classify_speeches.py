@@ -3,7 +3,6 @@ import argparse
 import json
 import os
 import re
-import sys
 from dataclasses import dataclass
 
 import numpy as np
@@ -11,8 +10,6 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils import ALL_LANGS_STR, FAILED_REASON_VALUES, REFUSED_REASON_PREFIXES, SOURCE_INPUT_FILENAME, SOURCE_OUTPUT_FILENAME, SOURCE_TEXT_COLUMN_PREFIX, VARIANTS
 
@@ -212,7 +209,7 @@ def parse_args():
     parser.add_argument("--model_dir", default=DEFAULT_MODEL_DIR,
                          help=f"Softmax-head classifier checkpoint. Default: {DEFAULT_MODEL_DIR}")
     parser.add_argument("--llm", default="qwen3.5-122b")
-    parser.add_argument("--dataset", default="euandi_2024", choices=["euandi_2019", "euandi_2024"])
+    parser.add_argument("--dataset", default="euandi_2024", choices=["euandi_2024"])
     parser.add_argument("--source", default="both", choices=["both", "speeches", "reasons"])
     parser.add_argument("--speeches_input", default=None)
     parser.add_argument("--reasons_input", default=None)

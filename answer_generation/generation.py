@@ -16,7 +16,6 @@ for the survey track, a task string for the speeches track. `call` turns a
 import argparse
 import json
 import os
-import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Callable
@@ -24,7 +23,6 @@ from typing import Callable
 import pandas as pd
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, _ROOT)
 
 from utils import ALL_LANGS_STR, VARIANTS, save_checkpoint
 
@@ -260,7 +258,7 @@ def parse_args(track):
     parser.add_argument("--task_prompts",
                         default=os.path.join(_ROOT, "prompts", track.default_prompts), type=str)
     parser.add_argument("--dataset", default="euandi_2024", type=str,
-                        choices=["euandi_2019", "euandi_2024"])
+                        choices=["euandi_2024"])
     parser.add_argument("--patch", action="store_true",
                         help="Regenerate only the failed/refused responses in an existing "
                              "output and patch them in place.")

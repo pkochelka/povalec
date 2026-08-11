@@ -16,8 +16,6 @@ Deliberately left out, so the comparison stays clean:
 """
 
 import argparse
-import os
-import sys
 import warnings
 from pathlib import Path
 
@@ -28,8 +26,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.lines import Line2D
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from analysis.evaluate_euandi import DEFAULT_POSITIONS, POSITION_CHOICES
 from analysis.plotting.plot_political_bias import (

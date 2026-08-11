@@ -1,7 +1,6 @@
 """Per-statement breakdown of classifier predictions for the LLM speeches.
 
-Analogue of embed_llm_speeches.per_statement_report, but instead of nearest-prototype
-cosine geometry it pools the *_classified.csv predicted_party columns over
+Pools the *_classified.csv predicted_party columns over
 language/variant/track and reports, for every statement (i.e. every euandi topic),
 the ordered counts of predicted EP party. Lets you see how the predicted leaning
 depends on the topic.
@@ -14,27 +13,28 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from utils import EUROPARTY_BY_EP_GROUP
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RESULTS_ROOT = REPO_ROOT / "data" / "euandi_2024_results"
 PARTIES_FILE = REPO_ROOT / "data" / "euandi_2024_data" / "euandi_2024_parties.jsonl"
 
-# predicted_party_<lang>[_negated|_question]_v<variant>
-PRED_RE = re.compile(r"^predicted_party_([a-z]{2})(?:_(negated|question))?_v(\d+)$")
-# stance_<lang>[_negated|_question]_v<variant>  (speech stance score in [-1, +1])
-STANCE_RE = re.compile(r"^stance_([a-z]{2})(?:_(negated|question))?_v(\d+)$")
+# predicted_party_<lang>[_negated]_v<variant>
+PRED_RE = re.compile(r"^predicted_party_([a-z]{2})(?:_(negated))?_v(\d+)$")
+# stance_<lang>[_negated]_v<variant>  (speech stance score in [-1, +1])
+STANCE_RE = re.compile(r"^stance_([a-z]{2})(?:_(negated))?_v(\d+)$")
 
-# classifier EP-group label -> euandi EU-level party (country_iso == "eu") that voices it
-GROUP_TO_EUANDI = {
-    "PPE": "EPP", "S&D": "PES", "ALDE": "ALDE", "ECR": "ECR",
-    "Greens/EFA": "EGP", "ID": "ID", "GUE/NGL": "PEL",
-}
+# classifier EP-group label -> euandi EU-level party (country_iso == "eu") that voices it.
+# Imported, not re-spelled: this used to be a hand-written inverse of evaluate_euandi's
+# mapping, which is how a group silently ends up reading another group's positions.
+GROUP_TO_EUANDI = EUROPARTY_BY_EP_GROUP
 
 
 def discover_classified_files(model_dir):
     files = []
     for path in sorted(model_dir.glob("speeches_*_classified.csv")):
         name = path.name
-        track = "negated" if "_negated" in name else "question" if "_question" in name else "base"
+        track = "negated" if "_negated" in name else "base"
         files.append((track, path))
     return files
 
@@ -68,7 +68,7 @@ def discover_scored_files(model_dir):
     files = []
     for path in sorted(model_dir.glob("speeches_*_scored.csv")):
         name = path.name
-        track = "negated" if "_negated" in name else "question" if "_question" in name else "base"
+        track = "negated" if "_negated" in name else "base"
         files.append((track, path))
     return files
 
@@ -325,7 +325,7 @@ def per_statement_report(df, statement_labels=None, out_path=None, relative=Fals
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-dir", default=str(RESULTS_ROOT / "mistral-medium-3.5"))
-    parser.add_argument("--tracks", default="base,negated", help="comma list of base,negated,question")
+    parser.add_argument("--tracks", default="base,negated", help="comma list of base,negated")
     parser.add_argument("--relative", action="store_true",
                         help="show each party's count as lift vs its overall base rate (share / mean share)")
     parser.add_argument("--score-corr", action="store_true",

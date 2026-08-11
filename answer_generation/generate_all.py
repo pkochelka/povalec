@@ -5,15 +5,12 @@ import os
 import time
 import threading
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from utils import ALL_LANGS_STR, VARIANTS
 
 LANGUAGES = ALL_LANGS_STR
 MAX_RETRIES = 1
 MAX_WORKERS = 40
-DATASETS = [#"euandi_2019",
-    "euandi_2024"]
+DATASETS = ["euandi_2024"]
 
 MODELS = [
     #{"model": "gemma4:12b",      "model_dir":"gemma-4-12b"},

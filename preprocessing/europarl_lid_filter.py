@@ -47,7 +47,6 @@ requirements.txt.
 """
 
 import argparse
-import sys
 from collections import Counter
 from pathlib import Path
 
@@ -57,7 +56,6 @@ from tqdm import tqdm
 pd.options.future.infer_string = False
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
 
 DATA_DIR = PROJECT_ROOT / "data" / "EuroParl Custom"
 DEFAULT_INPUT_CSV = DATA_DIR / "multi-europarl.csv"

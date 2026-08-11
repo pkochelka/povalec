@@ -10,7 +10,6 @@ encoder layers are frozen, and neutrals are down-weighted in the loss.
 """
 import os
 import re
-import sys
 import json
 import shutil
 
@@ -27,7 +26,6 @@ from transformers import (
 )
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, PROJECT_ROOT)
 
 from utils import ALL_LANGS_STR, VARIANTS, likert_to_stance, load_dataframe
 

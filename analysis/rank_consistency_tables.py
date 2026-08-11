@@ -73,19 +73,13 @@ import collections
 import itertools
 import json
 import re
-import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from scipy.special import xlogy
-from scipy.stats import chi2, rankdata
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-from analysis.evaluate_euandi import DEFAULT_POSITIONS, POSITION_CHOICES
-from analysis.plotting.plot_classified_parties import model_display_name
-from analysis.plotting.plot_ep_group_rank_boxplots import (
+from analysis.core import (
     CELL_KEYS,
     LANGS,
     METHODS,
@@ -104,105 +98,51 @@ from analysis.plotting.plot_ep_group_rank_boxplots import (
     slug_labels,
     speech_stances,
 )
+from analysis.evaluate_euandi import DEFAULT_POSITIONS, POSITION_CHOICES
+from analysis.tables import (
+    BYMODEL_FACTORS,
+    DEFAULT_METHODS,
+    DEFAULT_TABLES,
+    FACTOR_NOUN,
+    MATRIX_FRAMINGS,
+    MATRIX_LABEL,
+    METHOD_LABEL,
+    POOLED,
+    VARIANT_CAPTION,
+    VARIANT_FACTORS,
+    bymodel_cell,
+    bymodel_factor_spec,
+    bymodel_row_label,
+    check_unique_short_names,
+    matrix_title,
+    pairs_frame,
+    reliability_r_xx,
+    reliability_spec,
+    render_bymodel_latex,
+    render_bymodel_markdown,
+    render_latex,
+    render_markdown,
+    render_matrix_latex,
+    render_matrix_markdown,
+    render_reliability_latex,
+    render_reliability_markdown,
+    short_model_name,
+    table_body,
+    tidy_frame,
+)
+from analysis.stats import (
+    CONFIDENCE,
+    KINDS,
+    concordance_metrics,
+    pearson_matrix,
+    ranks_descending,
+    safe_divide,
+)
 
-# The NLI-scored reason texts are the one route plot_ep_group_rank_boxplots does
-# not carry (it scores that track with the LLM judge instead). Same column layout
-# as the scored speeches, so the same stance loader reads it.
+# The cross-encoder-scored reason texts are the one route analysis.core.METHODS does
+# not carry (it scores that track with the LLM judge instead). Same column layout as the
+# scored speeches, so the same stance loader reads it.
 REASONS_SCORED_CSV = re.compile(rf"^(?!speeches_)(?P<langs>{LANGS}){VARIANT}_scored\.csv$")
-
-METHOD_LABEL = {
-    "vaa-likert": "Direct VAA (Likert choice)",
-    "vaa-reasons": "Indirect VAA (NLI on reasons)",
-    "vaa-speeches": "Indirect VAA (NLI on prose)",
-    "clf-reasons": "Classifier on reasons",
-    "clf-speeches": "Classifier on prose",
-    "vaa-likert-judge": "VAA (LLM judge on reasons)",
-    "vaa-speeches-judge": "VAA (LLM judge on prose)",
-}
-# Short, self-explanatory row/column headers for the pairwise-correlation matrix --
-# readable on their own, unlike an "L / R / cR / cO" legend the reader has to look
-# up. Kept short enough that a 4x4 grid of them still fits a page.
-MATRIX_LABEL = {
-    "vaa-likert": "Direct",
-    "vaa-reasons": "Indirect (reasons)",
-    "vaa-speeches": "Indirect",
-    "clf-reasons": "Reasons",
-    "clf-speeches": "Prose",
-    "vaa-likert-judge": "Indirect (reasons, judge)",
-    "vaa-speeches-judge": "Indirect (judge)",
-}
-assert set(MATRIX_LABEL) == set(METHOD_LABEL)
-# "Indirect" means NLI-scored prose (the open-ended answers), not the NLI-scored reasons --
-# the reasons track is only measured here via the classifier.
-DEFAULT_METHODS = ["vaa-likert", "vaa-speeches", "clf-reasons", "clf-speeches"]
-DEFAULT_TABLES = ["internal", "negation", "crosslang", "variants", "bymodel"]
-
-# Short row labels for the per-model table; anything not listed falls back to its
-# first hyphen-separated token, capitalised.
-# Trimmed to the shortest form that still separates every model: only the two
-# Gemma, two Qwen and two GPT entries need a distinguishing suffix, and only
-# DeepSeek is long enough to be worth contracting. Anything shorter collides on the
-# G-prefix (GLM / GPT / Granite / Grok / Gemini / Gemma) -- check_unique_short_names
-# fails loudly if a future entry does.
-MODEL_SHORT = {
-    "deepseek-v4-pro": "DS", "gemini3.5-flash": "Gemini",
-    "gemma-4-12b": "Gemma12", "gemma-4-31b": "Gemma31", "glm-5.2": "GLM",
-    # Two GPT entries, so both carry which one they are: on the heuristic alone
-    # gpt-5.6-luna came out "Gpt" beside gpt-oss-120b's "GPT", a difference of one
-    # capital that no reader can be expected to see.
-    "gpt-5.6-luna": "GPT-Luna", "gpt-oss-120b": "GPT-OSS",
-    "granite-4.1-8b": "Granite", "granite-4.1-8b-instruct": "Granite",
-    "grok-4.5": "Grok", "kimi-k2.7": "Kimi2.7", "kimi-k3": "Kimi3",
-    "mistral-medium-3.5": "Mistral",
-    "muse-spark-1.1": "Muse", "qwen3.5-122b": "Qwen122", "qwen3.6-27b": "Qwen27",
-}
-# The pooled row is otherwise the widest entry in the column, so it sets the
-# width no matter how short the model names get.
-POOLED_ROW_LABEL = "All"
-
-
-def short_model_name(model):
-    return MODEL_SHORT.get(model, model.split("-")[0].capitalize())
-
-
-def check_unique_short_names(models):
-    """The fallback heuristic in short_model_name can collide (e.g. a new
-    gemma-4-Nb model dir falls back to the same "Gemma" an existing dict entry
-    already claims) -- caught here instead of silently mislabelling two different
-    models the same in the bymodel table.
-
-    Compared case-folded, because the fallback capitalises and the dict does not:
-    gpt-5.6-luna once printed as "Gpt" one row above gpt-oss-120b's "GPT", which is
-    a distinct label only to a reader who knows to look for it."""
-    labels = {}
-    for model in models:
-        labels.setdefault(short_model_name(model).casefold(), []).append(model)
-    collisions = {label: models for label, models in labels.items() if len(models) > 1}
-    if collisions:
-        details = "; ".join(f"{label!r} <- {models}" for label, models in collisions.items())
-        raise SystemExit(f"Short model names collide, add distinct MODEL_SHORT entries: {details}")
-
-
-POOLED = "All"
-DIMENSION_HEADER = {"model": "Model", "method": "Method"}
-
-VARIANT_FACTORS = ["prompt", "paraphrase", "framing"]
-VARIANT_CAPTION = {"prompt": "framing $\\times$ paraphrase",
-                   "paraphrase": "paraphrase wording, framings pooled",
-                   "framing": "base against negated, paraphrases pooled"}
-FACTOR_NOUN = {"method": "method", "language": "language", "prompt": "prompt variant",
-               "paraphrase": "paraphrase", "framing": "framing", "topic": "topic"}
-# The "annotator sets" of the per-model table. Names follow the user's framing,
-# not the script's internal factor keys: script "paraphrase" (the v0..v7 wording
-# index) is the user's "prompt variants", and script "framing" (base vs negated)
-# is the user's "paraphrase". "topic" is not a run-level factor like the others
-# -- see TOPIC_AXES.
-BYMODEL_FACTORS = [
-    ("language", "Lang"),
-    ("paraphrase", "Prompt"),
-    ("framing", "Negation"),
-    ("topic", "Topic"),
-]
 
 QUESTIONNAIRE_PATH = "data/euandi_2024_data/euandi_2024_questionnaire.jsonl"
 # The EU&I questionnaire tags each statement with signed loadings on seven axes.
@@ -218,293 +158,8 @@ IDEOLOGY_AXIS = "Left-Right"
 # misread as genuine topic-dependence.
 MIN_STATEMENTS_PER_TOPIC = 3
 
-CONFIDENCE = 95
 MIN_RATERS = 2
 BOOTSTRAP_CHUNK = 100
-
-
-# --------------------------------------------------------------------------- #
-# metrics
-# --------------------------------------------------------------------------- #
-
-def safe_divide(numerator, denominator):
-    numerator, denominator = np.asarray(numerator, float), np.asarray(denominator, float)
-    return np.divide(numerator, denominator,
-                     out=np.full(np.broadcast(numerator, denominator).shape, np.nan),
-                     where=denominator != 0)
-
-
-def kendalls_w(rankings):
-    """Tie-corrected coefficient of concordance for rankings (..., raters, objects).
-
-    W = 12 S / (m^2 (n^3 - n) - m T), with T the usual sum of (t^3 - t) over the tie
-    groups of every rater. Writing each element's tie-group size as t, that sum is
-    sum(t^2) - n per rater, which vectorises over the bootstrap draws."""
-    rankings = np.asarray(rankings, float)
-    raters, objects = rankings.shape[-2:]
-    rank_sums = rankings.sum(axis=-2)
-    deviation = ((rank_sums - rank_sums.mean(axis=-1, keepdims=True)) ** 2).sum(axis=-1)
-    tie_sizes = (rankings[..., :, None] == rankings[..., None, :]).sum(axis=-1)
-    ties = (tie_sizes ** 2).sum(axis=(-1, -2)) - raters * objects
-    return safe_divide(12.0 * deviation,
-                       raters ** 2 * (objects ** 3 - objects) - raters * ties)
-
-
-def kendall_pvalue(w, raters, objects):
-    """Friedman chi-square test of W against no concordance. For completeness only:
-    over this many runs it rejects for any W worth reporting."""
-    return float(chi2.sf(raters * (objects - 1) * w, objects - 1))
-
-
-def icc31(ratings):
-    """ICC(3,1) -- two-way MIXED effects, CONSISTENCY, single measurement -- for
-    ratings (..., targets, raters). The targets are the EP groups.
-
-    Deliberately not ICC(2,1) (absolute agreement): that form has a rater-main-
-    effect term in the denominator, so it penalises two raters whose overall
-    level or spread differ, not just whether their relative pattern across
-    targets agrees. Here the "raters" are measurement methods on genuinely
-    different raw scales -- VAA agreement lives in a narrow band near 0.5-0.7,
-    classifier probability spans [0, 1] concentrated near 0/1 -- so even after
-    reducing both to a 1..6 rank profile, a method built on a compressed scale
-    tends to produce a compressed (low between-group variance) rank profile
-    purely from that scale, not from disagreeing with the other raters about
-    which group is closest. Absolute agreement would count that scale artefact
-    as disagreement; consistency does not, because it has no rater-variance
-    term to be sensitive to it -- exactly Shrout & Fleiss's (1979) own guidance
-    for choosing consistency over agreement when raters' absolute levels are
-    not intended to be comparable, only their relative ordering."""
-    ratings = np.asarray(ratings, float)
-    targets, raters = ratings.shape[-2:]
-    grand = ratings.mean(axis=(-2, -1), keepdims=True)
-    target_means = ratings.mean(axis=-1, keepdims=True)
-
-    ss_targets = raters * ((target_means - grand) ** 2).sum(axis=(-2, -1))
-    rater_means = ratings.mean(axis=-2, keepdims=True)
-    ss_raters = targets * ((rater_means - grand) ** 2).sum(axis=(-2, -1))
-    ss_error = ((ratings - grand) ** 2).sum(axis=(-2, -1)) - ss_targets - ss_raters
-
-    mean_square_targets = ss_targets / (targets - 1)
-    mean_square_error = ss_error / ((targets - 1) * (raters - 1))
-    return safe_divide(mean_square_targets - mean_square_error,
-                       mean_square_targets + (raters - 1) * mean_square_error)
-
-
-def top1_consistency(profiles, tolerance=1e-9):
-    """(share of raters agreeing on the rank-1 group, index of that group) for mean
-    rank profiles (..., raters, objects) -- the lower the mean rank, the closer.
-
-    A rater can tie two groups at the top; picking one with argmin would make the
-    share depend on the order the groups happen to sit in, so a tie is split evenly
-    between the groups sharing it. The tolerance only absorbs floating-point noise:
-    two genuinely different mean ranks differ by at least 1/(2 x runs)."""
-    leaders = profiles <= profiles.min(axis=-1, keepdims=True) + tolerance
-    counts = (leaders / leaders.sum(axis=-1, keepdims=True)).sum(axis=-2)
-    return counts.max(axis=-1) / profiles.shape[-2], counts.argmax(axis=-1)
-
-
-# Two mean scores that are mathematically equal can still differ by an ULP
-# depending on the order their weighted sums were accumulated in -- a matrix
-# multiply against a weight row versus a pandas groupby, or one bootstrap chunk
-# size versus another. Ranking is a step function, so a 1e-16 difference turns a
-# genuine tie (ranks 2.5, 2.5) into a spurious split (3, 2) and silently moves
-# every statistic computed downstream of it. Observed live: EP groups GUE/NGL
-# and S&D both scored 0.709051724137931 in Slovak under the negated framing,
-# and the two paths disagreed on r_xx by 0.003 purely from that. Rounding
-# before ranking makes real ties survive as ties; 12 decimals sits ~4 orders of
-# magnitude below the smallest meaningful difference between two agreement
-# scores in [0, 1], and ~4 above double-precision noise.
-RANK_DECIMALS = 12
-
-
-def ranks_descending(values):
-    """Rank along the last axis, 1 = highest, ties averaged and tie-stable."""
-    return rankdata(-np.round(values, RANK_DECIMALS), axis=-1)
-
-
-def ranks_ascending(values):
-    """Rank along the last axis, 1 = lowest, ties averaged and tie-stable."""
-    return rankdata(np.round(values, RANK_DECIMALS), axis=-1)
-
-
-def pearson_matrix(vectors):
-    """Pairwise Pearson correlation between raters' vectors, (..., raters,
-    raters), over the last axis -- the Gram matrix of the centred, unit-norm
-    rows. Used both for Spearman rho (on re-ranked data, see spearman_matrix)
-    and directly on data that must NOT be re-ranked, such as the concatenated
-    per-language rank blocks the language-stratified rho is built from: ranking
-    that concatenation as one vector would destroy the per-language grouping
-    (see language_pair_rho)."""
-    centred = vectors - vectors.mean(axis=-1, keepdims=True)
-    norms = np.sqrt((centred ** 2).sum(axis=-1, keepdims=True))
-    unit = safe_divide(centred, norms)
-    return unit @ np.swapaxes(unit, -1, -2)
-
-
-def spearman_matrix(profiles):
-    """Pairwise Spearman rho between raters, (..., raters, raters), over the
-    objects. Spearman is Pearson on the ranks, and the profiles are already mean
-    ranks, so only the re-ranking (which collapses their magnitudes back onto
-    1..n) is needed before pearson_matrix."""
-    return pearson_matrix(ranks_ascending(profiles))
-
-
-def pair_indices(raters):
-    """Upper-triangle (i, j) pairs, the order the rho columns and the CSV use."""
-    return [(i, j) for i in range(raters) for j in range(i + 1, raters)]
-
-
-def as_distributions(profiles):
-    """Rater profiles rescaled to sum to one over the objects.
-
-    The classifier profiles are already distributions -- its six party
-    probabilities sum to one per statement, so their mean does too -- and this is a
-    no-op for them. A VAA agreement profile is not a distribution: it lives in a
-    narrow band well above zero, so normalising it gives a near-uniform vector and
-    its divergences come out an order of magnitude smaller. Comparable down a
-    method, not across methods."""
-    return safe_divide(profiles, profiles.sum(axis=-1, keepdims=True))
-
-
-def jensen_shannon_matrix(distributions):
-    """Pairwise Jensen-Shannon divergence in bits, (..., raters, raters).
-
-    JSD(p, q) = H((p + q) / 2) - (H(p) + H(q)) / 2, which is 0 for identical
-    distributions and 1 bit for disjoint support. xlogy keeps 0 log 0 at zero."""
-    left = distributions[..., :, None, :]
-    right = distributions[..., None, :, :]
-    mixture = (left + right) / 2
-    return (entropy_bits(mixture) - (entropy_bits(left) + entropy_bits(right)) / 2)
-
-
-def entropy_bits(distributions):
-    return -xlogy(distributions, distributions).sum(axis=-1) / np.log(2)
-
-
-def offdiagonal_mean(matrix):
-    """Mean over the distinct pairs of a symmetric (..., raters, raters) matrix."""
-    raters = matrix.shape[-1]
-    rows, columns = np.triu_indices(raters, k=1)
-    return np.nanmean(matrix[..., rows, columns], axis=-1)
-
-
-def safe_nanargmax(values):
-    """np.nanargmax over the last axis, returning index 0 for a slice that is
-    entirely NaN instead of raising. That happens when a bootstrap statement
-    resample happens to miss every valid statement for one (language, method,
-    model) job -- a real possibility once enough models have partial per-
-    language coverage. The result is discarded for every such draw regardless
-    (divergent/typical are categorical, kept only from the single observed,
-    full-coverage pass, where every rater has data and this never triggers)."""
-    all_nan = np.all(np.isnan(values), axis=-1, keepdims=True)
-    return np.nanargmax(np.where(all_nan, -np.inf, values), axis=-1)
-
-
-def safe_nanargmin(values):
-    all_nan = np.all(np.isnan(values), axis=-1, keepdims=True)
-    return np.nanargmin(np.where(all_nan, np.inf, values), axis=-1)
-
-
-def row_means(matrix):
-    """Each rater's mean value against the others, (..., raters); the diagonal is
-    zero for a divergence and one for a correlation, so it is excluded."""
-    raters = matrix.shape[-1]
-    off = ~np.eye(raters, dtype=bool)
-    return np.nanmean(np.where(off, matrix, np.nan), axis=-1)
-
-
-def standardize_raters(profiles):
-    """Z-score each rater's profile across the objects (mean 0, unit SD per
-    (draw, rater)), profiles (..., raters, objects).
-
-    ICC(3,1)'s consistency form removes a rater's additive offset, but not its
-    SCALE: a rater built on a compressed raw scale produces a compressed
-    (low-variance) rank profile purely from that compression, and a plain ICC
-    counts that as disagreement rather than measurement noise. Verified
-    directly: two raters related by a perfect, if rescaling, linear transform
-    give icc31 = 0.13, not the ~1.0 a scale-free agreement statistic should
-    show for a perfect relationship. Z-scoring first removes that scale
-    artefact along with the location one, so only the raters' relative
-    ordering drives the statistic -- the same effect Spearman rho already gets
-    for free from its own re-ranking step, extended here to ICC."""
-    mean = profiles.mean(axis=-1, keepdims=True)
-    std = profiles.std(axis=-1, keepdims=True)
-    return safe_divide(profiles - mean, std)
-
-
-def icc_consistency(rank_profiles):
-    """ICC(3,1) consistency, computed on each rater's z-scored profile. See
-    icc31 for why consistency over absolute agreement, and standardize_raters
-    for why the z-score step is also needed -- consistency alone still leaves
-    ICC sensitive to raters having different variances, which is exactly the
-    situation here (VAA agreement's narrow band versus classifier
-    probability's near-0/1 spread)."""
-    return icc31(np.swapaxes(standardize_raters(rank_profiles), -1, -2))
-
-
-def concordance_metrics(rank_profiles, _score_profiles):
-    """W, ICC and argmax agreement for mean rank profiles (draws, raters, objects)."""
-    share, winner = top1_consistency(rank_profiles)
-    return {
-        "w": kendalls_w(ranks_ascending(rank_profiles)),
-        "icc": icc_consistency(rank_profiles),
-        "top1": share,
-        "winner": winner,
-    }
-
-
-def pair_metrics(rank_profiles, score_profiles):
-    """Every pairwise Spearman rho, plus W, ICC(3,1) consistency (z-scored),
-    argmax (top-1) consistency and each rater's between-party SD (raw score
-    spread across the EP groups, before ranking) as the matrix table's summary
-    figures.
-
-    Between-party SD is the restriction-of-range check: a model whose semantic
-    refusals get scored as neutral pulls every group's score toward the same
-    middling value, which mechanically compresses this SD and, downstream,
-    every consistency coefficient computed on the resulting rank profile -- a
-    low ICC/rho next to a low SD is a measurement artefact, not necessarily a
-    finding about genuine disagreement between raters."""
-    correlations = spearman_matrix(rank_profiles)
-    rows, columns = np.triu_indices(rank_profiles.shape[-2], k=1)
-    share, _ = top1_consistency(rank_profiles)
-    return {
-        "rho": correlations[..., rows, columns],
-        "w": kendalls_w(ranks_ascending(rank_profiles)),
-        "icc": icc_consistency(rank_profiles),
-        "top1": share,
-        "between_party_sd": score_profiles.std(axis=-1),
-    }
-
-
-def divergence_metrics(rank_profiles, score_profiles):
-    """Mean pairwise JSD between the raters' distributions, W over their orderings,
-    and which rater sits furthest from / closest to the rest."""
-    divergences = jensen_shannon_matrix(as_distributions(score_profiles))
-    per_rater = row_means(divergences)
-    return {
-        "jsd": offdiagonal_mean(divergences),
-        "w": kendalls_w(ranks_ascending(rank_profiles)),
-        "rater_jsd": per_rater,
-        "divergent": safe_nanargmax(per_rater),
-        "typical": safe_nanargmin(per_rater),
-    }
-
-
-# Metrics that name a level rather than measure one: reported for the observed data
-# only, since a percentile interval over category labels means nothing.
-KINDS = {
-    "concordance": dict(metrics=concordance_metrics, categorical=["winner"]),
-    "pairs": dict(metrics=pair_metrics, categorical=[]),
-    "divergence": dict(metrics=divergence_metrics,
-                       categorical=["divergent", "typical", "rater_jsd"]),
-}
-
-
-def percentile_interval(values, axis=0):
-    tail = (100 - CONFIDENCE) / 2
-    return (np.nanpercentile(values, tail, axis=axis),
-            np.nanpercentile(values, 100 - tail, axis=axis))
 
 
 # --------------------------------------------------------------------------- #
@@ -1060,638 +715,6 @@ def bootstrap(jobs, tensor, statements, draws, seed, chunk=BOOTSTRAP_CHUNK):
 
 
 # --------------------------------------------------------------------------- #
-# rendering
-# --------------------------------------------------------------------------- #
-
-LATEX_ESCAPES = {"&": r"\&", "%": r"\%", "#": r"\#", "_": r"\_", "{": r"\{", "}": r"\}"}
-
-
-def latex_escape(text):
-    return "".join(LATEX_ESCAPES.get(character, character) for character in str(text))
-
-
-def format_metric(observed, replicates, key, percent=False):
-    value = observed[key]
-    text = f"{100 * value:.0f}\\%" if percent else f"{value:.3f}"
-    if not replicates:
-        return text
-    low, high = percentile_interval(replicates[key])
-    if percent:
-        return f"{text} [{100 * low:.0f}, {100 * high:.0f}]"
-    return f"{text} [{low:.3f}, {high:.3f}]"
-
-
-def scope_labels(spec, scope):
-    """The scope tuple as prose: method codes become their display names."""
-    return [value if dimension != "method" or value == POOLED else METHOD_LABEL[value]
-            for (dimension, _), value in zip(spec["dimensions"], scope)]
-
-
-def row_prefix(job, runs):
-    raters = len(job["levels"])
-    return [str(raters), str(runs[0]) if len(set(runs)) == 1 else f"{min(runs)}--{max(runs)}"]
-
-
-def concordance_body(spec, jobs, observed, replicates, parties, args):
-    """W / ICC(3,1) / top-1 share, for a rater set that all rank the same EP
-    groups: the methods, languages or prompt-variants tables."""
-    dimensions = len(spec["dimensions"])
-    header = [*(DIMENSION_HEADER[dimension] for dimension, _ in spec["dimensions"]),
-              "$m$", "runs/rater", "Kendall's $W$", "ICC(3,1)", "Top-1 share",
-              "Modal top-1 group"]
-    if args.pvalues:
-        header.insert(dimensions + 3, "$p$")
-    rows = []
-    for job, values, sampled in zip(jobs, observed, replicates):
-        raters, runs = len(job["levels"]), job["runs"]
-        labels = scope_labels(spec, job["scope"])
-        cells = [
-            *labels, *row_prefix(job, runs),
-            format_metric(values, sampled, "w"),
-            format_metric(values, sampled, "icc"),
-            format_metric(values, sampled, "top1", percent=True),
-            parties[values["winner"]],
-        ]
-        if args.pvalues:
-            cells.insert(dimensions + 3,
-                         format_pvalue(kendall_pvalue(values["w"], raters, len(parties))))
-        rows.append(cells)
-        print(f"  {' / '.join(labels):52s} m={raters:3d}  W={values['w']:.3f}  "
-              f"ICC={values['icc']:.3f}  top-1={values['top1']:.0%} "
-              f"({parties[values['winner']]})")
-    return header, rows, set(range(dimensions)) | {len(header) - 1}
-
-
-def method_pair_lookup(job):
-    """{frozenset of the two method codes: index into job['rho']} -- a job may not
-    carry every requested method (--allow-partial-models), so pairs are matched by
-    name, not by position in the job's own (possibly shorter) method list."""
-    return {frozenset((job["levels"][a], job["levels"][b])): local
-            for local, (a, b) in enumerate(pair_indices(len(job["levels"])))}
-
-
-def rho_marker(sampled, key, local):
-    """'*' when the pair's CI excludes zero -- the conventional reading. An
-    earlier version inverted this to flag the rarer non-significant case, but a
-    star is pattern-matched to "significant" faster than any caption is read,
-    so the convention wins."""
-    if not sampled:
-        return ""
-    low, high = percentile_interval(sampled[key][:, local])
-    return "" if low <= 0 <= high else "*"
-
-
-def format_correlation(value):
-    """APA-style correlation formatting: no leading zero (bounded by +-1, so it
-    is redundant), no + sign, and "1.0" rather than "1.00" for a perfect
-    correlation (2 decimals would otherwise round 0.995+ up to a misleading
-    "1.00" that reads as exact)."""
-    rounded = round(value, 2)
-    if rounded >= 1.0:
-        return "1.0"
-    if rounded <= -1.0:
-        return "-1.0"
-    text = f"{abs(value):.2f}".lstrip("0")
-    return f"-{text}" if value < 0 else text
-
-
-# Faint vertical rule between tabular columns; needs \usepackage{xcolor}.
-GRAY_COLUMN_RULE = r"!{\color{gray!25}\vrule}"
-
-
-def format_sd(value):
-    """Between-party SD formatting: same no-leading-zero convention. Always
-    non-negative, so no sign handling needed."""
-    if value is None or not np.isfinite(value):
-        return "n/a"
-    return f"{value:.2f}".lstrip("0") or "0.00"
-
-
-def with_sd_superscript(text, sd):
-    """"<value>\\textsuperscript{<sd>}" -- the between-party SD rides along as a
-    superscript rather than a parenthetical, so the primary coefficient stays
-    the thing the eye lands on in a dense grid."""
-    return text if sd is None else f"{text}\\textsuperscript{{{format_sd(sd)}}}"
-
-
-SUPERSCRIPT_PATTERN = re.compile(r"\\textsuperscript\{([^}]*)\}")
-
-
-def markdown_cell(text):
-    """A LaTeX cell rendered readably in the markdown preview: superscripts
-    become ^x, escaped percents unescape."""
-    return SUPERSCRIPT_PATTERN.sub(r"^\1", str(text)).replace("\\%", "%")
-
-
-def spearman_brown(half_correlation):
-    """Full-length reliability implied by a correlation between two half-tests:
-    r_full = 2 r_half / (1 + r_half).
-
-    The split here is by framing -- base against negated. Each framing supplies
-    half the runs behind the pooled profile the internal matrix correlates, so
-    the raw base-negated correlation is a HALF-test statistic and needs stepping
-    up before it can serve as the reliability of the full (both-framings)
-    measure that rho_lang is computed from.
-
-    Undefined for r_half <= 0. Spearman-Brown assumes the two halves are
-    parallel measures of one construct; a non-positive correlation between them
-    is evidence that they are not, so no reliability can be recovered and the
-    formula would return values outside [-1, 1] anyway (r_half = -.39 gives
-    -1.28). NaN there, so callers surface it as "not interpretable" rather than
-    printing a number that looks usable."""
-    half = np.asarray(half_correlation, dtype=float)
-    with np.errstate(invalid="ignore", divide="ignore"):
-        full = 2.0 * half / (1.0 + half)
-    result = np.where(np.isfinite(half) & (half > 0), full, np.nan)
-    return float(result) if np.ndim(half_correlation) == 0 else result
-
-
-MATRIX_FRAMINGS = ["base", "negated"]  # upper triangle, lower triangle
-
-
-def matrix_cells(methods, by_framing):
-    """(labels, labels, grid) for one model's method x method correlation matrix.
-
-    A correlation matrix is symmetric, so the lower triangle would otherwise
-    repeat the upper. It carries the second framing instead: the UPPER triangle
-    is the base framing, the LOWER the negated one. Each triangle is computed
-    from its own framing's runs -- pooling them first would average two
-    rankings that, for Indirect, are close to opposite. "n/a" marks a pair the
-    job is missing a method for (e.g. --allow-partial-models).
-
-    A grid entry is the (correlation text, significance marker) pair rather than
-    one joined string, so each renderer can mark the coefficient up on its own
-    terms -- LaTeX wraps it in \\Corr and leaves the star outside."""
-    labels = [MATRIX_LABEL[method] for method in methods]
-    grid = []
-    for row in range(len(methods)):
-        cells = []
-        for col in range(len(methods)):
-            if row == col:
-                cells.append(("1.0", ""))
-                continue
-            framing = MATRIX_FRAMINGS[0] if row < col else MATRIX_FRAMINGS[1]
-            job, values, sampled = by_framing[framing]
-            local = method_pair_lookup(job).get(frozenset((methods[row], methods[col])))
-            if local is None:
-                cells.append(("n/a", ""))
-                continue
-            key = "rho_lang" if "rho_lang" in values else "rho"
-            cells.append((format_correlation(values[key][local]),
-                          rho_marker(sampled, key, local)))
-        grid.append(cells)
-    return labels, labels, grid
-
-
-NOT_AVAILABLE = "n/a"
-
-
-def latex_correlation_cell(text, marker):
-    """\\Corr{<rho>} so the document can style every coefficient at once (shading
-    by magnitude, say) from one macro. The significance star stays outside the
-    braces: it qualifies the coefficient, it is not part of the number. "n/a" is
-    not a coefficient, so it is left bare."""
-    return text + marker if text == NOT_AVAILABLE else f"\\Corr{{{text}}}{marker}"
-
-
-def markdown_correlation_cell(text, marker):
-    return text + marker
-
-
-def matrix_title(model_scope):
-    """Table heading: the model's official name, as the figures write it."""
-    return "All models" if model_scope == POOLED else model_display_name(model_scope)
-
-
-def slug(text):
-    return re.sub(r"[^0-9a-zA-Z]+", "-", text).strip("-").lower()
-
-
-def matrix_summary_sentence(methods, by_framing, draws, explain=True):
-    """The closing lines: every whole-set figure the pairwise matrix cannot show --
-    Kendall's W, ICC(3,1) and the top-1 share over all the methods at once, per
-    framing. All three are computed here anyway (pair_metrics), and a reader who has
-    only the table in front of them should not have to go to the per-model table or
-    the CSV for the two that were previously dropped.
-
-    `explain=False` drops the sentence defining W / ICC / top-1: the per-model
-    tables are a block of a dozen otherwise identical captions, so the
-    definitions are stated once, on the pooled table they all sit under."""
-    def metrics(framing):
-        observed, sampled = by_framing[framing][1], by_framing[framing][2]
-        return (f"$W$ {format_metric(observed, sampled, 'w')}, "
-                f"ICC {format_metric(observed, sampled, 'icc')}, "
-                f"top-1 {format_metric(observed, sampled, 'top1', percent=True)}")
-
-    jointly = " jointly" if explain else ""
-    sentence = (f"Over all {len(methods)} methods{jointly}, base framing: "
-                f"{metrics('base')}; negated: {metrics('negated')}.")
-    if not explain:
-        return sentence
-    steps = ", ".join(f"{100 * (step + 1) // len(methods)}"
-                      for step in range(len(methods)))
-    return (f"{sentence} "
-            f"$W$ is the concordance of the {len(methods)} orderings (1 = identical, "
-            f"0 = unrelated); ICC is ICC(3,1), consistency form, over the methods' "
-            f"z-scored rank profiles, so a method whose raw scale is compressed is "
-            f"not charged for that; top-1 is the share of methods whose closest "
-            f"group is the modal one, ties split evenly, which on {len(methods)} "
-            f"methods can only be {steps}\\%.")
-
-
-def matrix_caption(spec, methods, model_scope, by_framing, draws):
-    """The pooled table carries the full explanation of what the matrix and the
-    summary figures are; the per-model tables that follow it repeat only their
-    own numbers, since a reader meets the explanation once and then wants the
-    dozen model tables to be scannable."""
-    title = latex_escape(matrix_title(model_scope))
-    if model_scope == POOLED:
-        return (f"\\textbf{{{title}.}} {spec['caption']} "
-                f"{matrix_summary_sentence(methods, by_framing, draws)}")
-    return (f"\\textbf{{{title}.}} "
-            f"{matrix_summary_sentence(methods, by_framing, draws, explain=False)}")
-
-
-def matrix_label_slug(model_scope):
-    """Slug from the DIRECTORY name, not the display title -- the title now
-    carries the official model name ("Kimi K2.7 Code"), and cross-references in
-    the thesis should not move because a model's marketing name gained a word."""
-    return "all-models" if model_scope == POOLED else slug(model_scope)
-
-
-def render_matrix_latex(spec, methods, model_scope, by_framing, draws, provenance):
-    """One small booktabs table per model: methods x methods, base framing in the
-    upper triangle and negated in the lower."""
-    row_labels, col_labels, grid = matrix_cells(methods, by_framing)
-    caption = matrix_caption(spec, methods, model_scope, by_framing, draws)
-    alignment = "l" + "r" * len(col_labels)
-    lines = [f"% {line}" for line in provenance]
-    lines += [
-        r"\begin{table}[htbp]",
-        r"  \centering",
-        r"  \small",
-        r"  \setlength{\tabcolsep}{4pt}",
-        f"  \\begin{{tabular}}{{{alignment}}}",
-        r"    \toprule",
-        "    " + " & ".join(["", *(latex_escape(label) for label in col_labels)]) + r" \\",
-        r"    \midrule",
-    ]
-    for row_label, cells in zip(row_labels, grid):
-        rendered = [latex_correlation_cell(text, marker) for text, marker in cells]
-        lines.append("    " + " & ".join([latex_escape(row_label), *rendered]) + r" \\")
-    lines += [r"    \bottomrule", r"  \end{tabular}",
-             f"  \\caption{{{caption}}}",
-             f"  \\label{{{spec['label']}-{matrix_label_slug(model_scope)}}}",
-             r"\end{table}"]
-    return "\n".join(lines)
-
-
-def render_matrix_markdown(methods, model_scope, by_framing, draws):
-    row_labels, col_labels, grid = matrix_cells(methods, by_framing)
-    header = ["", *col_labels]
-    body = [[row_label, *(markdown_cell(markdown_correlation_cell(text, marker))
-                          for text, marker in cells)]
-            for row_label, cells in zip(row_labels, grid)]
-    widths = [max(len(str(row[index])) for row in [header, *body])
-             for index in range(len(header))]
-    summary = markdown_cell(matrix_summary_sentence(methods, by_framing, draws))
-    lines = [f"#### {matrix_title(model_scope)}  (upper = base, lower = negated)", "",
-             summary, "",
-             "| " + " | ".join(c.ljust(w) for c, w in zip(header, widths)) + " |",
-             "|" + "|".join("-" * (width + 2) for width in widths) + "|"]
-    lines += ["| " + " | ".join(str(c).ljust(w) for c, w in zip(row, widths)) + " |"
-             for row in body]
-    return "\n".join(lines)
-
-
-def bymodel_factor_spec(factor):
-    """A minimal spec for one column of the per-model table: same row scoping as
-    "methods" (pooled + one row per model), but the raters are this factor's
-    levels with every method pooled together -- safe here because concordance
-    metrics operate on ranks (scale-free), unlike the crosslang table's JSD."""
-    return dict(name="bymodel", factor=factor, dimensions=[("model", True)],
-               kind="concordance")
-
-
-def reliability_spec():
-    """Raters = framing (base, negated) for one method at a time -- self-
-    negation invariance is inherently a per-method question, so unlike bymodel's
-    factors, method is never pooled here. Rows = model scopes (pooled + one
-    per model), matching every other table. Built whenever "internal" or
-    "negation" is requested: the internal table's disattenuated ratio needs
-    these r_xx values even if the user only asked to see the matrix."""
-    return dict(name="negation", factor="framing",
-               dimensions=[("method", False), ("model", True)], kind="pairs")
-
-
-def reliability_r_xx(values):
-    """The single base-vs-negated pair's language-blocked rho -- with exactly 2
-    raters (framings), pair_indices gives exactly one pair, and that value IS
-    the negation-invariance statistic for this (method, model scope). Only
-    valid on a negation job; an
-    internal job also carries "rho_lang" but with six pairs, of which [0] is a
-    cross-method correlation."""
-    return values["rho_lang"][0] if "rho_lang" in values else np.nan
-
-
-def reliability_cell(values, method, model_scope, sd_lookup):
-    """r_xx with the between-party SD superscripted -- the SD comes from the
-    internal table's own per-method score profile (see pair_metrics), and is
-    co-located so a reader can immediately check whether a low r_xx comes with
-    a low SD (restriction of range, e.g. semantic refusals scored as neutral)
-    rather than genuine test-retest noise."""
-    if values is None:
-        return "n/a"
-    return with_sd_superscript(format_correlation(reliability_r_xx(values)),
-                               sd_lookup.get((method, model_scope)))
-
-
-def render_reliability_latex(spec, methods, jobs, observed, provenance, sd_lookup):
-    """Grid: rows = model scopes, columns = methods, cell = that method's own
-    r_xx at that scope, next to its between-party SD. Pivoted from the flat
-    (method, model) job list built by reliability_spec, the same way
-    render_bymodel_latex pivots three factor job-lists -- here there is one
-    job-list, keyed by job["scope"] instead."""
-    by_scope = {job["scope"]: values for job, values in zip(jobs, observed)}
-    model_scopes = sorted({job["scope"][1] for job in jobs},
-                          key=lambda value: (value != POOLED, value))
-    header = ["Model", *(MATRIX_LABEL[method] for method in methods)]
-    alignment = "l" + "r" * len(methods)
-    lines = [f"% {line}" for line in provenance]
-    lines += [
-        r"\begin{table}[htbp]",
-        r"  \centering",
-        r"  \small",
-        f"  \\begin{{tabular}}{{{alignment}}}",
-        r"    \toprule",
-        "    " + " & ".join(header) + r" \\",
-        r"    \midrule",
-    ]
-    for index, model_scope in enumerate(model_scopes):
-        if index == 1:
-            lines.append(r"    \midrule")
-        row_label = POOLED_ROW_LABEL if model_scope == POOLED else short_model_name(model_scope)
-        cells = [reliability_cell(by_scope.get((method, model_scope)), method, model_scope,
-                                  sd_lookup)
-                for method in methods]
-        lines.append("    " + " & ".join([latex_escape(row_label), *cells]) + r" \\")
-    lines += [r"    \bottomrule", r"  \end{tabular}",
-             f"  \\caption{{{spec['caption']}}}",
-             f"  \\label{{{spec['label']}}}",
-             r"\end{table}"]
-    return "\n".join(lines)
-
-
-def render_reliability_markdown(methods, jobs, observed, sd_lookup):
-    by_scope = {job["scope"]: values for job, values in zip(jobs, observed)}
-    model_scopes = sorted({job["scope"][1] for job in jobs},
-                          key=lambda value: (value != POOLED, value))
-    header = ["Model", *(MATRIX_LABEL[method] for method in methods)]
-    body = []
-    for model_scope in model_scopes:
-        row_label = POOLED_ROW_LABEL if model_scope == POOLED else short_model_name(model_scope)
-        cells = [markdown_cell(reliability_cell(by_scope.get((method, model_scope)), method,
-                                                model_scope, sd_lookup))
-                for method in methods]
-        body.append([row_label, *cells])
-    widths = [max(len(str(row[i])) for row in [header, *body]) for i in range(len(header))]
-    lines = ["| " + " | ".join(c.ljust(w) for c, w in zip(header, widths)) + " |",
-             "|" + "|".join("-" * (width + 2) for width in widths) + "|"]
-    lines += ["| " + " | ".join(str(c).ljust(w) for c, w in zip(row, widths)) + " |"
-             for row in body]
-    return "\n".join(lines)
-
-
-def bymodel_cell(values):
-    """ICC(3,1) / Kendall's W / argmax share, all as bare fractions in the same
-    no-leading-zero style as the correlation matrices -- three numbers on one
-    scale read faster than a mix of decimals and percentages, and the cell stays
-    narrow enough for a single-column layout."""
-    if np.isnan(values["icc"]) or np.isnan(values["w"]):
-        return "n/a"
-    return "/".join(format_correlation(values[key]) for key in ("icc", "w", "top1"))
-
-
-def bymodel_row_label(job):
-    scope = job["scope"][0]
-    return POOLED_ROW_LABEL if scope == POOLED else short_model_name(scope)
-
-
-def render_bymodel_latex(spec, jobs_by_factor, observed_by_factor, provenance):
-    # Every cell is three "/"-joined numbers, so the columns run wide and read
-    # as one block without a separator. Tight inter-column padding plus a faint
-    # rule between the annotator sets keeps them apart without the heaviness of
-    # a full \vline. Needs xcolor in the preamble for \color{gray!25}.
-    header = ["Model", *(label for _, label in BYMODEL_FACTORS)]
-    alignment = "l" + GRAY_COLUMN_RULE.join("r" * len(BYMODEL_FACTORS))
-    lines = [f"% {line}" for line in provenance]
-    lines += [
-        r"\begin{table}[htbp]",
-        r"  \centering",
-        r"  \small",
-        r"  \setlength{\tabcolsep}{3pt}",
-        f"  \\begin{{tabular}}{{{alignment}}}",
-        r"    \toprule",
-        "    " + " & ".join(header) + r" \\",
-        r"    \midrule",
-    ]
-    for index, job in enumerate(jobs_by_factor[0]):
-        if index == 1:
-            lines.append(r"    \midrule")
-        cells = [bymodel_cell(observed_by_factor[column][index])
-                for column in range(len(BYMODEL_FACTORS))]
-        lines.append("    " + " & ".join([latex_escape(bymodel_row_label(job)), *cells])
-                     + r" \\")
-    lines += [r"    \bottomrule", r"  \end{tabular}",
-             f"  \\caption{{{spec['caption']}}}",
-             f"  \\label{{{spec['label']}}}",
-             r"\end{table}"]
-    return "\n".join(lines)
-
-
-def render_bymodel_markdown(spec, jobs_by_factor, observed_by_factor):
-    header = ["Model", *(label for _, label in BYMODEL_FACTORS)]
-    body = []
-    for index, job in enumerate(jobs_by_factor[0]):
-        cells = [bymodel_cell(observed_by_factor[column][index])
-                for column in range(len(BYMODEL_FACTORS))]
-        body.append([bymodel_row_label(job), *cells])
-    widths = [max(len(str(row[i])) for row in [header, *body]) for i in range(len(header))]
-    lines = [f"#### {spec['name']}", "",
-             "| " + " | ".join(c.ljust(w) for c, w in zip(header, widths)) + " |",
-             "|" + "|".join("-" * (width + 2) for width in widths) + "|"]
-    lines += ["| " + " | ".join(str(c).ljust(w) for c, w in zip(row, widths)) + " |"
-             for row in body]
-    return "\n".join(lines)
-
-
-def divergence_body(spec, jobs, observed, replicates, args):
-    """Mean pairwise JSD, W, and the two outlier raters -- the cross-language and
-    (if reused elsewhere) cross-rater distributional-agreement table."""
-    dimensions = len(spec["dimensions"])
-    header = [*(DIMENSION_HEADER[dimension] for dimension, _ in spec["dimensions"]),
-              "$m$", "runs/rater", "Mean JSD (bits)", "Kendall's $W$",
-              "Most divergent", "Most typical"]
-    rows = []
-    for job, values, sampled in zip(jobs, observed, replicates):
-        labels = scope_labels(spec, job["scope"])
-        runs = job["runs"]
-        divergent, typical = job["levels"][values["divergent"]], job["levels"][values["typical"]]
-        cells = [
-            *labels, *row_prefix(job, runs),
-            format_metric(values, sampled, "jsd"),
-            format_metric(values, sampled, "w"),
-            f"{divergent} ({values['rater_jsd'][values['divergent']]:.3f})",
-            f"{typical} ({values['rater_jsd'][values['typical']]:.3f})",
-        ]
-        rows.append(cells)
-        print(f"  {' / '.join(labels):52s} m={len(job['levels']):3d}  "
-              f"JSD={values['jsd']:.3f}  W={values['w']:.3f}  "
-              f"divergent={divergent}  typical={typical}")
-    return header, rows, set(range(dimensions)) | {len(header) - 2, len(header) - 1}
-
-
-def table_body(spec, jobs, observed, replicates, parties, args):
-    """(header, rows, prose_columns): the column indices render_latex must escape,
-    as opposed to the metric cells it must not (they already carry \\% and $...$).
-    Only concordance and divergence kinds use this path -- pairs renders one small
-    matrix table per job instead (see render_matrix_latex/_markdown)."""
-    if spec["kind"] == "divergence":
-        return divergence_body(spec, jobs, observed, replicates, args)
-    return concordance_body(spec, jobs, observed, replicates, parties, args)
-
-
-def format_pvalue(value):
-    return "$<10^{-4}$" if value < 1e-4 else f"{value:.4f}"
-
-
-def block_breaks(rows):
-    """Row indices to precede with a rule: where the outermost scope changes, unless
-    that scope is one row per block throughout and so needs no separating at all."""
-    blocks = [(label, len(list(group)))
-              for label, group in itertools.groupby(row[0] for row in rows)]
-    breaks, position = set(), 0
-    for index, (label, size) in enumerate(blocks):
-        previous = blocks[index - 1] if index else None
-        if previous and (size > 1 or previous[1] > 1 or previous[0] == POOLED):
-            breaks.add(position)
-        position += size
-    return breaks
-
-
-def render_latex(spec, header, rows, prose_columns, provenance):
-    # prose_columns are free text (scope labels, party/language names) and must be
-    # escaped; every other cell is written as LaTeX (\% and maths) on purpose and
-    # would be double-escaped if run through latex_escape again.
-    dimensions = len(spec["dimensions"])
-    alignment = "l" * dimensions + "rr" + "l" * (len(header) - dimensions - 2)
-    lines = [f"% {line}" for line in provenance]
-    lines += [
-        r"\begin{table}[htbp]",
-        r"  \centering",
-        r"  \small",
-        f"  \\begin{{tabular}}{{{alignment}}}",
-        r"    \toprule",
-        "    " + " & ".join(header) + r" \\",
-        r"    \midrule",
-    ]
-    breaks = block_breaks(rows)
-    for index, row in enumerate(rows):
-        if index in breaks:
-            lines.append(r"    \midrule")
-        cells = [latex_escape(cell) if position in prose_columns else cell
-                 for position, cell in enumerate(row)]
-        lines.append("    " + " & ".join(cells) + r" \\")
-    lines += [r"    \bottomrule", r"  \end{tabular}",
-             f"  \\caption{{{spec['caption']}}}",
-             f"  \\label{{{spec['label']}}}",
-             r"\end{table}"]
-    return "\n".join(lines)
-
-
-def render_markdown(spec, header, rows):
-    plain = [column.replace("$", "").replace("\\", "") for column in header]
-    body = [[str(cell).replace("\\%", "%") for cell in row] for row in rows]
-    widths = [max(len(row[index]) for row in [plain, *body]) for index in range(len(plain))]
-    lines = ["| " + " | ".join(c.ljust(w) for c, w in zip(plain, widths)) + " |",
-             "|" + "|".join("-" * (width + 2) for width in widths) + "|"]
-    lines += ["| " + " | ".join(c.ljust(w) for c, w in zip(row, widths)) + " |" for row in body]
-    return f"### {spec['name']}\n\n" + "\n".join(lines)
-
-
-def scope_record(spec, job):
-    """The scope columns common to every row of every table: one per possible
-    dimension, POOLED where a table has no such dimension, so the per-table frames
-    concatenate into one tidy CSV."""
-    scope = dict(zip((dimension for dimension, _ in spec["dimensions"]), job["scope"]))
-    record = {dimension: scope.get(dimension, POOLED) for dimension in DIMENSION_HEADER}
-    record.update({"raters": len(job["levels"]), "levels": "|".join(map(str, job["levels"])),
-                   "runs_per_rater_min": min(job["runs"]),
-                   "runs_per_rater_max": max(job["runs"])})
-    return record
-
-
-def tidy_frame(spec, jobs, observed, replicates, parties):
-    """The same numbers as a long CSV, for reuse outside the tex file. Columns are
-    the union of what any table kind produces; a kind that does not produce a given
-    metric leaves it NaN via the outer join in main()'s pd.concat."""
-    records = []
-    for job, values, sampled in zip(jobs, observed, replicates):
-        record = {"table": spec["name"], "factor": spec["factor"], **scope_record(spec, job)}
-        for key in ("w", "icc", "top1", "jsd"):
-            if key not in values:
-                continue
-            record[key] = values[key]
-            if sampled and key in sampled:
-                record[f"{key}_low"], record[f"{key}_high"] = percentile_interval(sampled[key])
-        if "winner" in values:
-            record["modal_top1_group"] = parties[values["winner"]]
-        if "divergent" in values:
-            record["most_divergent"] = job["levels"][values["divergent"]]
-            record["most_divergent_jsd"] = values["rater_jsd"][values["divergent"]]
-            record["most_typical"] = job["levels"][values["typical"]]
-            record["most_typical_jsd"] = values["rater_jsd"][values["typical"]]
-        if spec["name"] == "negation" and "rho_lang" in values:
-            # Keyed on the table, not just on "rho_lang" being present: the
-            # internal jobs carry that key too, but with six pairs, where [0]
-            # is a cross-method correlation. Here there are exactly 2 raters
-            # (base, negated), so the single pair is the negation-invariance
-            # statistic and fits the one-row-per-job schema as a scalar. Both
-            # it and its Spearman-Brown step-up are exported: the raw value is
-            # what the table reports, the stepped-up one is what the internal
-            # matrix divides by.
-            record["r_neg"] = reliability_r_xx(values)
-            record["r_xx_spearman_brown"] = spearman_brown(record["r_neg"])
-            if sampled and "rho_lang" in sampled:
-                record["r_neg_low"], record["r_neg_high"] = percentile_interval(
-                    sampled["rho_lang"][:, 0])
-        records.append(record)
-    return pd.DataFrame.from_records(records)
-
-
-def pairs_frame(spec, jobs, observed, replicates):
-    """Long (table, scope..., method_a, method_b, rho[, rho_low, rho_high][,
-    rho_lang, rho_lang_low, rho_lang_high]) -- the full pairwise detail the
-    internal-consistency table only shows a marker for."""
-    records = []
-    for job, values, sampled in zip(jobs, observed, replicates):
-        for local, (a, b) in enumerate(pair_indices(len(job["levels"]))):
-            record = {"table": spec["name"], **scope_record(spec, job),
-                      "method_a": job["levels"][a], "method_b": job["levels"][b],
-                      "rho": values["rho"][local]}
-            if sampled:
-                record["rho_low"], record["rho_high"] = percentile_interval(
-                    sampled["rho"][:, local])
-            if "rho_lang" in values:
-                record["rho_lang"] = values["rho_lang"][local]
-                if sampled:
-                    record["rho_lang_low"], record["rho_lang_high"] = percentile_interval(
-                        sampled["rho_lang"][:, local])
-            records.append(record)
-    return pd.DataFrame.from_records(records)
-
-
-# --------------------------------------------------------------------------- #
 
 def table_specs(args, methods):
     method_names = "; ".join(METHOD_LABEL[method] for method in methods)
@@ -1909,42 +932,30 @@ def resolve_model_dirs(results_dir, selected):
     return model_dirs
 
 
-def main():
-    args = parse_args()
-    methods = [method.strip() for method in args.methods.split(",") if method.strip()]
-    unknown = [method for method in methods if method not in ALL_METHODS]
-    if unknown:
-        raise SystemExit(f"Unknown method(s): {unknown}. Available: {list(ALL_METHODS)}")
+@dataclass
+class JobSet:
+    """Every row the run will compute, plus the index needed to find them again.
 
-    specs = table_specs(args, methods)
-    wanted = DEFAULT_TABLES if args.table == "all" else [t.strip() for t in args.table.split(",")]
-    unknown = [table for table in wanted if table not in specs]
-    if unknown:
-        raise SystemExit(f"Unknown table(s): {unknown}. Available: {list(specs)}")
+    `jobs` is one flat list because the bootstrap resamples all rows on shared draws;
+    the slices say which stretch of it each table owns. Topic rows sit outside it --
+    they are never bootstrapped -- which is why they are a separate field rather than
+    another slice.
 
-    results_dir = Path("data") / f"{args.dataset}_results"
-    if not results_dir.exists():
-        raise SystemExit(f"Directory not found: {results_dir} (run from the repo root)")
+    This was 83 lines inline in `main`, building five collections at once with the
+    reader expected to keep all five in their head."""
 
-    tables_dir = results_dir / "tables"
-    if args.no_output:
-        args.output = args.csv = args.pairs_csv = None
-    else:
-        args.output = args.output or str(tables_dir / "rank_consistency.tex")
-        args.csv = args.csv or str(tables_dir / "rank_consistency.csv")
-        args.pairs_csv = args.pairs_csv or str(tables_dir / "rank_consistency_pairs.csv")
+    jobs: list
+    table_slices: dict
+    bymodel_slices: dict
+    reliability_index: dict
+    internal_index: dict
+    topic_jobs: list
+    topic_observed: list
 
-    party_df = positions_frame(args.positions, not args.no_collapse_ecr_id)
-    scores = load_scores(resolve_model_dirs(results_dir, args.model), methods, party_df)
-    scores = keep_complete_models(scores, methods, args.allow_partial_models,
-                                 args.min_method_coverage)
-    parties = common_parties(scores)
-    tensor, cells, statements = score_tensor(scores, parties)
-    print(f"\n{len(cells)} runs, {len(parties)} EP groups ({', '.join(parties)}), "
-          f"{len(statements)} statements.")
-    if "bymodel" in wanted:
-        check_unique_short_names(cells["model"].unique())
 
+def build_all_jobs(cells, specs, wanted, methods, tensor, statements, args):
+    """Assemble the rows for every requested table, in one flat bootstrap-able list."""
+    topic_jobs, topic_observed = [], []
     jobs, table_slices, bymodel_slices = [], {}, {}
     reliability_index, internal_index = {}, {}
     if "internal" in wanted or "negation" in wanted:
@@ -2027,7 +1038,69 @@ def main():
             raise SystemExit(f"No usable rows for table '{name}'.")
         table_slices[name] = slice(len(jobs), len(jobs) + len(table_jobs))
         jobs += table_jobs
+    return JobSet(jobs, table_slices, bymodel_slices, reliability_index, internal_index,
+                  topic_jobs, topic_observed)
 
+
+@dataclass
+class OutputPaths:
+    """Where the three artefacts go, resolved once.
+
+    `main` used to write the defaults back into the parsed `args` -- setting
+    `args.output = args.csv = args.pairs_csv = None` for --no-output, and `or`-defaults
+    otherwise -- so the Namespace meant something different after the call than the CLI
+    said. Resolving defaults belongs to a config object, not to the parsed arguments."""
+
+    latex: str | None
+    tidy_csv: str | None
+    pairs_csv: str | None
+
+    @classmethod
+    def resolve(cls, args, tables_dir):
+        if args.no_output:
+            return cls(None, None, None)
+        return cls(
+            latex=args.output or str(tables_dir / "rank_consistency.tex"),
+            tidy_csv=args.csv or str(tables_dir / "rank_consistency.csv"),
+            pairs_csv=args.pairs_csv or str(tables_dir / "rank_consistency_pairs.csv"),
+        )
+
+
+def main():
+    args = parse_args()
+    methods = [method.strip() for method in args.methods.split(",") if method.strip()]
+    unknown = [method for method in methods if method not in ALL_METHODS]
+    if unknown:
+        raise SystemExit(f"Unknown method(s): {unknown}. Available: {list(ALL_METHODS)}")
+
+    specs = table_specs(args, methods)
+    wanted = DEFAULT_TABLES if args.table == "all" else [t.strip() for t in args.table.split(",")]
+    unknown = [table for table in wanted if table not in specs]
+    if unknown:
+        raise SystemExit(f"Unknown table(s): {unknown}. Available: {list(specs)}")
+
+    results_dir = Path("data") / f"{args.dataset}_results"
+    if not results_dir.exists():
+        raise SystemExit(f"Directory not found: {results_dir} (run from the repo root)")
+
+    outputs = OutputPaths.resolve(args, results_dir / "tables")
+
+    party_df = positions_frame(args.positions, not args.no_collapse_ecr_id)
+    scores = load_scores(resolve_model_dirs(results_dir, args.model), methods, party_df)
+    scores = keep_complete_models(scores, methods, args.allow_partial_models,
+                                 args.min_method_coverage)
+    parties = common_parties(scores)
+    tensor, cells, statements = score_tensor(scores, parties)
+    print(f"\n{len(cells)} runs, {len(parties)} EP groups ({', '.join(parties)}), "
+          f"{len(statements)} statements.")
+    if "bymodel" in wanted:
+        check_unique_short_names(cells["model"].unique())
+
+    job_set = build_all_jobs(cells, specs, wanted, methods, tensor, statements, args)
+    jobs = job_set.jobs
+    table_slices, bymodel_slices = job_set.table_slices, job_set.bymodel_slices
+    reliability_index, internal_index = job_set.reliability_index, job_set.internal_index
+    topic_jobs, topic_observed = job_set.topic_jobs, job_set.topic_observed
     observed_means = statement_means(np.nan_to_num(tensor), np.isfinite(tensor).astype(float),
                                      np.ones((1, len(statements))))
     observed_ranks = run_ranks(observed_means)
@@ -2172,21 +1245,21 @@ def main():
     document = "\n\n".join(rendered)
     print()
     print(document)
-    if args.output:
-        Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-        Path(args.output).write_text(document + "\n", encoding="utf-8")
-        print(f"\nWrote {args.output}")
-    if args.csv:
-        Path(args.csv).parent.mkdir(parents=True, exist_ok=True)
-        pd.concat(tidy, ignore_index=True).to_csv(args.csv, index=False)
-        print(f"Wrote {args.csv}")
-    if args.pairs_csv:
+    if outputs.latex:
+        Path(outputs.latex).parent.mkdir(parents=True, exist_ok=True)
+        Path(outputs.latex).write_text(document + "\n", encoding="utf-8")
+        print(f"\nWrote {outputs.latex}")
+    if outputs.tidy_csv:
+        Path(outputs.tidy_csv).parent.mkdir(parents=True, exist_ok=True)
+        pd.concat(tidy, ignore_index=True).to_csv(outputs.tidy_csv, index=False)
+        print(f"Wrote {outputs.tidy_csv}")
+    if outputs.pairs_csv:
         if not pairs:
             print("--pairs-csv given but no 'internal'-kind table was generated; skipping.")
         else:
-            Path(args.pairs_csv).parent.mkdir(parents=True, exist_ok=True)
-            pd.concat(pairs, ignore_index=True).to_csv(args.pairs_csv, index=False)
-            print(f"Wrote {args.pairs_csv}")
+            Path(outputs.pairs_csv).parent.mkdir(parents=True, exist_ok=True)
+            pd.concat(pairs, ignore_index=True).to_csv(outputs.pairs_csv, index=False)
+            print(f"Wrote {outputs.pairs_csv}")
 
 
 if __name__ == "__main__":

@@ -11,20 +11,15 @@ axis (leaning toward its +1 pole); negative => OPPOSING it.  Pooled over languag
 (and track), this shows, per axis, which statements the model supports vs opposes.
 """
 import argparse
-import importlib.util
 import json
 import re
 from pathlib import Path
 
 import pandas as pd
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+from utils import flip_likert, likert_to_stance
 
-# load utils/likert.py directly: importing the utils package pulls in requests via __init__
-_spec = importlib.util.spec_from_file_location("euandi_likert", REPO_ROOT / "utils" / "likert.py")
-_likert = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_likert)
-flip_likert, likert_to_stance = _likert.flip_likert, _likert.likert_to_stance
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 RESULTS_ROOT = REPO_ROOT / "data" / "euandi_2024_results"
 QUESTIONNAIRE = REPO_ROOT / "data" / "euandi_2024_data" / "euandi_2024_questionnaire.jsonl"
@@ -41,10 +36,10 @@ POLE = {
     "Ukraine": "pro-Ukraine support vs against",
 }
 
-# choice_<lang>[_negated|_question]_v<variant>
-CHOICE_RE = re.compile(r"^choice_([a-z]{2})(?:_(negated|question))?_v(\d+)$")
-# a survey csv stem is just the comma-joined languages, optionally + _negated/_question
-SURVEY_RE = re.compile(r"^[a-z]{2}(?:,[a-z]{2})*(?:_(negated|question))?$")
+# choice_<lang>[_negated]_v<variant>
+CHOICE_RE = re.compile(r"^choice_([a-z]{2})(?:_(negated))?_v(\d+)$")
+# a survey csv stem is just the comma-joined languages, optionally + _negated
+SURVEY_RE = re.compile(r"^[a-z]{2}(?:,[a-z]{2})*(?:_(negated))?$")
 
 
 def load_axis_coding():
@@ -154,7 +149,7 @@ def main():
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--model-dir", default=str(RESULTS_ROOT / "mistral-medium-3.5"))
     parser.add_argument("--tracks", default="base",
-                        help="comma list of base,negated,question (negated is stance-flipped)")
+                        help="comma list of base,negated (negated is stance-flipped)")
     parser.add_argument("--out", default=None)
     args = parser.parse_args()
 

@@ -19,9 +19,7 @@ Outputs (under data/<dataset>_results/plots/refusals/):
   * refusal_by_variant.png -- grouped bars per model broken down by statement variant
 """
 import argparse
-import os
 import re
-import sys
 from pathlib import Path
 
 import matplotlib
@@ -34,10 +32,8 @@ import torch.nn.functional as F
 from tqdm import tqdm
 from transformers import AutoModel, AutoTokenizer
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from analysis.plotting.plot_classified_parties import model_display_name
-from utils import ALL_LANGS, FAILED_REASON_VALUES, REFUSED_REASON_PREFIXES, VARIANTS, VARIANT_LABELS
+from analysis.core import model_display_name
+from utils import ALL_LANGS, FAILED_REASON_VALUES, REFUSED_REASON_PREFIXES, VARIANTS, VARIANT_LABELS, VARIANT_PATTERN
 
 
 SKIP_MODEL_SUBSTRINGS = ()
@@ -96,14 +92,14 @@ REFUSAL_TEMPLATES = [
 ]
 
 LIKERT_FILENAME_PATTERN = re.compile(
-    r"^(?P<langs>[a-z]{2}(?:,[a-z]{2})*)(?P<variant>|_negated)\.csv$"
+    r"^(?P<langs>[a-z]{2}(?:,[a-z]{2})*)" + VARIANT_PATTERN + r"\.csv$"
 )
 SPEECHES_FILENAME_PATTERN = re.compile(
-    r"^speeches_(?P<langs>[a-z]{2}(?:,[a-z]{2})*)(?P<variant>|_negated)\.csv$"
+    r"^speeches_(?P<langs>[a-z]{2}(?:,[a-z]{2})*)" + VARIANT_PATTERN + r"\.csv$"
 )
-REASON_COLUMN_PATTERN = re.compile(r"^reason_(?P<lang>[a-z]{2})(?P<variant>|_negated)_v(?P<idx>\d+)$")
-CHOICE_COLUMN_PATTERN = re.compile(r"^choice_(?P<lang>[a-z]{2})(?P<variant>|_negated)_v(?P<idx>\d+)$")
-ANSWER_COLUMN_PATTERN = re.compile(r"^answer_(?P<lang>[a-z]{2})(?P<variant>|_negated)_v(?P<idx>\d+)$")
+REASON_COLUMN_PATTERN = re.compile(r"^reason_(?P<lang>[a-z]{2})" + VARIANT_PATTERN + r"_v(?P<idx>\d+)$")
+CHOICE_COLUMN_PATTERN = re.compile(r"^choice_(?P<lang>[a-z]{2})" + VARIANT_PATTERN + r"_v(?P<idx>\d+)$")
+ANSWER_COLUMN_PATTERN = re.compile(r"^answer_(?P<lang>[a-z]{2})" + VARIANT_PATTERN + r"_v(?P<idx>\d+)$")
 ORIGINAL_TEXT_PATTERN = re.compile(r"^original_text_(?P<lang>[a-z]{2})$")
 
 
@@ -578,7 +574,7 @@ def plot_refusal_by_variant(variant_df, output_path):
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dataset", default="euandi_2024", choices=["euandi_2019", "euandi_2024"])
+    parser.add_argument("--dataset", default="euandi_2024", choices=["euandi_2024"])
     parser.add_argument("--embed_model", default=DEFAULT_EMBED_MODEL)
     parser.add_argument("--threshold", type=float, default=DEFAULT_SIM_THRESHOLD,
                         help="Cosine-similarity cutoff for marking a free-text response as a semantic refusal.")

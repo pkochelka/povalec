@@ -44,7 +44,6 @@ Usage
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
 import pandas as pd
@@ -52,10 +51,8 @@ from rdflib import Graph
 from tqdm import tqdm
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from preprocess_data import LANG_NAME_TO_CODE
+from preprocessing.preprocess_data import LANG_NAME_TO_CODE
 
 DATA_DIR = PROJECT_ROOT / "data" / "EuroParl Custom"
 DEFAULT_LINKEDEP_DIR = DATA_DIR / "data" / "linkedEP"

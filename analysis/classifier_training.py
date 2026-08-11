@@ -13,7 +13,6 @@ The best checkpoint is picked on the uniform dev split and evaluated once on tes
 """
 import functools
 import os
-import sys
 import json
 from dataclasses import dataclass
 
@@ -41,7 +40,6 @@ except (ImportError, AttributeError):
     pass
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, PROJECT_ROOT)
 
 from analysis.europarl_classification import (
     MIN_LANGUAGE_SAMPLES,

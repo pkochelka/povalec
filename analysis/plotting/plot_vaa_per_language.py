@@ -8,8 +8,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from utils import VARIANT_PATTERN
 
-VAA_CSV_PATTERN = re.compile(r"^vaa(?P<variant>|_negated)_(?P<langs>[a-z,]+)\.csv$")
+VAA_CSV_PATTERN = re.compile(r"^vaa" + VARIANT_PATTERN + r"_(?P<langs>[a-z,]+)\.csv$")
 
 
 def find_vaa_csvs(model_dir: Path) -> dict[str, Path]:

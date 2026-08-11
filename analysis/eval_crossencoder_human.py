@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Agreement of a stance cross-encoder checkpoint with the hand annotations.
 
-Everything else that validates the cross-encoder scores it against silver labels
--- the LLM judge (compare_mmbert_vs_labeled.py) or the NLI proxy
-(compare_stance_scoring.py). This one scores the hand-labeled speeches, whose
-`choice` column is already stance in [-1, 1] in 5 bins (+1 = totally agree).
+The other validator scores the cross-encoder against silver labels from the LLM
+judge (compare_mmbert_vs_labeled.py). This one scores the hand-labeled speeches,
+whose `choice` column is already stance in [-1, 1] in 5 bins (+1 = totally agree).
 
 The cross-encoder emits a continuous stance; for the Likert-only metrics
 (quadratic kappa, 5x5 confusion) it is cut into the same 5 bins the sample was
@@ -14,7 +13,6 @@ stay on the continuous score. Human is ground truth throughout.
 import argparse
 import json
 import os
-import sys
 
 import numpy as np
 import pandas as pd
@@ -23,13 +21,13 @@ from scipy.stats import pearsonr, spearmanr
 from sklearn.metrics import cohen_kappa_score, confusion_matrix
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, PROJECT_ROOT)
-sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from utils import stance_to_likert
-from analysis.compare_stance_scoring import DATA_DIR, load_regressor, predict_stances
+from utils import stance_to_likert, configure_stdout
+from analysis.stance_crossencoder import DATA_DIR, load_regressor, predict_stances
 from analysis.sample_speeches_for_labeling import STANCE_BIN_EDGES
 from analysis.validate_stance_judge import NEUTRAL_BAND, direction, read_csv_any
+
+configure_stdout()
 
 DEFAULT_MODEL_DIR = os.path.join(PROJECT_ROOT, "mmbert-small-stance-crossencoder")
 LABELED = os.path.join(DATA_DIR, "stance_speeches_labeled_en-cz-sk-fr.csv")

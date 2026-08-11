@@ -68,3 +68,38 @@ PARTY_COLORS = {
     "ECR+ID":     "#164B75",
 }
 FALLBACK_PARTY_COLOR = "#888888"
+
+# EU&I party short_name -> EP group. The EU-level ("europarty") half is separate from the
+# national half because only the first is invertible: every EP group has exactly one
+# europarty voicing it, while a group has many national member parties.
+#
+# This is the single source for the direction. The inverse used to be hand-written in a
+# second file, which is exactly how an EP group ends up silently reading another group's
+# euandi positions.
+EUROPARTY_BY_EP_GROUP = {
+    "PPE": "EPP", "S&D": "PES", "ALDE": "ALDE", "ECR": "ECR",
+    "Greens/EFA": "EGP", "ID": "ID", "GUE/NGL": "PEL",
+}
+EP_GROUP_BY_EUROPARTY = {party: group for group, party in EUROPARTY_BY_EP_GROUP.items()}
+
+# Kept 7-group (ECR and ID apart) on purpose: the compasses read this directly and plot
+# the two separately. The ECR+ID collapse that matches the collapsed classifier label is
+# applied by the one caller that needs it, in evaluate_euandi.agreement_by_ep_group.
+EP_GROUP_BY_NATIONAL_PARTY = {
+    "CDU": "PPE", "SPD": "S&D", "Grüne": "Greens/EFA", "FDP": "ALDE",
+    "AfD": "ID", "Linke": "GUE/NGL",
+
+    "RE": "ALDE", "RN": "ID", "PS": "S&D", "LFI": "GUE/NGL",
+    "EELV": "Greens/EFA", "LR": "PPE",
+
+    "FDI": "ECR", "Lega": "ID", "FI": "PPE", "PD": "S&D",
+    "M5S": "GUE/NGL", "AVS": "Greens/EFA", "AR": "ALDE",
+
+    "ND": "PPE", "PASOK": "S&D", "SYRIZA": "S&D", "EL": "ECR",
+
+    "PP": "PPE", "PSOE": "S&D", "Vox": "ECR",
+    "Sumar": "GUE/NGL", "Podemos": "GUE/NGL",
+}
+
+# What `load_party_positions` maps `short_name` through, either basis at once.
+EP_GROUP_BY_PARTY = {**EP_GROUP_BY_EUROPARTY, **EP_GROUP_BY_NATIONAL_PARTY}

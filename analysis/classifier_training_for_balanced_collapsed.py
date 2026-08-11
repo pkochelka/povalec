@@ -17,7 +17,6 @@ with logit-adjusted CE off the natural-prior collapsed/train.parquet instead.
 """
 import json
 import os
-import sys
 
 import numpy as np
 from dotenv import load_dotenv
@@ -25,7 +24,6 @@ from sklearn.metrics import f1_score
 from transformers import AutoTokenizer, EarlyStoppingCallback, Trainer
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, PROJECT_ROOT)
 
 from analysis.europarl_classification import (
     classification_report_text,

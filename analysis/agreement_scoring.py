@@ -1,45 +1,17 @@
 import argparse
-import json
 import os
-import sys
 
 import numpy as np
 import pandas as pd
 import torch
 from tqdm import tqdm
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, PROJECT_ROOT)
 
 from utils import ALL_LANGS_STR, FAILED_REASON_VALUES, REFUSED_REASON_PREFIXES, SOURCE_INPUT_FILENAME, SOURCE_TEXT_COLUMN_PREFIX, VARIANTS
+from analysis.stance_crossencoder import MODEL_DIR, load_crossencoder, score_pairs
 
-DEFAULT_CROSSENCODER_DIR = os.path.join(PROJECT_ROOT, "mmbert-small-stance-crossencoder")
-DEFAULT_MAX_TOKEN_LENGTH = 512
-
-
-
-def load_crossencoder(model_dir, device):
-    tokenizer = AutoTokenizer.from_pretrained(model_dir)
-    model = AutoModelForSequenceClassification.from_pretrained(model_dir).to(device)
-    model.eval()
-    config_path = os.path.join(model_dir, "stance_config.json")
-    max_length = DEFAULT_MAX_TOKEN_LENGTH
-    if os.path.exists(config_path):
-        with open(config_path, encoding="utf-8") as f:
-            max_length = json.load(f).get("max_len", DEFAULT_MAX_TOKEN_LENGTH)
-    return tokenizer, model, max_length
-
-
-@torch.no_grad()
-def agreement_scores(statements, speeches, tokenizer, model, device, max_length):
-    inputs = tokenizer(
-        statements, speeches,
-        return_tensors="pt", truncation="only_second", padding=True,
-        max_length=max_length,
-    ).to(device)
-    logits = model(**inputs).logits.view(-1).float().cpu().numpy()
-    return np.clip(logits, -1.0, 1.0)
+DEFAULT_CROSSENCODER_DIR = MODEL_DIR
 
 
 def text_variant_indices(df, lang_variant, text_prefix):
@@ -83,7 +55,7 @@ def score_pairs_in_batches(pairs, tokenizer, model, device, max_length, batch_si
         chunk = pairs[start:start + batch_size]
         chunk_statements = [statement for _, _, statement, _ in chunk]
         chunk_speeches = [speech for _, _, _, speech in chunk]
-        scores[start:start + len(chunk)] = agreement_scores(
+        scores[start:start + len(chunk)] = score_pairs(
             chunk_statements, chunk_speeches, tokenizer, model, device, max_length,
         )
     return scores
@@ -139,7 +111,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--crossencoder_dir", default=DEFAULT_CROSSENCODER_DIR)
     parser.add_argument("--llm", default="qwen3.5-122b")
-    parser.add_argument("--dataset", default="euandi_2024", choices=["euandi_2019", "euandi_2024"])
+    parser.add_argument("--dataset", default="euandi_2024", choices=["euandi_2024"])
     parser.add_argument("--input", default=None)
     parser.add_argument("--source", default="speeches", choices=["speeches", "reasons"])
     parser.add_argument("--variant", default="", choices=VARIANTS)

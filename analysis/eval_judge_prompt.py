@@ -12,7 +12,6 @@ used vs. how often the human used them.
 import argparse
 import json
 import os
-import sys
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -20,12 +19,12 @@ import pandas as pd
 from sklearn.metrics import cohen_kappa_score, confusion_matrix
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, PROJECT_ROOT)
-sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from utils import stance_to_likert, likert_to_stance
+from utils import stance_to_likert, likert_to_stance, configure_stdout
 from analysis.llm_stance_judge import judge_one
 from analysis.validate_stance_judge import read_csv_any, LABELED, META, DATA_DIR
+
+configure_stdout()
 
 DEFAULT_PROMPT = os.path.join(PROJECT_ROOT, "prompts", "stance_judge.json")
 # Speeches whose text is embedded in the prompt as worked examples -- scoring them

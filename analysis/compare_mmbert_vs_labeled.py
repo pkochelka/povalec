@@ -1,24 +1,21 @@
 #!/usr/bin/env python3
 """Run the stance cross-encoder on a labeled speeches CSV and compare to its stored scoring.
 
-Mirrors compare_stance_scoring.py, but instead of the raw *_scored.csv files it reads a
-stance_speeches_llm_labeled_*.csv and compares the cross-encoder against the score already
-in that file (the LLM judge by default, or the NLI proxy).
+Reads a stance_speeches_llm_labeled_*.csv and compares the cross-encoder against the score
+already in that file, which is the LLM judge's.
 """
 import argparse
 import os
-import sys
 
 import pandas as pd
 import torch
 from scipy.stats import pearsonr, spearmanr
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, PROJECT_ROOT)
+from analysis.stance_crossencoder import DATA_DIR, load_regressor, predict_stances
 
-from analysis.compare_stance_scoring import (
-    DATA_DIR, READABLE_LANGUAGES, load_regressor, predict_stances,
-)
+# Languages a human reviewer of this script can actually read the examples in. Was shared
+# with compare_stance_scoring.py until that was deleted; this is now its only consumer.
+READABLE_LANGUAGES = ["en", "cz", "sk", "pl", "fr", "lu", "be"]
 
 DEFAULT_CSV = os.path.join(DATA_DIR, "stance_speeches_llm_labeled_kimi_on_glm_full.csv")
 

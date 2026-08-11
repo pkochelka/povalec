@@ -19,7 +19,7 @@ Both tracks are scored two ways, giving four measurements per model:
 | Method | Track | Scoring |
 | --- | --- | --- |
 | `vaa-likert` | direct | agreement with each EP group's euandi positions |
-| `vaa-speeches` | indirect | same, on stance recovered from prose |
+| `vaa-speeches` | indirect | same, on stance recovered from prose by the cross-encoder |
 | `clf-reasons` | direct | mmBERT EP-party classifier over the justifications |
 | `clf-speeches` | indirect | same classifier over the prose |
 
@@ -32,9 +32,28 @@ concordance across method, language, prompt, framing and model.
 
 Python 3.10-3.14.
 
+Dependencies are managed with [uv](https://docs.astral.sh/uv/), into a project-local
+`.venv` — never into the system interpreter.
+
 ```bash
-pip install -r requirements.txt
+uv venv --python 3.11         # creates ./.venv
+uv pip install -e .           # or: uv pip install -e ".[lid]" for the fastText step
 ```
+
+Then either activate it (`.venv/Scripts/activate` on Windows, `source .venv/bin/activate`
+elsewhere) or prefix commands with `uv run`:
+
+```bash
+uv run python analysis/analyze_all.py --only evaluate_euandi
+```
+
+`uv.lock` pins the exact resolution and is committed; `uv sync` reproduces it exactly,
+which is what a rerun of the thesis pipeline should use. `uv lock --upgrade` refreshes it
+deliberately.
+
+The editable install is what puts `analysis`, `answer_generation`, `preprocessing`,
+`statement_collection` and `utils` on the import path. Without it the scripts cannot import
+each other — they no longer patch `sys.path` themselves.
 
 `.env.local` in the repo root supplies the API config:
 
@@ -43,8 +62,8 @@ BASE_URL=     # OpenAI-compatible endpoint
 AUTH_TOKEN=   # optional bearer token
 ```
 
-`HF_TOKEN` (read from `~/.env.local`) is only needed to train classifiers. Scripts bootstrap
-`sys.path` themselves; run them from the repo root.
+`HF_TOKEN` (read from `~/.env.local`) is only needed to train classifiers. Run the scripts
+from the repo root — data and prompt paths are resolved relative to it.
 
 ## Pipeline
 
@@ -136,7 +155,11 @@ analysis/validate_stance_judge.py                    # human vs judge vs NLI agr
 
 ```text
 answer_generation/   generation.py engine + one thin adapter per track
-analysis/            scoring, training, evaluation, LaTeX tables
+analysis/core/       reads the results tree: filename grammar, loaders, positions,
+                     questionnaire axis coding
+analysis/stats.py    pure statistics: Kendall's W, ICC, Spearman-Brown, concordance
+analysis/tables/     table labels + LaTeX/Markdown rendering
+analysis/            scoring, training, evaluation
 analysis/plotting/   figures
 preprocessing/       EuroParl corpus -> classifier splits
 utils/               constants, Likert conversions, API client, sampling
@@ -145,8 +168,14 @@ data/                inputs and per-model results (gitignored)
 ```
 
 `utils/constants.py` is the single source for the language list, prompt framings, EP-group
-order and palette, questionnaire axes, and results-filename templates. Do not re-spell these
-per script.
+order and palette, questionnaire axes, and the EP-group ↔ party mapping. Do not re-spell
+these per script.
+
+`analysis/core/` owns everything that *reads* the results tree — the filename and column
+grammar in both directions (`core/paths.py`), the stance loaders and the six scoring
+methods (`core/results.py`), and the positions basis (`core/positions.py`). The dependency
+rule is one-way: **analysis and plotting import core; core imports neither.** Table and
+statistics code must never import from `analysis/plotting/`.
 
 ## Conventions
 

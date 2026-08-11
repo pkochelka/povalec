@@ -10,7 +10,6 @@ register). The second stage is selected on LLM-judged speeches from held-out sou
 models (OOD_SOURCE_MODELS), which the training data never touches.
 """
 import os
-import sys
 import json
 import shutil
 
@@ -26,7 +25,6 @@ from transformers import (
 )
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, PROJECT_ROOT)
 
 from utils import likert_to_stance, load_dataframe
 from analysis.stance_detector_training import stance_metrics, freeze_bottom_layers, select_device

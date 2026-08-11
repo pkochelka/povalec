@@ -1,6 +1,5 @@
 import argparse
 import re
-import sys
 from math import ceil
 from pathlib import Path
 
@@ -10,13 +9,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-_ANALYSIS_DIR = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_ANALYSIS_DIR.parent))
-sys.path.insert(0, str(_ANALYSIS_DIR))
-
 from utils import VARIANTS, VARIANT_LABELS, flip_likert
-from sample_speeches_for_labeling import STANCE_BIN_EDGES
-from analysis.plotting.plot_classified_parties import model_display_name
+from analysis.sample_speeches_for_labeling import STANCE_BIN_EDGES
+from analysis.core import model_display_name
 
 VARIANT_COLORS = {"base": "#2CA02C", "negated": "#D62728"}
 # On the cross-model panel the colour is spent on the model, so the framing split

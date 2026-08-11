@@ -13,19 +13,11 @@ The axes overlap -- the same statement can load Economy, Ecology and Left-Right
 at once -- so the per-axis figures do not partition the pooled ones.
 """
 import argparse
-import sys
 from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-
-_ANALYSIS_DIR = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_ANALYSIS_DIR.parent))
-# evaluate_cronbach.py imports its siblings by bare name, so analysis/ has to be
-# importable as well as the repo root.
-sys.path.insert(0, str(_ANALYSIS_DIR))
-sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 import matplotlib
 matplotlib.use("Agg")
@@ -33,13 +25,17 @@ import matplotlib.pyplot as plt
 
 from analysis import plotting  # noqa: F401  (package import for the module below)
 from analysis.plotting import plot_classified_parties as pcp
-from analysis.evaluate_cronbach import AXES, axis_directions_in_admin_order
+
+from analysis.core.questionnaire import axis_directions_in_admin_order
 from analysis.evaluate_euandi import (
     DEFAULT_POSITIONS, POSITION_CHOICES, load_party_positions, positions_path,
 )
 from analysis.vaa_agreement_ci import (
     agreement_matrices, bootstrap_group_means, stance_frame_for,
 )
+from utils import AXES, configure_stdout
+
+configure_stdout()
 
 TOPICS_DIRNAME = "topics"
 OVERVIEW_FILENAME = "topics_axis_party_heatmap.png"

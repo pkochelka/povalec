@@ -9,7 +9,6 @@ mmBERT model.
 """
 import argparse
 import json
-import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -21,7 +20,6 @@ import pandas as pd
 from sklearn.metrics import f1_score
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
 
 from utils import call_api, extract_json, save_checkpoint
 from analysis.europarl_classification import (

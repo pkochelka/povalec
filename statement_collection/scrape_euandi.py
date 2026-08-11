@@ -1,12 +1,8 @@
-import os
-import sys
 import json
 import time
 
 import httpx
 from bs4 import BeautifulSoup
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils import LANGS
 

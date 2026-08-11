@@ -20,7 +20,6 @@ below comes from train's natural, heavily imbalanced priors.
 """
 
 import argparse
-import sys
 from pathlib import Path
 
 import matplotlib
@@ -30,14 +29,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pyarrow.parquet as pq
 
-_ANALYSIS_DIR = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_ANALYSIS_DIR.parent))
-
-from analysis.plotting.plot_ep_group_rank_boxplots import (
-    FALLBACK_PARTY_COLOR,
-    PARTY_COLORS,
-    PARTY_DISPLAY_ORDER,
-)
+from utils import FALLBACK_PARTY_COLOR, PARTY_COLORS, PARTY_DISPLAY_ORDER
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_INPUT_DIR = PROJECT_ROOT / "data" / "EuroParl Custom" / "cleaned"

@@ -11,7 +11,6 @@ sampled stratified across NLI-stance bins for balanced agree/disagree coverage.
 import argparse
 import json
 import os
-import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -19,11 +18,11 @@ import numpy as np
 import pandas as pd
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, PROJECT_ROOT)
-sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from utils import call_api, extract_json, likert_to_stance, load_dataframe, save_checkpoint
+from utils import call_api, extract_json, likert_to_stance, load_dataframe, save_checkpoint, configure_stdout
 from analysis.sample_speeches_for_labeling import load_speech_pool, STANCE_BIN_EDGES, LABEL_PATH
+
+configure_stdout()
 
 PROMPT_PATH = os.path.join(PROJECT_ROOT, "prompts", "stance_judge.json")
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "data", "euandi_2024_results")

@@ -24,8 +24,15 @@ MODEL_DISPLAY_NAME = {
 
 
 def model_display_name(name):
-    """Official name for a result directory, for figures. Takes a name or a Path."""
-    return MODEL_DISPLAY_NAME.get(getattr(name, "name", name), str(name))
+    """Official name for a result directory, for figures. Takes a name or a Path.
+
+    A directory with no entry above falls back to its own name -- the same key the lookup
+    used, not `str(name)`, which for a Path is the whole path. Every model that is not in
+    the table (a fine-tuned checkpoint, say) is titled by one or the other, so the
+    difference is a panel titled `gemma-cz-pcs-10000` rather than
+    `data\\euandi_2024_results\\gemma-cz-pcs-10000`."""
+    key = getattr(name, "name", name)
+    return MODEL_DISPLAY_NAME.get(key, str(key))
 
 
 def party_sort_key(party):

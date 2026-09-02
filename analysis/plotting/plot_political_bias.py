@@ -245,6 +245,69 @@ def party_anchors(questionnaire, dims, positions=DEFAULT_POSITIONS):
     return projected.groupby("ep_group").mean()
 
 
+TRAINING_MIX_PARTY_CSV = "EUandI_2024_party_dataset.csv"
+TRAINING_MIX_LABEL = "PVV+CU+SGP (train mix)"
+TRAINING_MIX_COUNTRY = "Netherlands"
+# ParlEE NL plenary-speech counts for the three parties gemma-nl-pcs was fine-tuned on
+# (data/processed/speeches.parquet filtered per configs' data.filters.party, see
+# pac_config.json in the checkpoint dirs: PVV, CU, SGP). Recomputing this from the
+# parquet would need a cross-repo path and pyarrow inside the vendored checkout, so the
+# counts are pinned here instead -- update them if the fine-tune's party mix changes.
+TRAINING_MIX_WEIGHTS = {"PVV": 28088, "CU": 21132, "SGP": 8799}
+
+
+def training_mix_party_positions(results_dir, questionnaire, dims):
+    """Each training-mix party's own euandi position, projected onto `dims` exactly like
+    party_anchors() does -- keyed by ABBREVIATON, e.g. {"PVV": {...}, "CU": {...}, ...}.
+
+    Unlike party_anchors(), which reads the pre-built euandi_2024_parties.jsonl (Dutch
+    parties are not in it), this reads the raw EUandI 2024 party dataset directly -- it
+    carries every country, including the Netherlands, but as unlabelled s1..sN columns
+    on a 0-100 scale (-1 = not answered) rather than one JSON record per statement."""
+    path = results_dir / TRAINING_MIX_PARTY_CSV
+    if not path.exists():
+        return None
+    df = pd.read_csv(path, sep=";", encoding="utf-8-sig")
+    s_cols = [f"s{i}" for i in range(1, len(questionnaire) + 1)]
+    subset = df[(df["COUNTRY"] == TRAINING_MIX_COUNTRY) &
+               (df["ABBREVIATON"].isin(TRAINING_MIX_WEIGHTS))]
+    if subset.empty:
+        print(f"  No {TRAINING_MIX_COUNTRY} rows for {sorted(TRAINING_MIX_WEIGHTS)} in {path}; "
+              f"skipping the training-mix anchors.")
+        return None
+
+    # The raw file is in codebook order (s1..s36); the questionnaire keeps the first
+    # len(questionnaire) of those, in the same order, so s<i> lines up positionally with
+    # the questionnaire's i-th row -- see analysis/core/questionnaire.py's docstring.
+    signs = questionnaire[dims].to_numpy(dtype=float)
+    positions = {}
+    for _, row in subset.iterrows():
+        raw = row[s_cols].to_numpy(dtype=float)
+        raw[raw < 0] = np.nan  # -1: statement not answered by this party
+        normalized = raw / 50.0 - 1.0
+        pos = {}
+        for i, dim in enumerate(dims):
+            loading = signs[:, i] != 0
+            pos[dim] = np.nanmean(normalized[loading] * signs[loading, i])
+        positions[row["ABBREVIATON"]] = pos
+    return positions
+
+
+def training_mix_anchor(positions):
+    """The fine-tune's own position: positions averaged across PVV/CU/SGP, weighted by
+    how much of the training corpus (ParlEE NL speeches) each party contributed."""
+    total_weight = sum(TRAINING_MIX_WEIGHTS[abbrev] for abbrev in positions)
+    mix = {dim: sum(pos[dim] * TRAINING_MIX_WEIGHTS[a] for a, pos in positions.items()) / total_weight
+          for dim in next(iter(positions.values()))}
+    return pd.DataFrame([mix], index=[TRAINING_MIX_LABEL])
+
+
+def training_mix_party_anchors(positions):
+    """The same three parties, unweighted -- one row per party rather than one pooled
+    point, so each party's own position is visible alongside the weighted mix."""
+    return pd.DataFrame.from_dict(positions, orient="index")
+
+
 def draw_party_anchors(ax, anchors, x_dim, y_dim, size=260, fontsize=FONTSIZE,
                        color=PARTY_COLOR):
     """The label ink stays dark whatever the marker colour: a light star (EU
@@ -537,6 +600,15 @@ def draw_models_scatter_panel(ax, runs_by_model, x_dim, y_dim, split_by, anchors
             for source in sources:
                 draw(runs[runs["source"] == source], color, SOURCE_MARKER[source],
                      is_hollow(source=source))
+        elif split_by == "framing_source":
+            # Same (framing, source) -> icon mapping as the pooled aggregate compass, just
+            # coloured per model instead of per framing -- so a shape still means the same
+            # thing wherever it is seen.
+            for framing in framings:
+                for source in sources:
+                    draw(runs[(runs["framing"] == framing) & (runs["source"] == source)],
+                         color, FRAMING_SOURCE_MARKER[(framing, source)],
+                         is_hollow(framing, source))
         else:
             draw(runs, color, "o")
 
@@ -551,6 +623,11 @@ def draw_models_scatter_panel(ax, runs_by_model, x_dim, y_dim, split_by, anchors
                                      hollow=is_hollow(source=s))
                          for s in sources]
         style_title = "source"
+    elif split_by == "framing_source":
+        style_handles = [legend_mark("gray", FRAMING_SOURCE_MARKER[(f, s)],
+                                     f"{f} · {SOURCE_LABEL[s]}", hollow=is_hollow(f, s))
+                         for f in framings for s in sources]
+        style_title = "framing · source"
     if party_handle is not None:
         style_handles.append(party_handle)
     return model_handles, style_handles, style_title
@@ -607,6 +684,106 @@ def plot_models_scatter_panels(runs_by_model, x_dim, y_dim, one_sided, out_path,
     fig.legend(handles=shared_handles, loc="upper center", bbox_to_anchor=(0.5, 0.0),
                ncol=4, fontsize=FONTSIZE, title=MODEL_LEGEND_TITLE,
                title_fontsize=FONTSIZE, frameon=False)
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved {out_path}")
+
+
+def plot_models_scatter_by_language(runs_by_model, x_dim, y_dim, one_sided, out_path,
+                                    split_by=None, anchors=None, steps=None):
+    """The per-model scatter compass as one panel per language.
+
+    Same colour-per-model drawing as plot_models_scatter_compass, just with each panel
+    restricted to one language's runs instead of pooling every language into one cloud --
+    the per-model equivalent of plot_pooled_compass_by_language's framing x source split."""
+    languages = sorted({lang for runs in runs_by_model.values()
+                        for lang in runs["language"].dropna().unique()})
+    fig, axes = plt.subplots(1, len(languages), figsize=(9 * len(languages), 9), squeeze=False)
+    shared_handles = None
+    for ax, lang in zip(axes[0], languages):
+        setup_compass(ax, x_dim, y_dim, one_sided)
+        by_lang = {model: runs[runs["language"] == lang] for model, runs in runs_by_model.items()}
+        by_lang = {model: runs for model, runs in by_lang.items() if not runs.empty}
+        model_handles, style_handles, style_title = draw_models_scatter_panel(
+            ax, by_lang, x_dim, y_dim, split_by, anchors, steps)
+        ax.set_title(lang, fontsize=FONTSIZE)
+        place_style_legend(ax, style_handles, style_title, loc=MAIN_LEGEND_LOC)
+        # Same models, same order, same colours on every panel, so the first panel's
+        # handles stand for all of them.
+        shared_handles = shared_handles or model_handles
+
+    fig.tight_layout()
+    # A figure legend is not laid out by tight_layout, so the panels keep the whole canvas
+    # and bbox_inches="tight" grows the saved image to take the legend in below them.
+    fig.legend(handles=shared_handles, loc="upper center", bbox_to_anchor=(0.5, 0.0),
+              ncol=4, fontsize=FONTSIZE, title=MODEL_LEGEND_TITLE,
+              title_fontsize=FONTSIZE, frameon=False)
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved {out_path}")
+
+
+def plot_pooled_compass_by_language(runs_by_model, x_dim, y_dim, one_sided, out_path, anchors=None):
+    """Two pooled compasses, one per language, styled by framing x source -- the same
+    density-cloud, framing-coloured, source-marker style plot_compass draws for a single
+    model's own aggregate compass, but with every model's runs pooled together instead of
+    split out by model."""
+    all_runs = pd.concat(runs_by_model.values(), ignore_index=True)
+    languages = sorted(all_runs["language"].dropna().unique())
+    sources = [s for s in SOURCE_MARKER if s in set(all_runs["source"])]
+    framings = [f for f in FRAMING_MARKER if f in set(all_runs["framing"])]
+
+    fig, axes = plt.subplots(1, len(languages), figsize=(9 * len(languages), 9), squeeze=False)
+
+    def draw_mean(ax, points, marker, color):
+        ax.scatter(*points.mean(axis=0), s=260, marker=marker, facecolor=color,
+                   edgecolor="black", linewidths=1.8, zorder=5)
+
+    party_handle = None
+    for ax, lang in zip(axes[0], languages):
+        setup_compass(ax, x_dim, y_dim, one_sided)
+        runs = all_runs[all_runs["language"] == lang]
+
+        points = runs[[x_dim, y_dim]].dropna().to_numpy()
+        if len(points) >= 5:
+            try:
+                density = gaussian_kde(points.T)
+                gx, gy = np.mgrid[-1:1:120j, -1:1:120j]
+                grid = density(np.vstack([gx.ravel(), gy.ravel()])).reshape(gx.shape)
+                ax.contourf(gx, gy, grid, levels=12, cmap="Greys", alpha=0.25)
+                ax.contour(gx, gy, grid, levels=6, colors="gray", linewidths=0.5, alpha=0.5)
+            except np.linalg.LinAlgError:
+                pass
+
+        for framing in framings:
+            color = FRAMING_COLOR[framing]
+            for source in sources:
+                marker = FRAMING_SOURCE_MARKER[(framing, source)]
+                hollow = is_hollow(framing, source)
+                pts = runs[(runs["framing"] == framing) &
+                          (runs["source"] == source)][[x_dim, y_dim]].dropna().to_numpy()
+                if not len(pts):
+                    continue
+                ax.scatter(pts[:, 0], pts[:, 1], s=10, marker=marker,
+                          **mark_style(color, hollow), alpha=0.5, linewidths=0.6)
+                draw_mean(ax, pts, marker, color)
+
+        handle = draw_party_anchors(ax, anchors, x_dim, y_dim)
+        party_handle = party_handle or handle
+        ax.set_title(lang, fontsize=FONTSIZE)
+
+    style_handles = [legend_mark(FRAMING_COLOR[f], FRAMING_SOURCE_MARKER[(f, s)],
+                                 f"{f} · {SOURCE_LABEL[s]}", hollow=is_hollow(f, s))
+                     for f in framings for s in sources]
+    if party_handle is not None:
+        style_handles.append(party_handle)
+
+    fig.tight_layout()
+    # A figure legend is not laid out by tight_layout, so the panels keep the whole canvas
+    # and bbox_inches="tight" grows the saved image to take the legend in below them.
+    fig.legend(handles=style_handles, loc="upper center", bbox_to_anchor=(0.5, 0.0),
+              ncol=4, fontsize=FONTSIZE, title="framing · source  (small = run, large = mean)",
+              title_fontsize=FONTSIZE, frameon=False)
     fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     print(f"  Saved {out_path}")
@@ -911,6 +1088,16 @@ def main():
         print(f"\nEP-group anchors ({args.parties}):")
         print(anchors[[args.x_dim, args.y_dim]].round(3).to_string())
 
+    training_mix_positions = training_mix_party_positions(results_dir, questionnaire, dims)
+    if training_mix_positions is not None:
+        party_rows = training_mix_party_anchors(training_mix_positions)
+        mix_row = training_mix_anchor(training_mix_positions)
+        print(f"\nTraining-mix anchors ({', '.join(TRAINING_MIX_WEIGHTS)}, unweighted, plus "
+              f"the fine-tune-speech-weighted average):")
+        print(pd.concat([party_rows, mix_row])[[args.x_dim, args.y_dim]].round(3).to_string())
+        extra = pd.concat([party_rows, mix_row])
+        anchors = extra if anchors is None else pd.concat([anchors, extra])
+
     runs_by_model = {}
     for model_dir in model_dirs:
         runs = process_model(model_dir, questionnaire, dims, one_sided,
@@ -925,6 +1112,21 @@ def main():
         steps = grid_steps(questionnaire, [args.x_dim, args.y_dim])
         plot_models_compass(runs_by_model, args.x_dim, args.y_dim, one_sided,
                             out_dir / f"political_compass_models{suffix}.png", anchors=anchors)
+        plot_pooled_compass_by_language(runs_by_model, args.x_dim, args.y_dim, one_sided,
+                            out_dir / f"political_compass_models_by_language{suffix}.png",
+                            anchors=anchors)
+        plot_models_scatter_by_language(runs_by_model, args.x_dim, args.y_dim, one_sided,
+                            out_dir / f"political_compass_models_scatter_by_language{suffix}.png",
+                            anchors=anchors, steps=steps)
+        plot_models_scatter_by_language(runs_by_model, args.x_dim, args.y_dim, one_sided,
+                            out_dir / f"political_compass_models_scatter_by_language_framing_source{suffix}.png",
+                            split_by="framing_source", anchors=anchors, steps=steps)
+        plot_models_scatter_by_language(runs_by_model, args.x_dim, args.y_dim, one_sided,
+                            out_dir / f"political_compass_models_scatter_by_language_framing{suffix}.png",
+                            split_by="framing", anchors=anchors, steps=steps)
+        plot_models_scatter_by_language(runs_by_model, args.x_dim, args.y_dim, one_sided,
+                            out_dir / f"political_compass_models_scatter_by_language_source{suffix}.png",
+                            split_by="source", anchors=anchors, steps=steps)
         plot_models_scatter_compass(runs_by_model, args.x_dim, args.y_dim, one_sided,
                             out_dir / f"political_compass_models_scatter{suffix}.png",
                             anchors=anchors, steps=steps)

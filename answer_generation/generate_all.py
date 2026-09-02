@@ -41,8 +41,12 @@ def build_cmd(script, model, model_dir, variant, dataset, patch,
     cmd = [sys.executable, os.path.join(_DIR, script),
            "--model", model, "--model_dir", model_dir,
            "--variant", variant, "--dataset", dataset]
-    if script == "survey_processor_concurrent.py":
-        cmd += ["--languages", LANGUAGES]
+    # Both tracks, not just the survey: they go through the same `generation.main`, whose
+    # --languages defaults to every language povalec knows. Passing it to one of them left
+    # the speeches generated in a different language set from the answers -- and since the
+    # set is part of the filename, nothing downstream raised. It picked whichever file
+    # named the most languages and quietly reported on that.
+    cmd += ["--languages", LANGUAGES]
     cmd += ["--max_workers", str(MAX_WORKERS)]
     if patch:
         cmd.append("--patch")

@@ -239,10 +239,11 @@ DEFAULT_PANEL_MODELS = ("grok-4.5", "gemma-4-31b")
 # sharing --panel-models.
 DEFAULT_TOPIC_PANEL_MODELS = ("granite-4.1-8b", "gemini3.5-flash")
 # Rows x columns of the per-topic grid, and the models it covers: everything except the
-# pair above, which already has the stacked figure of its own. Eleven models fill this
-# shape leaving one cell over, and that cell is where their shared legends go -- see
-# grid_topic_panels.
-TOPIC_GRID_SHAPE = (6, 2)
+# pair above, which already has the stacked figure of its own. `None` rows means "as many
+# as the models need", counting the one spare cell their shared legends go in -- see
+# grid_topic_panels. Columns are the fixed half: two panels of this aspect is what a page
+# width takes, whereas the row count only has to follow however many models were run.
+TOPIC_GRID_SHAPE = (None, 2)
 DEFAULT_TOPIC_GRID_EXCLUDED = DEFAULT_TOPIC_PANEL_MODELS
 
 
@@ -958,9 +959,9 @@ def grid_topic_panels(topics_by_model, topic_counts_by_model, grid_model_dirs,
                       dataset_plots_dir, ylim, shape=TOPIC_GRID_SHAPE):
     """The per-topic figure for every remaining model, as one grid.
 
-    One panel per model, filled row-major in the order the models are given. Eleven models
-    in a 6x2 grid leave one cell over, and the legends go in it: the coding is the same in
-    all eleven panels, so it is drawn once, in space the grid was giving up anyway.
+    One panel per model, filled row-major in the order the models are given. The grid
+    always keeps one cell over, and the legends go in it: the coding is the same in every
+    panel, so it is drawn once, in space the grid was giving up anyway.
 
     Every panel is on the ylim of all the models together, so any bar can be read against
     any other."""
@@ -1341,6 +1342,13 @@ def plot_stacked_split_bars(panels, output_path, ylim=None,
     plt.rcParams["hatch.linewidth"] = matplotlib.rcParamsDefault["hatch.linewidth"]
 
 
+def grid_rows_for(panel_count, ncols, spare_cells=0):
+    """Rows enough to hold `panel_count` panels in `ncols` columns, plus `spare_cells`.
+
+    Kept separate from the plotting so the caller can size a figure before drawing it."""
+    return -(-(panel_count + spare_cells) // ncols)
+
+
 def last_panel_in_each_column(panel_count, ncols):
     """Indices of the bottom-most drawn panel of each column, row-major.
 
@@ -1427,9 +1435,10 @@ def plot_grid_split_bars(panels, output_path, ylim=None, *, shape, series_order=
     """The same panels as `plot_stacked_split_bars`, laid out as a grid rather than a
     single column.
 
-    A column of eleven panels is a figure some ten times taller than it is wide, which no
-    page takes; `shape` (rows, columns) folds them into a block that does. The panels are
-    filled row-major, so they read in the order they are given.
+    A single column of panels is a figure many times taller than it is wide, which no page
+    takes; `shape` (rows, columns) folds them into a block that does. Rows given as `None`
+    are derived from the number of panels. The panels are filled row-major, so they read in
+    the order they are given.
 
     The grid is what lets the repeated furniture go: every panel is the same categories on
     the same scale, so the x tick labels are drawn once per column and the y axis label
@@ -1443,9 +1452,16 @@ def plot_grid_split_bars(panels, output_path, ylim=None, *, shape, series_order=
     if not panels:
         return
     nrows, ncols = shape
-    if len(panels) > nrows * ncols:
-        raise SystemExit(f"{len(panels)} panels do not fit a {nrows}x{ncols} grid "
-                         f"({output_path.name}).")
+    if nrows is None:
+        # Rows follow the panels, so a run with more models than the default grid was
+        # written for grows the figure instead of failing on it. The spare cell is
+        # counted in: without it a panel count that divides exactly by `ncols` would
+        # leave nowhere for the legends.
+        nrows = grid_rows_for(len(panels), ncols,
+                              spare_cells=1 if legends_in_spare_cell else 0)
+    elif len(panels) > nrows * ncols:
+        raise SystemExit(f"{len(panels)} panels do not fit the requested {nrows}x{ncols} "
+                         f"grid ({output_path.name}).")
     series, methods, categories = split_bar_dimensions(
         [shares for _, shares in panels], series_order, category_order)
     if not series or not methods or not categories:
@@ -1565,6 +1581,10 @@ def parse_args():
                         help="Models for the two per-topic grid figures, in panel order. "
                              "Defaults to every model processed except --topic-panel-models, "
                              "which already has a stacked figure of its own.")
+    parser.add_argument("--topic-grid-columns", type=int, default=TOPIC_GRID_SHAPE[1],
+                        help="Panels per row in the per-topic grid (default: %(default)s). "
+                             "Rows follow from the number of models, so this is the only "
+                             "half of the shape a page width constrains.")
     parser.add_argument("--positions", default=DEFAULT_POSITIONS, choices=POSITION_CHOICES,
                         help="Which euandi answers stand for an EP group in the two VAA "
                              "methods; must match the basis evaluate_euandi.py was run with.")
@@ -1659,7 +1679,8 @@ def main():
               f"{grid_topic_ylim[1]:.1f}% over these models alone):"
               if grid_topic_ylim else f"\nPer-topic grid over {len(grid_dirs)} model(s):")
         grid_topic_panels(topics_by_model, topic_counts_by_model, grid_dirs,
-                          results_dir / "plots", grid_topic_ylim)
+                          results_dir / "plots", grid_topic_ylim,
+                          shape=(None, args.topic_grid_columns))
 
     records = [
         record

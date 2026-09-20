@@ -77,12 +77,12 @@ def breakdown(df, a_col, b_col, name):
 def run_crossencoder(df, model_dir, batch_size, device):
     """Score the checkpoint on the same items and compare it to both annotators."""
     import torch
-    from analysis.compare_stance_scoring import load_regressor, predict_stances
+    from analysis.stance_crossencoder import load_crossencoder, predict_stances
     from analysis.eval_crossencoder_human import bin_stance
     from utils import stance_to_likert
 
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-    tokenizer, model, max_len = load_regressor(device, model_dir)
+    tokenizer, model, max_len = load_crossencoder(model_dir, device)
     stance = predict_stances(df["statement"].tolist(), df["answer"].tolist(),
                              tokenizer, model, device, max_len, batch_size)
     df = df.assign(

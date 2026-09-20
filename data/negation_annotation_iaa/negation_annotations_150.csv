@@ -1,0 +1,151 @@
+﻿item_id,statement_idx,language,statement,negated_statement,annotator_a,annotator_b
+001,1,cz,Sociální programy by měly zůstat zachovány i za cenu vyšších daní.,"Sociální programy by neměly zůstat zachovány, pokud to znamená vyšší daně.",4,5
+002,1,de,"Sozialstaatliche Leistungen sollten erhalten bleiben, selbst wenn dies zu höheren Steuern führt.","Sozialstaatliche Leistungen sollten nicht erhalten bleiben, wenn dies zu höheren Steuern führt.",5,5
+003,1,en,Social programs should be maintained even at the cost of higher taxes,Social programs should not be maintained if it means higher taxes,5,5
+004,1,fr,Les programmes sociaux devraient être maintenus même au prix d’une hausse des impôts,Les programmes sociaux ne devraient pas être maintenus si cela implique une hausse des impôts,5,5
+005,1,sk,Sociálne programy by sa mali udržať na súčasnej úrovni aj za cenu zvýšenia daní,"Sociálne programy by sa nemali udržať na súčasnej úrovni, ak to znamená zvýšenie daní.",4,4
+006,2,cz,Stát by měl poskytovat větší finanční podporu nezaměstnaným.,Stát by neměl poskytovat větší finanční podporu nezaměstnaným.,5,5
+007,2,de,Der Staat sollte Arbeitslose finanziell stärker unterstützen.,Der Staat sollte Arbeitslose finanziell nicht stärker unterstützen.,5,5
+008,2,en,The state should provide stronger financial support to unemployed workers,The state should not provide stronger financial support to unemployed workers.,5,5
+009,2,fr,L’État devrait fournir un soutien financier plus important aux chômeurs,L'État ne devrait pas fournir un soutien financier plus important aux chômeurs.,5,5
+010,2,sk,Štát by mal poskytovať vyššiu finančnú podporu nezamestnaným osobám,Štát by nemal poskytovať vyššiu finančnú podporu nezamestnaným osobám.,5,5
+011,3,cz,"Vláda by měla snížit rozpočtové výdaje, aby bylo možné snížit daně.","Vláda by neměla snížit rozpočtové výdaje ani proto, aby bylo možné snížit daně.",5,4
+012,3,de,"Staatsausgaben sollten reduziert werden, um Steuersenkungen zu ermöglichen.","Staatsausgaben sollten nicht reduziert werden, auch nicht, um Steuersenkungen zu ermöglichen.",5,5
+013,3,en,Government spending should be reduced in order to lower taxes,"Government spending should not be reduced, even to lower taxes.",5,5
+014,3,fr,Les dépenses publiques devraient être réduites afin de réduire les impôts,"Les dépenses publiques ne devraient pas être réduites, même pour réduire les impôts",5,5
+015,3,sk,Výdavky vlády by mali byť znížené v prospech nižších daní,Výdavky vlády by nemali byť znížené ani v prospech nižších daní.,5,5
+016,4,cz,Zdanění nejbohatší části populace by se mělo zvýšit.,Zdanění nejbohatší části populace by se nemělo zvýšit.,5,5
+017,4,de,Der wohlhabendste Teil der Bevölkerung sollte stärker besteuert werden.,Der wohlhabendste Teil der Bevölkerung sollte nicht stärker besteuert werden.,5,5
+018,4,en,Taxation on the wealthiest part of the population should be increased,Taxation on the wealthiest part of the population should not be increased.,5,5
+019,4,fr,L’imposition de la partie la plus aisée de la population devrait être augmentée,L’imposition de la partie la plus aisée de la population ne devrait pas être augmentée.,5,5
+020,4,sk,Zdanenie najbohatšej časti obyvateľstva by sa malo zvýšiť,Zdanenie najbohatšej časti obyvateľstva by sa nemalo zvýšiť,5,5
+021,5,cz,"Měl by se zvýšit věk odchodu do důchodu, aby byl důchodový systém udržitelnější","Věk odchodu do důchodu by se neměl zvýšit ani proto, aby byl důchodový systém udržitelnější.",5,5
+022,5,de,"Das Renteneintrittsalter sollte angehoben werden, um das Rentensystems nachhaltiger zu gestalten.","Das Renteneintrittsalter sollte nicht angehoben werden, auch nicht, um das Rentensystem nachhaltiger zu gestalten.",5,5
+023,5,en,Retirement age should be raised in order to make the pension system more sustainable,"Retirement age should not be raised, even to make the pension system more sustainable.",5,5
+024,5,fr,L’âge de la retraite devrait être relevé afin de rendre le système de retraite plus viable,"L’âge de la retraite ne devrait pas être relevé, même pour rendre le système de retraite plus viable",5,5
+025,5,sk,"Vek odchodu do dôchodku by sa mal zvýšiť, s cieľom zvýšiť udržateľnosť dôchodkového systému",Vek odchodu do dôchodku by sa nemal zvýšiť ani s cieľom zvýšiť udržateľnosť dôchodkového systému.,5,5
+026,6,cz,Stát by měl přímo regulovat rostoucí ceny základních potřeb,Stát by neměl přímo regulovat rostoucí ceny základních potřeb.,5,5
+027,6,de,"Der Staat sollte direkt intervenieren, um Preissteigerungen von Grundgütern zu kontrollieren.","Der Staat sollte nicht direkt intervenieren, um Preissteigerungen von Grundgütern zu kontrollieren.",5,5
+028,6,en,The state should intervene directly to control the rising prices of basic commodities,The state should not intervene directly to control the rising prices of basic commodities,5,5
+029,6,fr,L’État doit intervenir directement pour contrôler la hausse des prix des produits de base,L'État ne doit pas intervenir directement pour contrôler la hausse des prix des produits de base.,5,5
+030,6,sk,"Štát má priamo zasiahnuť, aby kontroloval rastúce ceny základných surovín","Štát nemá priamo zasiahnuť, aby kontroloval rastúce ceny základných surovín.",5,5
+031,7,cz,Legalizace sňatků párů stejného pohlaví je dobrá věc,Legalizace sňatků párů stejného pohlaví není dobrá věc.,5,5
+032,7,de,Die Legalisierung gleichgeschlechtlicher Ehen ist eine gute Sache.,Die Legalisierung gleichgeschlechtlicher Ehen ist keine gute Sache.,5,5
+033,7,en,The legalisation of same sex marriages is a good thing,The legalisation of same sex marriages is not a good thing,5,5
+034,7,fr,La légalisation des mariages entre personnes de même sexe est une bonne chose,La légalisation des mariages entre personnes de même sexe n'est pas une bonne chose,5,5
+035,7,sk,Podporujem legalizáciu manželstiev osôb rovnakého pohlavia,Nepodporujem legalizáciu manželstiev osôb rovnakého pohlavia.,5,5
+036,8,cz,Užití měkkých drog pro osobní potřebu by mělo být povoleno,Užití měkkých drog pro osobní potřebu by nemělo být povoleno.,5,5
+037,8,de,Der private Konsum weicher Drogen (z.B. Cannabis) sollte legalisiert werden.,Der private Konsum weicher Drogen (z.B. Cannabis) sollte nicht legalisiert werden.,5,5
+038,8,en,The legalisation of the personal use of soft drugs is to be welcomed,The legalisation of the personal use of soft drugs is not to be welcomed.,5,5
+039,8,fr,La légalisation de l’usage personnel des drogues douces est à saluer,La légalisation de l’usage personnel des drogues douces n’est pas à saluer,5,5
+040,8,sk,Podporujem legalizáciu užívania mäkkých drog na osobné účely,Nepodporujem legalizáciu užívania mäkkých drog na osobné účely,5,5
+041,9,cz,Přistěhovalci ze zemí mimo Evropu by měli mít povinnost přijmout naši kulturu a hodnoty,Přistěhovalci ze zemí mimo Evropu by neměli mít povinnost přijmout naši kulturu a hodnoty,5,5
+042,9,de,Migrant:innen aus dem nicht-europäischen Ausland sollten unsere Kultur und Werte akzeptieren.,Migrant:innen aus dem nicht-europäischen Ausland sollten unsere Kultur und Werte nicht akzeptieren.,4,4
+043,9,en,Immigrants from outside Europe should be required to accept our culture and values,Immigrants from outside Europe should not be required to accept our culture and values,5,5
+044,9,fr,Les immigrés de l’extérieur de l’Europe devraient être tenus d’accepter notre culture et nos valeurs,Les immigrés de l’extérieur de l’Europe ne devraient pas être tenus d’accepter notre culture et nos valeurs,5,5
+045,9,sk,Európske krajiny by mali vyžadovať od mimoeurópskych imigrantov akceptovanie našej kultúry a hodnôt,Európske krajiny by nemali vyžadovať od mimoeurópskych imigrantov akceptovanie našej kultúry a hodnôt.,5,5
+046,10,cz,Přístup k potratům by měl být více omezen,Přístup k potratům by neměl být více omezen.,5,5
+047,10,de,Der Zugang zu Schwangerschaftsabbrüchen sollte stärker eingeschränkt werden.,Der Zugang zu Schwangerschaftsabbrüchen sollte nicht stärker eingeschränkt werden.,5,5
+048,10,en,Access to abortion should become more restricted,Access to abortion should not become more restricted,5,5
+049,10,fr,L’accès à l’avortement devrait devenir plus restreint,L’accès à l’avortement ne devrait pas devenir plus restreint.,5,5
+050,10,sk,Prístup k interrupciám by sa mal obmedziť,Prístup k interrupciám by sa nemal obmedziť,5,5
+051,11,cz,Imigrace do České republiky by měla být obtížnější.,Imigrace do České republiky by neměla být obtížnější.,5,5
+052,11,de,Die Zuwanderung in Ihr Land sollte beschränkt werden.,Die Zuwanderung in Ihr Land sollte nicht beschränkt werden.,5,5
+053,11,en,Immigration into European Union should be made more restrictive,Immigration into European Union should not be made more restrictive.,5,5
+054,11,fr,L'immigration dans votre pays devrait être rendue plus restrictive,L'immigration dans votre pays ne devrait pas être rendue plus restrictive,5,5
+055,11,sk,Imigrácia na Slovensko by mala byť výraznejšie obmedzená,Imigrácia na Slovensko by nemala byť výraznejšie obmedzená,5,5
+056,12,cz,"Genderové kvóty (minimální podíl pozic, které mají být obsazeny ženami) jsou žádoucí","Genderové kvóty (minimální podíl pozic, které mají být obsazeny ženami) nejsou žádoucí.",5,5
+057,12,de,"Geschlechterquoten (ein Mindestanteil von Positionen, die von Frauen besetzt werden sollen) sind zu begrüßen.","Geschlechterquoten (ein Mindestanteil von Positionen, die von Frauen besetzt werden sollen) sind nicht zu begrüßen.",5,5
+058,12,en,Gender quotas (e.g. a minimum share of positions to be filled by women) are to be welcomed,Gender quotas (e.g. a minimum share of positions to be filled by women) are not to be welcomed.,5,5
+059,12,fr,Les quotas de genre (une part minimale des postes à pourvoir par des femmes) sont à saluer,Les quotas de genre (une part minimale des postes à pourvoir par des femmes) ne sont pas à saluer,5,5
+060,12,sk,"Podporujem zavedenie rodových kvót (minimálny podiel pozícií, ktoré majú byť obsadené ženami)","Nepodporujem zavedenie rodových kvót (minimálny podiel pozícií, ktoré majú byť obsadené ženami).",5,5
+061,13,cz,Veřejná doprava by měla být podpořena prostřednictvím ekologických daní (např. silniční daň),Veřejná doprava by neměla být podpořena prostřednictvím ekologických daní (např. silniční daň).,5,5
+062,13,de,Der öffentliche Personenverkehr sollte mit Hilfe ökologischer Steuern (z.B. Straßenbenutzungsgebühren) gefördert werden.,Der öffentliche Personenverkehr sollte mit Hilfe ökologischer Steuern (z.B. Straßenbenutzungsgebühren) nicht gefördert werden.,5,5
+063,13,en,The promotion of public transport should be fostered through green taxes (e.g. road taxing),The promotion of public transport should not be fostered through green taxes (e.g. road taxing).,5,5
+064,13,fr,"La promotion des transports publics devrait être encouragée par le biais de taxes vertes (par exemple, la taxation des routes)","La promotion des transports publics ne devrait pas être encouragée par le biais de taxes vertes (par exemple, la taxation des routes).",5,5
+065,13,sk,Verejná doprava by mala byť podporená zavedením tzv. zelených daní (napr. cestná daň),Verejná doprava by nemala byť podporená zavedením tzv. zelených daní (napr. cestná daň).,5,5
+066,14,cz,Obnovitelné zdroje energie (např. solární a větrná) by měly být podporovány i za cenu vyšších cen za energie,"Obnovitelné zdroje energie (např. solární a větrná) by neměly být podporovány, pokud to znamená vyšší ceny energií.",4,5
+067,14,de,"Erneuerbare Energien (z.B. Solar- oder Windenergie) sollten gefördert werden, selbst wenn dies zu höheren Energiekosten führt.","Erneuerbare Energien (z.B. Solar- oder Windenergie) sollten nicht gefördert werden, wenn dies zu höheren Energiekosten führt.",5,5
+068,14,en,Renewable sources of energy (e.g. solar or wind energy) should be supported even if this means higher energy costs,Renewable sources of energy (e.g. solar or wind energy) should not be supported if this means higher energy costs.,5,5
+069,14,fr,"Les sources d’énergie renouvelables (par exemple l’énergie solaire ou éolienne) doivent être soutenues, même si cela signifie des coûts énergétiques plus élevés","Les sources d’énergie renouvelables (par exemple l’énergie solaire ou éolienne) ne doivent pas être soutenues, si cela signifie des coûts énergétiques plus élevés.",5,5
+070,14,sk,Obnoviteľné zdroje energie by mali byť podporené aj za cenu vyšších cien energií,"Obnoviteľné zdroje energie by nemali byť podporené, ak to znamená vyššie ceny energií",4,4
+071,15,cz,"EU by měla přísně trestat členské státy, které porušují rozpočtová pravidla EU","EU by neměla přísně trestat členské státy, které porušují rozpočtová pravidla EU",5,5
+072,15,de,"Die EU sollte Mitgliedstaaten, die gegen EU-Defizit-Regeln verstoßen, streng bestrafen","Die EU sollte Mitgliedstaaten, die gegen EU-Defizit-Regeln verstoßen, nicht streng bestrafen.",5,5
+073,15,en,The EU should rigorously punish member states that violate the EU deficit rules,The EU should not rigorously punish member states that violate the EU deficit rules.,5,5
+074,15,fr,L’UE devrait punir sévèrement les États membres qui enfreignent les règles de l’UE en matière de déficit,L’UE ne devrait pas punir sévèrement les États membres qui enfreignent les règles de l’UE en matière de déficit,5,5
+075,15,sk,"Európska únia by mala prísnejšie trestať členské štáty, ktoré porušujú rozpočtové pravidlá EÚ","Európska únia by nemala prísnejšie trestať členské štáty, ktoré porušujú rozpočtové pravidlá EÚ.",5,5
+076,16,cz,EU by měla disponovat vlastní pravomocí na výběr daní,EU by neměla disponovat vlastní pravomocí na výběr daní.,5,5
+077,16,de,"Die EU sollte das Recht bekommen, eigenständig Steuern zu erheben.","Die EU sollte das Recht nicht bekommen, eigenständig Steuern zu erheben.",5,5
+078,16,en,The EU should acquire its own tax raising powers,The EU should not acquire its own tax raising powers.,5,5
+079,16,fr,L’UE devrait se doter de ses propres pouvoirs de collecte d’impôts,L’UE ne devrait pas se doter de ses propres pouvoirs de collecte d’impôts,5,5
+080,16,sk,EÚ by mala získať vlastné daňové právomoci,EÚ by nemala získať vlastné daňové právomoci.,5,5
+081,17,cz,"EU by měla posílit regulaci technologie umělé inteligence, i za cenu zpomalení inovací.","EU by neměla posílit regulaci technologie umělé inteligence, pokud to znamená zpomalení inovací.",5,5
+082,17,de,"Die EU sollte künstlichen Intelligenz stärker regulieren, selbst wenn dies eine Verlangsamung von Innovation bedeutet.","Die EU sollte künstlichen Intelligenz nicht stärker regulieren, wenn dies eine Verlangsamung von Innovation bedeutet.",5,5
+083,17,en,The EU should strenghten the regulation of Artificial Intelligence technology even if this means slowing down innovation,The EU should not strenghten the regulation of Artificial Intelligence technology if this means slowing down innovation.,5,5
+084,17,fr,"L’UE devrait renforcer la réglementation de la technologie de l’intelligence artificielle, même si cela signifie ralentir l’innovation","L’UE ne devrait pas renforcer la réglementation de la technologie de l’intelligence artificielle, si cela signifie ralentir l’innovation.",5,5
+085,17,sk,"EÚ by mala posilniť reguláciu technológií umelej inteligencie, aj za cenu spomalenia inovácií","EÚ by nemala posilniť reguláciu technológií umelej inteligencie, ak to znamená spomalenie inovácií.",5,5
+086,18,cz,Jednotná evropská měna (Euro) je špatná věc,Jednotná evropská měna (Euro) není špatná věc.,4,5
+087,18,de,Die Europäische Einheitswährung (Euro) ist eine schlechte Sache.,Die Europäische Einheitswährung (Euro) ist keine schlechte Sache.,5,5
+088,18,en,The single European currency (Euro) is a bad thing,The single European currency (Euro) is not a bad thing,4,5
+089,18,fr,La monnaie unique européenne (l’euro) est une mauvaise chose,La monnaie unique européenne (l’euro) n’est pas une mauvaise chose,4,5
+090,18,sk,Nepodporujem jednotnú európsku menu (Euro),Podporujem jednotnú európsku menu (Euro),5,5
+091,19,cz,"EU by měla chránit evropské zemědělce před vnější konkurencí, i když to povede k vyšším cenám potravin","EU by neměla chránit evropské zemědělce před vnější konkurencí, pokud to povede k vyšším cenám potravin.",5,5
+092,19,de,"Die EU sollte europäische Landwirt:innen vor externem Wettbewerb schützen, selbst wenn dies zu höheren Lebensmittelpreisen führt.","Die EU sollte europäische Landwirt:innen nicht vor externem Wettbewerb schützen, wenn dies zu höheren Lebensmittelpreisen führt.",5,5
+093,19,en,The EU should protect European farmers from external competition even if this leads to higher food prices,The EU should not protect European farmers from external competition if this leads to higher food prices.,5,5
+094,19,fr,"L’UE devrait protéger les agriculteurs européens de la concurrence extérieure, même si cela entraîne une hausse des prix des denrées alimentaires","L’UE ne devrait pas protéger les agriculteurs européens de la concurrence extérieure, si cela entraîne une hausse des prix des denrées alimentaires.",5,5
+095,19,sk,"EÚ by mala chrániť európskych poľnohospodárov pred vonkajšou konkurenciou, aj za cenu vyšších cien potravín","EÚ by nemala chrániť európskych poľnohospodárov pred vonkajšou konkurenciou, ak to znamená vyššie ceny potravín.",4,5
+096,20,cz,V otázkách zahraniční politiky by EU měla vystupovat jednotně,V otázkách zahraniční politiky by EU neměla vystupovat jednotně.,4,5
+097,20,de,Die EU sollte in der Außenpolitik mit einer Stimme sprechen.,Die EU sollte in der Außenpolitik nicht mit einer Stimme sprechen.,5,5
+098,20,en,On foreign policy issues the EU should speak with one voice,On foreign policy issues the EU should not speak with one voice.,4,5
+099,20,fr,"Sur les questions de politique étrangère, l’UE doit parler d’une seule voix","Sur les questions de politique étrangère, l’UE ne doit pas parler d’une seule voix",4,5
+100,20,sk,V otázkach zahraničnej politiky by EÚ mala hovoriť jednotným hlasom,V otázkach zahraničnej politiky by EÚ nemala hovoriť jednotným hlasom,4,5
+101,21,cz,Žadatelé o azyl v zemích EU by měli být proporčně rozdělováni mezi členské státy na základě povinného systému přemísťování,Žadatelé o azyl v zemích EU by neměli být proporčně rozdělováni mezi členské státy na základě povinného systému přemísťování.,5,5
+102,21,de,Asylbewerber:innen sollten durch ein verpflichtendes Verteilungssystem proportional auf alle EU-Mitgliedstaaten verteilt werden.,Asylbewerber:innen sollten nicht durch ein verpflichtendes Verteilungssystem proportional auf alle EU-Mitgliedstaaten verteilt werden.,5,5
+103,21,en,Asylum-seekers should be distributed proportionally among EU member states through a mandatory relocation system,Asylum-seekers should not be distributed proportionally among EU member states through a mandatory relocation system.,5,5
+104,21,fr,Les demandeurs d’asile devraient être répartis proportionnellement entre les États membres de l’UE par le biais d’un système de relocalisation obligatoire,Les demandeurs d’asile ne devraient pas être répartis proportionnellement entre les États membres de l’UE par le biais d’un système de relocalisation obligatoire.,5,5
+105,21,sk,Žiadatelia o azyl by mali byť proporčne rozdelení medzi členské štáty na základe povinných kvót,Žiadatelia o azyl by nemali byť proporčne rozdelení medzi členské štáty na základe povinných kvót.,5,5
+106,22,cz,EU by měla posílit společnou bezpečnostní a obrannou politiku,EU by neměla posílit společnou bezpečnostní a obrannou politiku.,5,5
+107,22,de,Die EU sollte ihre Sicherheits- und Verteidigungspolitik stärken.,Die EU sollte ihre Sicherheits- und Verteidigungspolitik nicht stärken.,5,5
+108,22,en,The European Union should strengthen its security and defence policy,The European Union should not strengthen its security and defence policy.,5,5
+109,22,fr,L’Union européenne doit renforcer sa politique de sécurité et de défense,L’Union européenne ne doit pas renforcer sa politique de sécurité et de défense.,5,5
+110,22,sk,Európska únia by mala posilniť svoju bezpečnostnú a obrannú politiku,Európska únia by nemala posilniť svoju bezpečnostnú a obrannú politiku,5,5
+111,23,cz,V boji proti nelegální migraci by Evropská unie měla převzít odpovědnost za hlídání svých hranic,Evropská unie by neměla převzít odpovědnost za hlídání svých hranic ani v boji proti nelegální migraci.,4,5
+112,23,de,"Um das Problem illegaler Einwanderung zu bekämpfen, sollte die Europäische Union Verantwortung in der Überwachung ihrer Grenzen übernehmen.","Die Europäische Union sollte Verantwortung in der Überwachung ihrer Grenzen nicht übernehmen, selbst um das Problem illegaler Einwanderung zu bekämpfen.",5,5
+113,23,en,"To fight the problem of illegal immigration, the European Union should take responsibility in patrolling its borders","The European Union should not take responsibility in patrolling its borders, even to fight the problem of illegal immigration.",4,5
+114,23,fr,"Pour lutter contre le problème de l’immigration clandestine, l’Union européenne devrait prendre ses responsabilités en surveillant ses frontières","L'Union européenne ne devrait pas prendre ses responsabilités en surveillant ses frontières, même pour lutter contre le problème de l'immigration clandestine.",4,4
+115,23,sk,V boji proti nelegálnemu prisťahovalectvu by Európska únia mala prevziať zodpovednosť za stráženie svojich hraníc,Európska únia by nemala prevziať zodpovednosť za stráženie svojich hraníc ani v boji proti nelegálnemu prisťahovalectvu.,4,5
+116,24,cz,"Do roku 2035 by měl být zaveden celoevropský zákaz prodeje nových vozidel se spalovacím motorem, tak jak plánuje Zelená dohoda pro Evropu",Na rozdíl od plánů Zelené dohody pro Evropu by do roku 2035 neměl být zaveden celoevropský zákaz prodeje nových vozidel se spalovacím motorem.,5,5
+117,24,de,"Wie im Europäischen Green Deal geplant, sollte bis 2035 ein europaweites Verbot des Verkaufs von Fahrzeugen mit Verbrennungsmotoren eingeführt werden.",Entgegen dem Europäischen Green Deal sollte bis 2035 kein europaweites Verbot des Verkaufs von Fahrzeugen mit Verbrennungsmotoren eingeführt werden.,5,5
+118,24,en,"As planned in the European Green Deal, there should be a Europe-wide ban on selling internal combustion engine vehicles by 2035","Contrary to the European Green Deal, there should not be a Europe-wide ban on selling internal combustion engine vehicles by 2035.",5,5
+119,24,fr,"Comme prévu dans le Pacte vert pour l’Europe, la vente de véhicules à moteur à combustion interne devrait être interdite à l’échelle européenne d’ici 2035","Contrairement au Pacte vert pour l’Europe, la vente de véhicules à moteur à combustion interne ne devrait pas être interdite à l’échelle européenne d’ici 2035",5,5
+120,24,sk,"V celej Európskej únii by sa mal do roku 2035 zrealizovať zákaz predaja nových vozidiel so spaľovacím motorom, tak ako to je plánované v Európskej zelenej dohode",Na rozdiel od plánov Európskej zelenej dohody by sa v celej Európskej únii do roku 2035 nemal zrealizovať zákaz predaja nových vozidiel so spaľovacím motorom.,5,5
+121,25,cz,"Evropská unie by měla Ukrajině nadále poskytovat vojenskou pomoc, jako jsou zbraně a střelivo","Evropská unie by neměla Ukrajině nadále poskytovat vojenskou pomoc, jako jsou zbraně a střelivo.",5,5
+122,25,de,"Die Europäische Union sollte weiterhin militärische Hilfe, wie Waffen und Munition, an die Ukraine bereitstellen.","Die Europäische Union sollte nicht weiterhin militärische Hilfe, wie Waffen und Munition, an die Ukraine bereitstellen.",5,5
+123,25,en,"The European Union should continue providing military aid, such as weapons and ammunition, to Ukraine","The European Union should not continue providing military aid, such as weapons and ammunition, to Ukraine.",5,5
+124,25,fr,"L’Union européenne devrait continuer à fournir une aide militaire à l’Ukraine, notamment des armes et des munitions","L’Union européenne ne devrait pas continuer à fournir une aide militaire à l’Ukraine, notamment des armes et des munitions.",5,5
+125,25,sk,"Európska únia by mala naďalej poskytovať Ukrajine vojenskú pomoc, napríklad zbrane a muníciu","Európska únia by nemala naďalej poskytovať Ukrajine vojenskú pomoc, napríklad zbrane a muníciu.",5,5
+126,26,cz,Evropská integrace je dobrá věc,Evropská integrace není dobrá věc.,5,5
+127,26,de,Die Europäische Integration ist eine gute Sache.,Die Europäische Integration ist keine gute Sache.,5,5
+128,26,en,European integration is a good thing,European integration is not a good thing.,5,5
+129,26,fr,L’intégration européenne est une bonne chose,L’intégration européenne n’est pas une bonne chose.,5,5
+130,26,sk,Podporujem európsku integráciu,Nepodporujem európsku integráciu,5,5
+131,27,cz,Jednotlivé členské státy EU by měly mít menší právo vetovat rozhodnutí,Jednotlivé členské státy EU by neměly mít menší právo vetovat rozhodnutí.,5,5
+132,27,de,Die einzelnen Mitgliedstaaten der EU sollten weniger Vetorechte besitzen.,Die einzelnen Mitgliedstaaten der EU sollten nicht weniger Vetorechte besitzen.,5,5
+133,27,en,Individual member states of the EU should have less veto power,Individual member states of the EU should not have less veto power,5,5
+134,27,fr,Les États membres de l’UE devraient avoir moins de droit de veto,Les États membres de l’UE ne devraient pas avoir moins de droit de veto,5,5
+135,27,sk,Členské štáty EÚ by mali mať menej možností použiť právo veta,Členské štáty EÚ by nemali mať menej možností použiť právo veta.,5,5
+136,28,cz,Evropská unie by se měla rozšířit o Ukrajinu.,Evropská unie by se neměla rozšířit o Ukrajinu.,5,5
+137,28,de,Die Europäische Union sollte um die Ukraine erweitert werden.,Die Europäische Union sollte nicht um die Ukraine erweitert werden.,5,5
+138,28,en,The European Union should be enlarged to include Ukraine,The European Union should not be enlarged to include Ukraine.,5,5
+139,28,fr,L’Union européenne devrait être élargie à l’Ukraine,L’Union européenne ne devrait pas être élargie à l’Ukraine,5,5
+140,28,sk,Európska únia by sa mala rozšíriť o Ukrajinu,Európska únia by sa nemala rozšíriť o Ukrajinu,5,5
+141,29,cz,"EU by měla sankcionovat členské státy, jejichž vlády podkopávají právní stát","EU by neměla sankcionovat členské státy, jejichž vlády podkopávají právní stát.",5,5
+142,29,de,"Die EU sollte Sanktionen gegen Mitgliedsstaaten verhängen, deren Regierungen Prinzipien der Rechtsstaatlichkeit untergraben.","Die EU sollte keine Sanktionen gegen Mitgliedsstaaten verhängen, deren Regierungen Prinzipien der Rechtsstaatlichkeit untergraben.",5,5
+143,29,en,The EU should sanction member states whose governments undermine the rule of law,The EU should not sanction member states whose governments undermine the rule of law,5,5
+144,29,fr,L’UE devrait sanctionner les États membres dont les gouvernements portent atteinte à l’État de droit,L’UE ne devrait pas sanctionner les États membres dont les gouvernements portent atteinte à l’État de droit.,5,5
+145,29,sk,"EÚ by mala sankcionovať členské štáty, ktorých vlády porušujú zásady právneho štátu","EÚ by nemala sankcionovať členské štáty, ktorých vlády porušujú zásady právneho štátu",5,5
+146,30,cz,Česká republika by měla zvýšit vojenské výdaje,Česká republika by neměla zvýšit vojenské výdaje.,5,5
+147,30,de,Ihr Land sollte seine Militärausgaben erhöhen.,Ihr Land sollte seine Militärausgaben nicht erhöhen.,5,5
+148,30,en,European Union should increase military spending,European Union should not increase military spending,5,5
+149,30,fr,Votre pays devrait augmenter ses dépenses militaires.,Votre pays ne devrait pas augmenter ses dépenses militaires.,5,5
+150,30,sk,Slovensko by malo zvýšiť výdavky na obranu,Slovensko by nemalo zvýšiť výdavky na obranu.,5,5

@@ -1,12 +1,8 @@
-Archived/
-data/
-distilbert_trainer/
-local_model_answerdotai/
-local_model_distilbert-base-uncased/
-tmp_trainer/
-answerdotai/
+data/*
+!data/euandi_2024_data/
+!data/stance_annotation_iaa/
+!data/negation_annotation_iaa/
 __pycache__/
-AIC/
 .env.local
 results*
 mmBERT-*

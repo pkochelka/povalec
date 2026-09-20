@@ -410,8 +410,13 @@ def load_statement_topics(path, statements):
     the broader bucket. Ties break alphabetically for determinism.
 
     The questionnaire is 1-based and the rest of the pipeline 0-based, so the
-    index is shifted here (verified: questionnaire statement_idx 1 carries the
-    same text as the party positions' statement_idx 0)."""
+    index is shifted here. That shift only lands on the right statement because
+    `statement_collection/align_statement_order.py` reordered the questionnaire
+    into statements.jsonl order; before it, questionnaire row n-1 and results row
+    n-1 were the same statement for only 11 of the 30, and this function silently
+    assigned 19 statements to another statement's topic. Checking the shift
+    against the party positions file (as this note used to) could not catch that,
+    since that file was in the same codebook order and wrong in the same way."""
     rows = [json.loads(line) for line in open(path, encoding="utf-8") if line.strip()]
     loadings = {int(row["statement_idx"]) - 1: [axis for axis in TOPIC_AXES
                                                 if row.get(axis, 0)]

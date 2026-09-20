@@ -42,6 +42,13 @@ if __name__ == "__main__":
     with open("data/euandi_2024_data/statements.jsonl", "w", encoding="utf-8") as f:
         for idel in all_ids:
             record = {
+                # euandi's own element id. The row order of this file *is* the order every
+                # results CSV is written in, but it is decided by sorting these ids, and
+                # without recording them a reorder on euandi's side would silently
+                # renumber every statement. See
+                # statement_collection/align_statement_order.py, which realigns the
+                # positions and questionnaire files whenever this order changes.
+                "idel": int(idel),
                 "statement": {
                     "en": en_stmts.get(idel, ""),
                     **{lang: by_lang[lang][idel] for lang in LANGS if idel in by_lang.get(lang, {})}

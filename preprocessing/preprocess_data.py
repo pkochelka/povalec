@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 from pathlib import Path
+from urllib.parse import unquote
 
 from utils import write_parquet_chunked
 
@@ -17,16 +18,19 @@ LANG_COLS = ["fr", "it", "da", "sv", "el", "pt", "en", "lv", "es", "nl",
              "fi", "de", "hu", "pl", "et", "sl", "sk", "lt", "mt", "cs",
              "ro", "bg", "hr"]
 
+# Keyed on the full group code after ".../EUParty/" -- three codes contain a slash
+# (EUL/NGL, G/EFA, IND/DEM), and keying on the last path segment once sent IND/DEM
+# (eurosceptic, 2004-09) to ALDE via "DEM". IND/DEM and EFDD follow PARLEE_PARTY_MAPPING.
 MULTIPARL_PARTY_MAPPING = {
-    "EPP-ED": "PPE",   "EPP":  "PPE",
-    "PES":    "S&D",   "S&D":  "S&D",
-    "ELDR":   "ALDE",  "ALDE": "ALDE",  "DEM": "ALDE",
-    "EFA":    "Greens/EFA",
-    "NGL":    "GUE/NGL",
-    "ECR":    "ECR",
-    "ITS":    "ID",    "EFD":  "ID",
-    "UEN":    "ECR",   "EDD":  "ECR",
-    "TGI":    np.nan,  "NA":   np.nan,
+    "EPP-ED":  "PPE",         "EPP":  "PPE",
+    "PES":     "S&D",         "S&D":  "S&D",
+    "ELDR":    "ALDE",        "ALDE": "ALDE",
+    "G/EFA":   "Greens/EFA",
+    "EUL/NGL": "GUE/NGL",
+    "ECR":     "ECR",
+    "ITS":     "ID",          "EFD":  "ID",   "EFDD": "ID",   "IND/DEM": "ID",
+    "UEN":     "ECR",         "EDD":  "ECR",
+    "TGI":     np.nan,        "NA":   np.nan,
 }
 
 PARLEE_PARTY_MAPPING = {
@@ -53,6 +57,17 @@ LANG_NAME_TO_CODE = {
 }
 
 
+def eu_party_code(uri):
+    """".../EUParty/EUL/NGL" -> "EUL/NGL", whichever way the IRI was written out.
+
+    Three codes contain "/" or "&" (EUL/NGL, G/EFA, S&D), and depending on the rdflib
+    version they reach the CSV plain, Turtle-escaped ("EUL\\/NGL") or percent-encoded
+    ("EUL%2FNGL"). All three spellings must land on the same mapping key.
+    """
+    code = unquote(str(uri)).replace("\\", "")
+    return code.split("EUParty/", 1)[-1]
+
+
 def collapse(series):
     unique_vals = series.dropna().unique()
     if len(unique_vals) == 0:
@@ -69,8 +84,13 @@ def preprocess_multiparl():
     print(f"  Loaded {len(df):,} rows")
 
     df = df.dropna(subset=["EU Party"])
-    df["truncated_party"] = df["EU Party"].apply(lambda x: x.split("/")[-1])
+    df["truncated_party"] = df["EU Party"].map(eu_party_code)
     df["party_group_std"] = df["truncated_party"].map(MULTIPARL_PARTY_MAPPING)
+    # A code missing from the mapping drops every speech under it; say so instead of
+    # losing a whole EP group silently.
+    unknown = df.loc[~df["truncated_party"].isin(MULTIPARL_PARTY_MAPPING), "truncated_party"]
+    if not unknown.empty:
+        print(f"  WARNING: unmapped EU Party codes (dropped): {unknown.value_counts().to_dict()}")
 
     df = df.groupby("Unnamed: 0", as_index=False).agg(collapse)
     df = df.dropna(subset=["party_group_std"])

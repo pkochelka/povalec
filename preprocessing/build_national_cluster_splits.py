@@ -1,14 +1,15 @@
-"""Build the k=4 cluster track labelled by each speech's NATIONAL party.
+"""Build a k-cluster track (k=4 by default) labelled by each speech's NATIONAL party.
 
 Reads  data/EuroParl Custom/cleaned/{train,dev,test}.parquet
        data/EuroParl Custom/national_parties/speeches.parquet   (build_national_party_map.py)
-Writes data/EuroParl Custom/clusters_k4_national/{train,dev,test,train_balanced}.parquet
-       data/EuroParl Custom/clusters_k4_national/labels.json
+Writes data/EuroParl Custom/clusters_k{k}_national/{train,dev,test,train_balanced}.parquet
+       data/EuroParl Custom/clusters_k{k}_national/labels.json
+       (--k 2, 3 or 4; each k has its own directory, so tracks never overwrite each other)
 
 The group-level track (build_cluster_splits.py) moves whole EP groups into clusters.
 This one looks up every row's national party instead, maps it onto the EU&I 2024 party
-it became (see build_national_party_map.py), and labels the row with that party's k=4
-cluster. A Romanian S&D speech (PSD, in the PSD-PNL list) and a German S&D speech (SPD)
+it became (see build_national_party_map.py), and labels the row with that party's
+cluster in analysis/party_kmeans.py's k-cluster fit. A Romanian S&D speech (PSD, in the PSD-PNL list) and a German S&D speech (SPD)
 can therefore land in different clusters, as the parties themselves do.
 
 Rows whose national party does not map onto a clustered 2024 party are DROPPED -- UK
@@ -38,15 +39,16 @@ pd.options.future.infer_string = False
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 from analysis import party_kmeans as pk
-from preprocessing.build_cluster_splits import (K, PARTY_COLUMN, cluster_parties, load_pool,
-                                                split_and_write)
+from preprocessing.build_cluster_splits import (K, PARTY_COLUMN, add_language_ratio_arg,
+                                                cluster_parties, load_pool, split_and_write)
 from preprocessing.build_national_party_map import LINKEDEP_PREFIX, name_key
 from preprocessing.split_preprocessed_data import EVAL_SET_SIZE
 
 DATA_DIR = PROJECT_ROOT / "data" / "EuroParl Custom"
 DEFAULT_INPUT_DIR = DATA_DIR / "cleaned"
 DEFAULT_SPEECHES = DATA_DIR / "national_parties" / "speeches.parquet"
-DEFAULT_OUTPUT_DIR = DATA_DIR / "clusters_k4_national"
+def default_output_dir(k):
+    return DATA_DIR / f"clusters_k{k}_national"
 
 
 def nearest(rows, lookup, key, max_gap):
@@ -105,6 +107,13 @@ def report(pool):
         }
         print(f"  {route:<13} {len(df):>10,} rows  kept {df['kept'].mean():6.1%}  "
               f"(same-day {df['exact'].mean():.1%}, no speaker match {(~df['matched']).mean():.1%})")
+    # Where each original EP group's rows went -- the check that a whole group (and so,
+    # usually, a whole cluster) did not silently fall out between preprocessing and here.
+    by_group = pd.crosstab(pool[PARTY_COLUMN], pool["cluster"].fillna("(unmapped)"))
+    print("  rows by original EP group (rows) x resulting cluster (columns):")
+    print("    " + by_group.to_string().replace("\n", "\n    "))
+    summary["rows_by_ep_group_and_cluster"] = {g: {c: int(n) for c, n in row.items() if n}
+                                               for g, row in by_group.iterrows()}
     by_year = pool.groupby(pool["date"].dt.year)["kept"].mean().round(3)
     by_lang = pool.groupby("language")["kept"].mean().round(3)
     print(f"  kept by year:     {by_year.to_dict()}")
@@ -119,7 +128,10 @@ def parse_args():
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--input-dir", type=Path, default=DEFAULT_INPUT_DIR)
     parser.add_argument("--speeches", type=Path, default=DEFAULT_SPEECHES)
-    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--k", type=int, default=K, choices=(2, 3, 4),
+                        help="number of clusters (names from analysis/party_kmeans.py)")
+    parser.add_argument("--output-dir", type=Path, default=None,
+                        help="default: data/EuroParl Custom/clusters_k{k}_national")
     parser.add_argument("--max-gap-days", type=int, default=5 * 365,
                         help="furthest a nearest-date speaker match may reach")
     parser.add_argument("--per-party", type=int, default=None,
@@ -128,12 +140,14 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=42, help="split/balancing seed")
     parser.add_argument("--cluster-seed", type=int, default=0,
                         help="k-means seed; CLUSTER_NAMES were read off the seed-0 fit")
+    add_language_ratio_arg(parser)
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    parties = cluster_parties(args.cluster_seed)
+    output_dir = args.output_dir or default_output_dir(args.k)
+    parties = cluster_parties(args.cluster_seed, args.k)
     cluster_of = dict(zip(parties["PUI"].astype(int), parties["cluster_name"]))
     # Abbreviations repeat across countries (PS is Portuguese, Belgian and Slovak).
     label_of = dict(zip(parties["PUI"].astype(int),
@@ -141,6 +155,7 @@ def main():
 
     speeches = pd.read_parquet(args.speeches)
     pool = resolve(load_pool(args.input_dir), speeches, args.max_gap_days)
+    pool["cluster"] = pool["pui"].map(lambda p: cluster_of.get(int(p)) if pd.notna(p) else None)
     print("Row -> national party:")
     coverage = report(pool)
 
@@ -157,15 +172,15 @@ def main():
     for (cluster, pui), n in kept.groupby([PARTY_COLUMN, "pui"]).size().sort_values(ascending=False).items():
         rows_by_party.setdefault(cluster, {})[label_of[pui]] = int(n)
 
-    split_and_write(kept, args.output_dir, args.seed, args.per_party, args.eval_set_size, {
-        "k": K,
+    split_and_write(kept, output_dir, args.seed, args.per_party, args.eval_set_size, {
+        "k": args.k,
         "cluster_seed": args.cluster_seed,
         "split_seed": args.seed,
-        "clusters": pk.CLUSTER_NAMES[K],
+        "clusters": pk.CLUSTER_NAMES[args.k],
         "max_gap_days": args.max_gap_days,
         "coverage": coverage,
         "rows_by_cluster_and_party": rows_by_party,
-    }, "labels.json")
+    }, "labels.json", args.language_ratio)
 
 
 if __name__ == "__main__":

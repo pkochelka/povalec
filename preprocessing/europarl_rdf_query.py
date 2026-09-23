@@ -9,11 +9,16 @@ Paper:   Lerner and Yvon (2025), "Assessing the Political Fairness of Multilingu
 Input data: LinkedEP / Talk of Europe, van Aggelen et al. (2016), DANS
 DOI 10.17026/dans-x62-ew3m, CC0-1.0. Fetch it with fetch_raw_data.py.
 
-Adapted for this project: the three SPARQL queries and the output shape are
-Lerner's, unchanged. What changed here is packaging only -- the script was moved
-out of the gitignored data directory into preprocessing/, the jsonargparse CLI
-was replaced with the repo-standard argparse, and --languages was added so the
-graph can be built on a subset of the language dumps.
+Adapted for this project: the output shape and two of the three SPARQL queries are
+Lerner's, unchanged. Packaging changed -- the script was moved out of the gitignored
+data directory into preprocessing/, the jsonargparse CLI was replaced with the
+repo-standard argparse, and --languages was added so the graph can be built on a
+subset of the language dumps. One query changed: in multiparallel() the translation
+is OPTIONAL. Lerner builds a multiparallel corpus and needs translations; this
+project classifies speeches and wants every one. The EP stopped translating plenary
+verbatims at the end of 2012, so the required join silently dropped every 2013-2017
+speech (52-74% of each party cluster's LinkedEP speeches). Those now arrive with
+their original-language text only.
 
 WHERE THIS PIPELINE STOPS
 -------------------------
@@ -95,7 +100,7 @@ def multiparallel(g):
     """
     Main query for multiparallel data.
     Retrieves, for a given speech:
-        - all of its translations
+        - all of its translations, if any (OPTIONAL: none exist after 2012)
         - its source language
         - speaker identifier
         - for each type of party:
@@ -114,7 +119,7 @@ def multiparallel(g):
         ?party rdf:type ?partytype.
         ?partytype rdfs:label ?partytypelabel.
         ?speech lpv:speaker ?speaker.
-        ?speech lpv:translatedText ?translation.
+        OPTIONAL { ?speech lpv:translatedText ?translation. }
     }
     """
     df = {}
@@ -122,7 +127,8 @@ def multiparallel(g):
     for row in result:
         df.setdefault(row.speech, {})
         df[row.speech][row.text.language] = row.text.value
-        df[row.speech][row.translation.language] = row.translation.value
+        if row.translation is not None:
+            df[row.speech][row.translation.language] = row.translation.value
         df[row.speech]["src_lang"] = row.text.language
         df[row.speech]["date"] = str(row.date.value)
         df[row.speech]["speaker"] = str(row.speaker)

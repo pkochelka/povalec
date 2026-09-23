@@ -27,6 +27,7 @@ from transformers import (
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 from utils import likert_to_stance, load_dataframe
+from analysis.classifier_training import warmup_kwargs
 from analysis.stance_detector_training import stance_metrics, freeze_bottom_layers, select_device
 from analysis.judge_all_speeches import load_speech_pool, load_reason_pool
 from analysis.llm_stance_judge import load_checkpoint
@@ -186,7 +187,7 @@ def build_trainer(model, train_ds, val_ds, collator, tokenizer, num_epochs, outp
         num_train_epochs=num_epochs,
         learning_rate=1e-5,
         weight_decay=WEIGHT_DECAY,
-        warmup_ratio=0.06,
+        **warmup_kwargs(0.06),
         lr_scheduler_type="cosine",
         max_grad_norm=1.0,
         load_best_model_at_end=select,

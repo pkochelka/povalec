@@ -28,6 +28,7 @@ from transformers import (
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 from utils import ALL_LANGS_STR, VARIANTS, likert_to_stance, load_dataframe
+from analysis.classifier_training import warmup_kwargs
 
 MODEL_NAME = "jhu-clsp/mmBERT-small"
 MODEL_SLUG = MODEL_NAME.split("/")[-1]
@@ -222,7 +223,7 @@ def build_trainer(model, train_ds, val_ds, collator, tokenizer):
         num_train_epochs=NUM_EPOCHS,
         learning_rate=2e-5,
         weight_decay=WEIGHT_DECAY,
-        warmup_ratio=0.06,
+        **warmup_kwargs(0.06),
         lr_scheduler_type="cosine",
         max_grad_norm=1.0,
         load_best_model_at_end=True,

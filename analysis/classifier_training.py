@@ -12,6 +12,7 @@ inference the plain argmax of the logits is Bayes-optimal for the uniform dev/te
 The best checkpoint is picked on the uniform dev split and evaluated once on test.
 """
 import functools
+import inspect
 import os
 import json
 from dataclasses import dataclass
@@ -202,6 +203,13 @@ def build_model(data, hf_token, device):
     ).to(device)
 
 
+def warmup_kwargs(ratio):
+    # transformers 5 dropped warmup_ratio; a float < 1 in warmup_steps is read as a ratio.
+    if "warmup_ratio" in inspect.signature(TrainingArguments.__init__).parameters:
+        return {"warmup_ratio": ratio}
+    return {"warmup_steps": ratio}
+
+
 def training_arguments(output_dir, num_epochs, evaluate_each_epoch):
     return TrainingArguments(
         output_dir=output_dir,
@@ -217,7 +225,7 @@ def training_arguments(output_dir, num_epochs, evaluate_each_epoch):
         num_train_epochs=num_epochs,
         learning_rate=2e-5,
         weight_decay=0.01,
-        warmup_ratio=0.06,
+        **warmup_kwargs(0.06),
         lr_scheduler_type="cosine",
         max_grad_norm=1.0,
         load_best_model_at_end=evaluate_each_epoch,

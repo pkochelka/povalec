@@ -103,10 +103,12 @@ def preprocess_parlee():
     df = pd.read_csv(PARLEE_CSV, low_memory=False)
     print(f"  Loaded {len(df):,} rows")
 
+    # A speech is (date, speechnumber): speechnumber restarts every sitting, so on its own
+    # it merges up to 86 unrelated speeches (362,854 speeches, not 88,221).
     df_speeches = (
-        df.sort_values(["speechnumber", "sentencenumber"])
-          .groupby("speechnumber", as_index=False)
-          .agg({"text": " ".join, "date": "first", "party": "first", "language": "first", "speaker": "first"})
+        df.sort_values(["date", "speechnumber", "sentencenumber"])
+          .groupby(["date", "speechnumber"], as_index=False)
+          .agg({"text": " ".join, "party": "first", "language": "first", "speaker": "first"})
     )
     print(f"  {len(df_speeches):,} speeches after grouping")
 

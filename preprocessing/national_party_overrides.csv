@@ -1,0 +1,42 @@
+source,country,party,eu_pui,eu_abbr,reason
+parlee,Portugal,Partido Social Democrata,2219,AD,PSD leads the 2024 Aliança Democrática list
+parlee,Portugal,Portugal à Frente,2219,AD,2014 PSD+CDS-PP joint list; same pair runs as AD in 2024
+parlee,Portugal,Partido Popular,2219,AD,CDS-PP; member of the 2024 AD list
+parlee,Portugal,Partido Comunista Português,2207,CDU,PCP runs as CDU (PCP+PEV) in 2024
+parlee,Romania,Partidul Social Democrat,2313,PSD-PNL,PSD co-leads the 2024 PSD-PNL joint list
+parlee,Romania,Partidul National Liberal,2313,PSD-PNL,PNL co-leads the 2024 PSD-PNL joint list
+parlee,Romania,Partidul Naţional Liberal,2313,PSD-PNL,PNL (diacritic variant)
+parlee,Romania,Partidul Na<U+021B>ional Liberal,2313,PSD-PNL,PNL (ParlEE encoding variant)
+parlee,Romania,Partidul Democrat-Liberal,2313,PSD-PNL,PDL merged into PNL in 2014
+parlee,Spain,Izquierda Unida,2617,SMR,IU is a member of the 2024 Sumar list
+parlee,Spain,Euzko Alderdi Jeltzalea,2616,CEUS,PNV leads the 2024 CEUS list
+parlee,Spain,Esquerra Republicana de Catalunya,2615,AR,ERC is a member of the 2024 Ahora Repúblicas list
+parlee,Spain,Euskal Herria Bildu,2615,AR,EH Bildu is a member of the 2024 Ahora Repúblicas list
+parlee,Spain,EH Bildu,2615,AR,EH Bildu (short form)
+parlee,Spain,Bloque Nacionalista Galego,2615,AR,BNG is a member of the 2024 Ahora Repúblicas list
+parlee,France,Les Républicains,1003,LR,renamed from UMP in 2015
+parlee,France,Union pour un Mouvement Populaire,1003,LR,renamed to Les Républicains in 2015
+parlee,France,Union pour un mouvement populaire,1003,LR,renamed to Les Républicains in 2015
+parlee,France,Front national,1015,RN,renamed to Rassemblement national in 2018
+parlee,France,Front national/ Rassemblement Bleu Marine,1015,RN,FN electoral label; renamed RN in 2018
+parlee,France,Mouvement Démocrate,1022,RE,MoDem is a member of the 2024 Besoin d'Europe (Renaissance) list
+parlee,France,Mouvement démocrate,1022,RE,MoDem (case variant)
+parlee,Czechia,ANO 2011,611,ANO,same party
+parlee,Czechia,Obcanská demokratická strana,616,SPOLU,ODS is a member of the 2024 SPOLU list
+parlee,Czechia,Krestanská a demokratická unie – Ceskoslovenská strana lidová,616,SPOLU,KDU-ČSL is a member of the 2024 SPOLU list
+parlee,Czechia,Tradice Odpovednost Prosperita,616,SPOLU,TOP 09 is a member of the 2024 SPOLU list
+parlee,Czechia,Komunistická strana Cech a Moravy,618,Stačilo!,KSČM leads the 2024 Stačilo! list
+parlee,Poland,Polskie Stronnictwo Ludowe,2119,TD,PSL is a member of the 2024 Trzecia Droga list
+parlee,Poland,Sojusz Lewicy Demokratycznej,2120,L,SLD merged into Nowa Lewica in 2021
+parlee,Poland,Solidarna Polska,2104,PiS,Solidarna/Suwerenna Polska merged into PiS in 2024
+parlee,Netherlands,GroenLinks,2016,GL-PvdA,GL runs the joint GL-PvdA list in 2024
+parlee,Netherlands,Partij van de Arbeid,2016,GL-PvdA,PvdA runs the joint GL-PvdA list in 2024
+parlee,Hungary,Magyar Szocialista Párt,1307,DK,MSZP is a member of the 2024 DK-MSZP-Párbeszéd list
+parlee,Latvia,"Socialdemokratiska partija ""Saskana""",1607,SDPS,Harmony (Saskaņa) is the SDPS row
+parlee,Germany,Familien-Partei Deutschlands,1112,FAMILIE,same party
+parlee,Germany,Freie Wähler,1101,FW,same party
+parlee,Germany,Ökologisch-Demokratische Partei,1117,ÖDP,same party
+parlee,Germany,Die PARTEI,1116,PARTEI,same party
+parlee,Germany,Christlich-Soziale Union in Bayern,1104,CDU/CSU,CSU runs the joint CDU/CSU row
+parlee,Belgium,Christlich-Soziale Partei,219,CSP,same party
+parlee,Belgium,Open Vlaamse Liberalen en Democraten,207,OpenVLD,same party; its ids do not reach the EU&I row

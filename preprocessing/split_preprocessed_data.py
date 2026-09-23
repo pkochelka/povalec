@@ -15,6 +15,10 @@ MIN_TEXT_LEN     = 50
 MIN_LANG_SAMPLES = 10_000
 EVAL_SET_SIZE    = 50_000   # target rows for EACH of dev and test
 RANDOM_STATE     = 42
+# An eval split may take at most this share of a party's rows in any one language
+# (see carve). A party short in a language gets a smaller quota there rather than
+# having nearly all of its speech groups swept into the eval split and discarded.
+MAX_EVAL_SHARE   = 0.25
 
 COLUMNS = ["date", "EU Party", "text", "language", "speaker"]
 
@@ -29,13 +33,24 @@ COLUMNS = ["date", "EU Party", "text", "language", "speaker"]
 # ECR+ID-collapsed track can merge first and re-split with identical machinery.
 
 
-def carve(sub, targets, rng):
+def carve(sub, targets, rng, max_share=MAX_EVAL_SHARE):
     """Pull one class-balanced, language-stratified evaluation chunk out of `sub`.
 
     Whole speech groups are claimed for the chunk (so they can't leak into the
     remainder), then exactly `targets[lang]` rows per language are sampled from
     the claimed pool. Returns the selected row labels and the untouched rows.
+
+    Claimed-but-unsampled rows are discarded (their groups belong to this chunk, so
+    they cannot go to train), which is why each language's target is capped at
+    `max_share` of the party's rows in that language. Uncapped, a language the party
+    barely speaks -- a GUE/NGL row in Croatian -- cannot meet its target, pushes the
+    cutoff to its LAST row, claims nearly every group and discards everything not
+    sampled: that is how GUE/NGL lost ~90% of its rows before this cap.
     """
+    available = sub["language"].value_counts()
+    targets = {lang: min(target, int(available.get(lang, 0) * max_share))
+               for lang, target in targets.items()}
+    targets = {lang: target for lang, target in targets.items() if target > 0}
     groups = sub["group"].unique()
     rank = dict(zip(groups, rng.permutation(len(groups))))
     work = sub.assign(_grank=sub["group"].map(rank)).sort_values("_grank", kind="stable")
@@ -134,6 +149,11 @@ def split_dataframe(df, eval_set_size=EVAL_SET_SIZE, seed=RANDOM_STATE):
         sub = df[df["EU Party"] == party]
         dev_idx,  rest  = carve(sub,  target_per_lang, rng)
         test_idx, rest2 = carve(rest, target_per_lang, rng)
+        # Rows of claimed groups that were not sampled are lost to every split; report
+        # them so a party draining away is visible rather than silent.
+        lost = len(sub) - len(dev_idx) - len(test_idx) - len(rest2)
+        print(f"  {party}: {len(sub):,} rows -> dev {len(dev_idx):,}, test {len(test_idx):,}, "
+              f"train {len(rest2):,}, discarded {lost:,} ({lost / len(sub):.1%})")
         dev_parts.append(dev_idx)
         test_parts.append(test_idx)
         train_parts.append(rest2.index.to_numpy())

@@ -146,6 +146,18 @@ def split_dataframe(df, eval_set_size=EVAL_SET_SIZE, seed=RANDOM_STATE):
     # Group key: all translations of the same speech share speaker+date.
     df["group"] = df["speaker"].astype(str) + "_" + df["date"].astype(str)
     print(f"Unique speech groups: {df['group'].nunique():,}")
+    # carve() runs per party, so it keeps a group whole only if the group has ONE label.
+    # A group under two labels (a missing speaker lumping a whole day together, two
+    # namesakes, sources disagreeing on the speaker's group) would be split across
+    # train and dev/test. Its label is ambiguous anyway: drop it.
+    labels_per_group = df.groupby("group")["EU Party"].nunique()
+    mixed = labels_per_group.index[labels_per_group > 1]
+    if len(mixed):
+        is_mixed = df["group"].isin(mixed)
+        print(f"Dropping {len(mixed):,} speech groups ({is_mixed.sum():,} rows, "
+              f"{is_mixed.mean():.2%}) that carry more than one label; largest: "
+              f"{df.loc[is_mixed, 'group'].value_counts().head(5).to_dict()}")
+        df = df[~is_mixed]
 
     parties = sorted(df["EU Party"].unique())
     per_party = eval_set_size // len(parties)

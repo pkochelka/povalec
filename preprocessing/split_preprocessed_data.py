@@ -19,6 +19,12 @@ RANDOM_STATE     = 42
 # (see carve). A party short in a language gets a smaller quota there rather than
 # having nearly all of its speech groups swept into the eval split and discarded.
 MAX_EVAL_SHARE   = 0.25
+# ... and may claim at most this share of a party's speech groups. Claimed groups are
+# lost to train whole, so this bounds what each eval split can discard: at 0.25 alone,
+# a language GUE/NGL barely speaks still made dev and test each claim a quarter of its
+# groups and discard 59.5% of its rows. Languages that cannot be filled within the
+# cap are filled partially (see carve).
+MAX_EVAL_GROUP_SHARE = 0.10
 
 COLUMNS = ["date", "EU Party", "text", "language", "speaker"]
 
@@ -33,7 +39,7 @@ COLUMNS = ["date", "EU Party", "text", "language", "speaker"]
 # ECR+ID-collapsed track can merge first and re-split with identical machinery.
 
 
-def carve(sub, targets, rng, max_share=MAX_EVAL_SHARE):
+def carve(sub, targets, rng, max_share=MAX_EVAL_SHARE, max_group_share=MAX_EVAL_GROUP_SHARE):
     """Pull one class-balanced, language-stratified evaluation chunk out of `sub`.
 
     Whole speech groups are claimed for the chunk (so they can't leak into the
@@ -45,7 +51,9 @@ def carve(sub, targets, rng, max_share=MAX_EVAL_SHARE):
     `max_share` of the party's rows in that language. Uncapped, a language the party
     barely speaks -- a GUE/NGL row in Croatian -- cannot meet its target, pushes the
     cutoff to its LAST row, claims nearly every group and discards everything not
-    sampled: that is how GUE/NGL lost ~90% of its rows before this cap.
+    sampled: that is how GUE/NGL lost ~90% of its rows before this cap. The cutoff
+    is also capped at `max_group_share` of the party's groups; a language whose
+    target does not fit inside that many groups is filled with what is there.
     """
     available = sub["language"].value_counts()
     targets = {lang: min(target, int(available.get(lang, 0) * max_share))
@@ -65,6 +73,7 @@ def carve(sub, targets, rng, max_share=MAX_EVAL_SHARE):
         reached = col[col["_lang_cum"] >= target]
         grank = reached["_grank"].iloc[0] if not reached.empty else col["_grank"].iloc[-1]
         cutoff = max(cutoff, int(grank))
+    cutoff = min(cutoff, max(0, int(np.ceil(len(groups) * max_group_share)) - 1))
 
     pool = work[work["_grank"] <= cutoff]
     leftover = work[work["_grank"] > cutoff].drop(columns=["_grank", "_lang_cum"])

@@ -12,7 +12,7 @@ EU_DEBATES_PARQUET = Path("data/EuroParl Custom/preprocessed_eu_debates.parquet"
 OUTPUT_DIR         = Path("data/EuroParl Custom")
 
 MIN_TEXT_LEN     = 50
-MIN_LANG_SAMPLES = 10_000
+MIN_LANG_SAMPLES = 15_000   # languages with fewer rows are dropped (was 10k; raised to drop hr)
 EVAL_SET_SIZE    = 50_000   # target rows for EACH of dev and test
 RANDOM_STATE     = 42
 # An eval split may take at most this share of a party's rows in any one language
@@ -113,6 +113,8 @@ def load_combined():
     df = df[df["text"].str.len() >= MIN_TEXT_LEN]
     lang_counts = df["language"].value_counts()
     kept_langs = lang_counts[lang_counts >= MIN_LANG_SAMPLES].index
+    dropped = lang_counts[lang_counts < MIN_LANG_SAMPLES]
+    print(f"Languages below {MIN_LANG_SAMPLES:,} rows, dropped: {dropped.to_dict()}")
     df = df[df["language"].isin(kept_langs)]
     df = df.dropna(subset=["EU Party"]).reset_index(drop=True)
     print(f"After length + language filter: {len(df):,} rows "

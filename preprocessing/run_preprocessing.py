@@ -130,7 +130,7 @@ STEPS = [
     ),
     Step(
         "clean-names", "clean_party_names.py",
-        "strip self-identifying EP group names from the text",
+        "repair detached accents; strip EP group names and titled person names",
         outputs=[EUROPARL_DIR / "cleaned" / f"{split}.parquet" for split in SPLITS],
     ),
     Step(

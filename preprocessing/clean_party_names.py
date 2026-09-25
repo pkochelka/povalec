@@ -1,12 +1,14 @@
 """
 Strip European Parliament political-group / party names out of the speech text,
-then titled person names and stray leading punctuation (clean_person_names.py).
+after repairing detached accents (fix_diacritics.py), then titled person names and
+stray leading punctuation (clean_person_names.py).
 
 Reads  data/EuroParl Custom/{train,dev,test}.parquet
 Writes data/EuroParl Custom/cleaned/{train,dev,test}.parquet
 and prints, per split, how many name occurrences were removed for each of the
-seven canonical EP groups, and per language how many titled names ("Mr Morillon")
-and stray leading punctuation marks clean_person_names removed. The `cleaned/` subdirectory, same filenames, is what
+seven canonical EP groups, and per language how many rows had their accents
+repaired and how many titled names ("Mr Morillon") and stray leading punctuation
+marks were removed. The `cleaned/` subdirectory, same filenames, is what
 build_collapsed_splits.py and analysis/plotting/plot_speech_counts.py read.
 
 Why this exists
@@ -63,8 +65,10 @@ import pyarrow.parquet as pq
 
 try:                                    # run as a script from the repo root ...
     from preprocessing.clean_person_names import strip_names
+    from preprocessing.fix_diacritics import fix_diacritics
 except ImportError:                     # ... or from inside preprocessing/
     from clean_person_names import strip_names
+    from fix_diacritics import fix_diacritics
 
 DATA_DIR = Path("data/EuroParl Custom")
 OUT_DIR = DATA_DIR / "cleaned"      # what build_collapsed_splits.py reads
@@ -358,8 +362,9 @@ def clean_text(text: str, counts: Counter) -> str:
 def _clean_chunk(chunk: tuple[list, list]) -> tuple[list, Counter, Counter]:
     """Worker: clean a list of texts, returning (cleaned, party_counts, address_counts).
 
-    Party names go first, then titled person names and stray leading punctuation
-    (clean_person_names.strip_names). address_counts is keyed (language, kind), plus
+    Accents are repaired first (fix_diacritics), so the name patterns see whole
+    words; then party names; then titled person names and stray leading
+    punctuation (clean_person_names.strip_names). address_counts is keyed (language, kind), plus
     (language, "rows"), so the report can show a rate per language.
 
     Runs in a separate process (Python's `re` holds the GIL, so threads do not
@@ -372,7 +377,7 @@ def _clean_chunk(chunk: tuple[list, list]) -> tuple[list, Counter, Counter]:
     for text, lang in zip(texts, langs):
         if text:
             kinds: Counter = Counter()
-            text = strip_names(clean_text(text, local), kinds)
+            text = strip_names(clean_text(fix_diacritics(text, kinds), local), kinds)
             for kind, n in kinds.items():
                 addr[(lang, kind)] += n
         addr[(lang, "rows")] += 1
@@ -380,7 +385,7 @@ def _clean_chunk(chunk: tuple[list, list]) -> tuple[list, Counter, Counter]:
     return cleaned, local, addr
 
 
-ADDRESS_KINDS = ["lead_punct", "name"]
+ADDRESS_KINDS = ["diacritics", "lead_punct", "name"]
 
 
 def print_address_report(addr: Counter) -> None:
@@ -451,7 +456,7 @@ def process_split(split: str) -> tuple[Counter, Counter]:
     width = max(len(g) for g in CANON)
     for g in CANON:
         print(f"    {g:<{width}} {counts.get(g, 0):>8,}")
-    print(f"  titled names / leading punctuation removed ({split}):")
+    print(f"  accents repaired (rows) / leading punctuation / titled names removed ({split}):")
     print_address_report(addr)
     return counts, addr
 
@@ -470,7 +475,7 @@ def main() -> None:
     for g in CANON:
         print(f"    {g:<{width}} {grand.get(g, 0):>9,}")
     print(f"    {'ALL':<{width}} {sum(grand.values()):>9,}")
-    print("\n=== titled names / leading punctuation, all splits ===")
+    print("\n=== accents repaired / leading punctuation / titled names, all splits ===")
     print_address_report(grand_addr)
 
 

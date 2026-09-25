@@ -50,6 +50,12 @@ DEFAULT_INPUT_DIR = DATA_DIR / "cleaned"
 DEFAULT_OUTPUT_DIR = DATA_DIR / "clusters_k4"
 
 K = 4
+# Languages with fewer pool rows than this are dropped before the split. The corpus-wide
+# filter (split_preprocessed_data.MIN_LANG_SAMPLES) counts rows before the national track
+# drops unmapped parties, so hr passes it yet ends up with ~22k train rows here and a
+# Radical-left floor of ~100, starving the language quota. 30k sits between hr (~23-25k
+# pool rows) and the next-thinnest language (~42k+).
+MIN_LANG_ROWS = 30_000
 # The training corpus's labels (preprocess_data.py's mappings) -> the tenth-term groups
 # that succeeded them, spelled as in the raw EU&I file. ID split in 2024 into Patriots
 # (RN, Lega, FPÖ, VB) and ESN (AfD), so it takes both.
@@ -216,6 +222,10 @@ def split_and_write(pool, output_dir, seed, per_party, eval_set_size, metadata, 
     """
     rng = np.random.default_rng(seed)
     output_dir.mkdir(parents=True, exist_ok=True)
+    lang_counts = pool["language"].value_counts()
+    thin = lang_counts[lang_counts < MIN_LANG_ROWS]
+    print(f"Languages below {MIN_LANG_ROWS:,} pool rows, dropped: {thin.to_dict()}")
+    pool = pool[~pool["language"].isin(thin.index)].reset_index(drop=True)
     train, dev, test = split_dataframe(pool, eval_set_size=eval_set_size, seed=seed)
     splits = {"train": train, "dev": dev, "test": test}
     for name, df in splits.items():
@@ -246,7 +256,9 @@ def split_and_write(pool, output_dir, seed, per_party, eval_set_size, metadata, 
          for c in sorted(counts.index)],
         ignore_index=True,
     ).sample(frac=1, random_state=seed).reset_index(drop=True)
-    metadata = {**metadata, "language_ratio": language_ratio, "balanced_per_cluster": target}
+    metadata = {**metadata, "language_ratio": language_ratio, "balanced_per_cluster": target,
+                "min_lang_rows": MIN_LANG_ROWS,
+                "dropped_languages": {k: int(v) for k, v in thin.items()}}
     print(f"Balanced train: {len(balanced):,} rows")
     print(balanced.groupby([PARTY_COLUMN, "language"], observed=True)
           .size().unstack(fill_value=0).to_string())

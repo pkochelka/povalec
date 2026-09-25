@@ -13,6 +13,7 @@ call time, so this wrapper points them elsewhere instead of forking them:
 
     --track group        data/EuroParl Custom/clusters_k4            (build_cluster_splits.py)
     --track national     data/EuroParl Custom/clusters_k{k}_national (build_national_cluster_splits.py)
+    --suffix _nohr       ... clusters_k4_nohr / clusters_k{k}_national_nohr, run dir likewise
 
 Everything a run writes -- the model directory, manifest.json and the trainer's
 results_<tag>.txt, which is written to the working directory under a name that does
@@ -36,12 +37,12 @@ TRAINERS = {
 }
 
 
-def track_dir(track, k):
+def track_dir(track, k, suffix=""):
     if track == "group":
         if k != 4:
             raise SystemExit("the group track exists for k=4 only")
-        return DATA_ROOT / "clusters_k4"
-    return DATA_ROOT / f"clusters_k{k}_national"
+        return DATA_ROOT / f"clusters_k4{suffix}"
+    return DATA_ROOT / f"clusters_k{k}_national{suffix}"
 
 
 def main():
@@ -50,20 +51,23 @@ def main():
     parser.add_argument("--track", choices=("group", "national"), required=True)
     parser.add_argument("--trainer", choices=tuple(TRAINERS), required=True)
     parser.add_argument("--k", type=int, default=4)
+    parser.add_argument("--suffix", default="",
+                        help="track variant: reads clusters_k4<suffix>/ or clusters_k<k>_national<suffix>/ "
+                             "(slurm_preprocess_clusters.sh SUFFIX=) and writes runs/<track>-k<k>-<trainer><suffix>")
     parser.add_argument("--run-dir", type=Path, default=None,
-                        help="default: runs/<track>-k<k>-<trainer>")
+                        help="default: runs/<track>-k<k>-<trainer><suffix>")
     parser.add_argument("--dry-run", action="store_true",
                         help="resolve and check paths, then stop before loading the trainer")
     args = parser.parse_args()
 
     module_name, train_split = TRAINERS[args.trainer]
-    data_dir = track_dir(args.track, args.k)
+    data_dir = track_dir(args.track, args.k, args.suffix)
     needed = [data_dir / f"{name}.parquet" for name in (train_split, "dev", "test")]
     missing = [str(p) for p in needed if not p.exists()]
     if missing:
         raise SystemExit(f"missing split files (build the track first): {missing}")
 
-    run_dir = (args.run_dir or PROJECT_ROOT / "runs" / f"{args.track}-k{args.k}-{args.trainer}").resolve()
+    run_dir = (args.run_dir or PROJECT_ROOT / "runs" / f"{args.track}-k{args.k}-{args.trainer}{args.suffix}").resolve()
     print(f"trainer:   {module_name} (train split: {train_split}.parquet)")
     print(f"data:      {data_dir}")
     print(f"run dir:   {run_dir}")

@@ -12,7 +12,8 @@ EU_DEBATES_PARQUET = Path("data/EuroParl Custom/preprocessed_eu_debates.parquet"
 OUTPUT_DIR         = Path("data/EuroParl Custom")
 
 MIN_TEXT_LEN     = 50
-MIN_LANG_SAMPLES = 15_000   # languages with fewer rows are dropped (was 10k; raised to drop hr)
+MIN_LANG_SAMPLES = 15_000   # languages with fewer rows are dropped (was 10k). hr passes
+                            # this; the cluster tracks drop it (build_cluster_splits.MIN_LANG_ROWS)
 EVAL_SET_SIZE    = 50_000   # target rows for EACH of dev and test
 RANDOM_STATE     = 42
 # An eval split may take at most this share of a party's rows in any one language

@@ -1,10 +1,12 @@
 """
-Strip European Parliament political-group / party names out of the speech text.
+Strip European Parliament political-group / party names out of the speech text,
+then titled person names and stray leading punctuation (clean_person_names.py).
 
 Reads  data/EuroParl Custom/{train,dev,test}.parquet
 Writes data/EuroParl Custom/cleaned/{train,dev,test}.parquet
 and prints, per split, how many name occurrences were removed for each of the
-seven canonical EP groups. The `cleaned/` subdirectory, same filenames, is what
+seven canonical EP groups, and per language how many titled names ("Mr Morillon")
+and stray leading punctuation marks clean_person_names removed. The `cleaned/` subdirectory, same filenames, is what
 build_collapsed_splits.py and analysis/plotting/plot_speech_counts.py read.
 
 Why this exists
@@ -58,6 +60,11 @@ from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+
+try:                                    # run as a script from the repo root ...
+    from preprocessing.clean_person_names import strip_names
+except ImportError:                     # ... or from inside preprocessing/
+    from clean_person_names import strip_names
 
 DATA_DIR = Path("data/EuroParl Custom")
 OUT_DIR = DATA_DIR / "cleaned"      # what build_collapsed_splits.py reads
@@ -348,30 +355,61 @@ def clean_text(text: str, counts: Counter) -> str:
     return new
 
 
-def _clean_chunk(texts: list) -> tuple[list, Counter]:
-    """Worker: clean a list of texts, returning (cleaned, local_counts).
+def _clean_chunk(chunk: tuple[list, list]) -> tuple[list, Counter, Counter]:
+    """Worker: clean a list of texts, returning (cleaned, party_counts, address_counts).
+
+    Party names go first, then titled person names and stray leading punctuation
+    (clean_person_names.strip_names). address_counts is keyed (language, kind), plus
+    (language, "rows"), so the report can show a rate per language.
 
     Runs in a separate process (Python's `re` holds the GIL, so threads do not
     help). The module-level COMBINED_RE is compiled once per worker on import.
     """
+    texts, langs = chunk
     local: Counter = Counter()
-    cleaned = [clean_text(t, local) if t else t for t in texts]
-    return cleaned, local
+    addr: Counter = Counter()
+    cleaned = []
+    for text, lang in zip(texts, langs):
+        if text:
+            kinds: Counter = Counter()
+            text = strip_names(clean_text(text, local), kinds)
+            for kind, n in kinds.items():
+                addr[(lang, kind)] += n
+        addr[(lang, "rows")] += 1
+        cleaned.append(text)
+    return cleaned, local, addr
 
 
-def process_split(split: str) -> Counter:
+ADDRESS_KINDS = ["lead_punct", "name"]
+
+
+def print_address_report(addr: Counter) -> None:
+    """Removals per 100 rows, per language: the coverage check for languages whose
+    patterns nobody has read against real text."""
+    langs = sorted({lang for lang, _ in addr}, key=lambda l: -addr[(l, "rows")])
+    print(f"    {'lang':<6}{'rows':>11}" + "".join(f"{k:>12}" for k in ADDRESS_KINDS)
+          + "   (removals per 100 rows)")
+    for lang in langs:
+        rows = addr[(lang, "rows")]
+        print(f"    {str(lang):<6}{rows:>11,}"
+              + "".join(f"{100 * addr[(lang, k)] / max(rows, 1):>12.1f}" for k in ADDRESS_KINDS))
+
+
+def process_split(split: str) -> tuple[Counter, Counter]:
     src = DATA_DIR / f"{split}.parquet"
     dst = OUT_DIR / f"{split}.parquet"
     if not src.exists():
         print(f"[skip] {src} not found")
-        return Counter()
+        return Counter(), Counter()
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     counts: Counter = Counter()
+    addr: Counter = Counter()
     reader = pq.ParquetFile(src)
     schema = reader.schema_arrow
     field = schema.field(TEXT_COL)
     text_idx = schema.get_field_index(TEXT_COL)
+    lang_idx = schema.get_field_index("language")
     pool = pa.default_memory_pool()
 
     writer = pq.ParquetWriter(dst, schema)
@@ -384,17 +422,21 @@ def process_split(split: str) -> Counter:
             for rg in range(reader.metadata.num_row_groups):
                 group = reader.read_row_group(rg)
                 texts = group.column(text_idx).to_pylist()
-                chunks = [texts[i:i + PAR_CHUNK] for i in range(0, len(texts), PAR_CHUNK)]
+                langs = (group.column(lang_idx).to_pylist() if lang_idx >= 0
+                         else [None] * len(texts))
+                chunks = [(texts[i:i + PAR_CHUNK], langs[i:i + PAR_CHUNK])
+                          for i in range(0, len(texts), PAR_CHUNK)]
                 cleaned: list = []
-                for part, local in ex.map(_clean_chunk, chunks):
+                for part, local, local_addr in ex.map(_clean_chunk, chunks):
                     cleaned.extend(part)
                     counts.update(local)
+                    addr.update(local_addr)
                 new_col = pa.array(cleaned, type=field.type)
                 group = group.set_column(text_idx, field, new_col)
                 writer.write_table(group)
                 rows += group.num_rows
                 print(f"  {split}: {rows:,} rows processed", end="\r")
-                del group, texts, chunks, cleaned, new_col
+                del group, texts, langs, chunks, cleaned, new_col
                 gc.collect()
                 try:
                     pool.release_unused()
@@ -409,20 +451,27 @@ def process_split(split: str) -> Counter:
     width = max(len(g) for g in CANON)
     for g in CANON:
         print(f"    {g:<{width}} {counts.get(g, 0):>8,}")
-    return counts
+    print(f"  titled names / leading punctuation removed ({split}):")
+    print_address_report(addr)
+    return counts, addr
 
 
 def main() -> None:
     splits = sys.argv[1:] or SPLITS      # e.g. `python clean_party_names.py test`
     grand: Counter = Counter()
+    grand_addr: Counter = Counter()
     for split in splits:
-        grand.update(process_split(split))
+        counts, addr = process_split(split)
+        grand.update(counts)
+        grand_addr.update(addr)
 
     print("\n=== TOTAL across splits ===")
     width = max(len(g) for g in CANON)
     for g in CANON:
         print(f"    {g:<{width}} {grand.get(g, 0):>9,}")
     print(f"    {'ALL':<{width}} {sum(grand.values()):>9,}")
+    print("\n=== titled names / leading punctuation, all splits ===")
+    print_address_report(grand_addr)
 
 
 if __name__ == "__main__":

@@ -286,18 +286,19 @@ def _capitalise(text: str) -> str:
     return text[:1].upper() + text[1:] if text[:1].islower() else text
 
 
-def strip_names(text: str, counts: Counter | None = None) -> str:
+def strip_names(text: str, counts: Counter | None = None, lead_punct: bool = True) -> str:
     """Delete stray leading punctuation and titled person names from `text`.
 
     `counts`, if given, is incremented under "lead_punct" and "name". Text with
-    nothing to remove is returned unchanged (byte-identical).
+    nothing to remove is returned unchanged (byte-identical). lead_punct=False removes
+    names only (analysis/name_ablation.py isolates the effect of names that way).
     """
     if not text:
         return text
     counts = counts if counts is not None else Counter()
     new = text
 
-    m = LEAD_PUNCT_RE.match(new)
+    m = LEAD_PUNCT_RE.match(new) if lead_punct else None
     if m:
         counts["lead_punct"] += 1
         new = new[m.end():]

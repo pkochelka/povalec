@@ -194,7 +194,8 @@ def _kind(token: str) -> str:
     """'hon', 'office', 'post', 'name' or '' for one whitespace-delimited word as-is."""
     if _HON_FULL.fullmatch(token):
         return "hon"
-    if _OFFICE_FULL.fullmatch(token):
+    # hyphenated compounds of an office word: "President-in-Office", "Commissioner-designate"
+    if _OFFICE_FULL.fullmatch(token) or ("-" in token and _OFFICE_FULL.fullmatch(token.split("-", 1)[0])):
         return "office"
     if _POST_FULL.fullmatch(token):
         return "post"
@@ -286,12 +287,15 @@ def _capitalise(text: str) -> str:
     return text[:1].upper() + text[1:] if text[:1].islower() else text
 
 
-def strip_names(text: str, counts: Counter | None = None, lead_punct: bool = True) -> str:
+def strip_names(text: str, counts: Counter | None = None, lead_punct: bool = True,
+                names: bool = True) -> str:
     """Delete stray leading punctuation and titled person names from `text`.
 
     `counts`, if given, is incremented under "lead_punct" and "name". Text with
     nothing to remove is returned unchanged (byte-identical). lead_punct=False removes
-    names only (analysis/name_ablation.py isolates the effect of names that way).
+    names only (analysis/name_ablation.py isolates the effect of names that way);
+    names=False removes leading punctuation only (what the pipeline does: see
+    clean_party_names.REMOVE_PERSON_NAMES).
     """
     if not text:
         return text
@@ -303,7 +307,7 @@ def strip_names(text: str, counts: Counter | None = None, lead_punct: bool = Tru
         counts["lead_punct"] += 1
         new = new[m.end():]
 
-    spans = _name_spans(new, counts)
+    spans = _name_spans(new, counts) if names else []
     if spans:
         parts, pos = [], 0
         for start, end in spans:

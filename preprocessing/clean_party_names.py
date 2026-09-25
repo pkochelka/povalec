@@ -77,6 +77,12 @@ TEXT_COL = "text"
 PAR_CHUNK = 4_000            # rows per task handed to a worker process
 N_WORKERS = max(1, (os.cpu_count() or 2) - 2)   # leave a couple cores for I/O
 REPLACEMENT = " "            # what a removed name becomes (whitespace then collapsed)
+# Titled person names ("Mr Morillon") stay in the text. Removing them was tested: on the
+# rows that have one, a test-time ablation cost -3.4pp accuracy against -2.3pp for
+# deleting as many random words (analysis/name_ablation.py), so the name-specific cue
+# is ~1pp -- and the title patterns cover the corpus languages unevenly, which matters
+# more for a multilingual instrument than that cue. True brings the removal back.
+REMOVE_PERSON_NAMES = False
 
 CANON = ["PPE", "S&D", "ALDE", "Greens/EFA", "ECR", "GUE/NGL", "ID"]
 
@@ -377,7 +383,8 @@ def _clean_chunk(chunk: tuple[list, list]) -> tuple[list, Counter, Counter]:
     for text, lang in zip(texts, langs):
         if text:
             kinds: Counter = Counter()
-            text = strip_names(clean_text(fix_diacritics(text, kinds), local), kinds)
+            text = strip_names(clean_text(fix_diacritics(text, kinds), local), kinds,
+                               names=REMOVE_PERSON_NAMES)
             for kind, n in kinds.items():
                 addr[(lang, kind)] += n
         addr[(lang, "rows")] += 1

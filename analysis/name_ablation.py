@@ -140,6 +140,8 @@ def main():
 
     ci_names = paired_bootstrap(ok_raw.astype(float), ok_names.astype(float), args.bootstrap, rng)
     ci_ctrl = paired_bootstrap(ok_raw.astype(float), ok_ctrl.astype(float), args.bootstrap, rng)
+    # The name-specific part: names removed vs the same amount of random deletion.
+    ci_names_vs_ctrl = paired_bootstrap(ok_ctrl.astype(float), ok_names.astype(float), args.bootstrap, rng)
 
     result = {
         "model_dir": str(args.model_dir), "data_dir": str(args.data_dir), "split": args.split,
@@ -150,6 +152,8 @@ def main():
         "affected_accuracy_delta": {
             "names_minus_raw": float(ok_names.mean() - ok_raw.mean()), "names_ci95": ci_names,
             "control_minus_raw": float(ok_ctrl.mean() - ok_raw.mean()), "control_ci95": ci_ctrl,
+            "names_minus_control": float(ok_names.mean() - ok_ctrl.mean()),
+            "names_vs_control_ci95": ci_names_vs_ctrl,
         },
         "affected_flips": {
             "names_changed_prediction": float((pred_names_aff != raw_aff).mean()),
@@ -186,6 +190,8 @@ def main():
           f"95% CI [{ci_names[0]:+.4f}, {ci_names[1]:+.4f}]")
     print(f"  accuracy change, control:       {d['control_minus_raw']:+.4f}  "
           f"95% CI [{ci_ctrl[0]:+.4f}, {ci_ctrl[1]:+.4f}]")
+    print(f"  names vs control (name-specific): {d['names_minus_control']:+.4f}  "
+          f"95% CI [{ci_names_vs_ctrl[0]:+.4f}, {ci_names_vs_ctrl[1]:+.4f}]")
     f = result["affected_flips"]
     print(f"  predictions changed: names {f['names_changed_prediction']:.1%} "
           f"(right->wrong {f['names_right_to_wrong']:,}, wrong->right {f['names_wrong_to_right']:,}), "

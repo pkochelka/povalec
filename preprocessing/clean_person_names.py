@@ -60,8 +60,9 @@ def _alt(words):
 # --------------------------------------------------------------------------- #
 # Word banks, in all 21 corpus languages.                                      #
 # --------------------------------------------------------------------------- #
-# Courtesy titles: "Mr", "Mrs", "Madam". Dotted abbreviations are case-sensitive, so
-# a sentence ending in "on." before a capitalised word is not read as a title.
+# Courtesy titles: "Mr", "Mrs", "Madam". Abbreviations are case-sensitive, so a
+# sentence ending in "on." before a capitalised word, or "DNA" in capitals, is not
+# read as a title.
 HONORIFIC = _alt([
     r"mr", r"mrs", r"ms", r"mister", r"madam", r"madame", r"mesdames", r"messieurs", r"monsieur",
     r"herrn?", r"frau",
@@ -72,8 +73,9 @@ HONORIFIC = _alt([
     r"gospod", r"gospa", r"gospe", r"gospoda", r"gospodine", r"gospođo", r"gospodin", r"gospođa",
     r"domnule", r"domnul", r"domnului", r"doamnă", r"doamna", r"doamnei",
     r"härra", r"proua", r"pone", r"ponia", r"ponas",
-    r"господин", r"госпожо", r"госпожа",
-    r"(?-i:Mme|M\.|Sig\.(?:ra)?|On\.|Sr\.(?:ª|a)?|Sra\.|Hr\.|Dl\.|Dna\.|κ\.|Г-н|Г-жо|Г-жа|Dr)",
+    r"господин", r"госпожо", r"госпожа", r"г-н", r"г-жо", r"г-жа", r"gđ[aeo]",
+    r"(?-i:Mme|M\.|Sig\.(?:ra)?|On\.|Sr\.(?:ª|a)?|Sra\.|Hr\.|hr\.|Dl\.?|dl\.?|Dna\.?|dna\.?|"
+    r"dlui|dnei|p\.|g\.|ga\.|κ\.|Dr)",
     r"mr\.", r"mrs\.", r"ms\.", r"dr\.",
 ])
 # Titles that follow the name (Hungarian, Latvian).
@@ -100,6 +102,7 @@ OFFICE = _NOT_PRESIDENCY + _alt([
     r"comissári[oa]", r"commissaris\w*", r"kommissionär\w*", r"kommissær\w*", r"komissaari\w*",
     r"επίτροπ\w*", r"komisarz\w*", r"komisař\w*", r"komisár\w*", r"komisar\w*", r"povjeren\w*",
     r"comisar\w*", r"biztos\w*", r"volinik\w*", r"komisār\w*", r"комисар\w*",
+    r"kommissionsledamot\w*", r"jäsen\w*",
     # minister / high representative / in office
     r"minist[er]\w*", r"ministr\w*", r"υπουργ\w*", r"miniszter\w*", r"министр?\w*",
     r"high", r"hoher?", r"haute?", r"alt[oa]", r"hoge", r"vysok\w*", r"wysok\w*",

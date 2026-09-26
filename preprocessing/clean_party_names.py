@@ -366,7 +366,7 @@ PATTERNS: dict[str, dict[str, list[str]]] = {
             r"Partito comunista (?:di Grecia|greco)", r"Partido Comunista (?:de Grecia|Griego|da Grécia)",
             r"Komunistick\w* stran\w* (?:Řecka|Grécka)", r"(?:Řeck|Gréck)\w* komunistick\w* stran\w*",
             r"Komunistyczn\w* Parti\w* Grecji",
-            r"Sinn F[ée]in", r"Rassemblement national", r"Prawo i Sprawiedliwo\w*",
+            r"Sinn F(?:[ée]|e´)in", r"Rassemblement national", r"Prawo i Sprawiedliwo\w*",
             r"Northern League", r"Ligue du Nord", r"Lega Nord",
         ],
         "raw": [
@@ -601,7 +601,11 @@ PATTERNS_MORE_2: dict[str, dict[str, list[str]]] = {
     },
     "Greens/EFA": {
         "name": [r"Den Europæiske Fri Alliance"],
-        "raw": [r"[/–]\s?Zelen(?:e|ih|i)\b"],                         # sl "Skupina Zelenih/... – Zelene"
+        "raw": [
+            r"[/–]\s?Zelen(?:e|ih|i)\b",                              # sl "Skupina Zelenih/... – Zelene"
+            r"\bZeleným\b/?",                                         # sk dative "k ... Zeleným/ESA"
+            r"\b(?:Zelenim|Zielonych|Зелените)/",                     # sl/pl/bg, the "/ESA" tail went
+        ],
     },
     "GUE/NGL": {
         "name": [
@@ -631,7 +635,18 @@ PATTERNS_MORE_2: dict[str, dict[str, list[str]]] = {
         ],
     },
     "national": {
-        "acr": ["Fidesz-KDNP", "KDNP"],                              # "Fidesz – KDNP" left "- KDNP"
+        "acr": ["Fidesz-KDNP", "KDNP",                               # "Fidesz – KDNP" left "- KDNP"
+                "FN-RBM",
+                # Austrian delegations name themselves ("ÖVP-Europa-Club", "SPÖ-EU-Delegation")
+                "ÖVP-Europa-Club", "SPÖ-EU-Delegation", "SPÖ-Delegation"],
+        "name": [r"Lig\w* [Ss]everu"],                                # cs/sk Lega Nord
+        "raw": [
+            r"\b(?:ÖVP|SPÖ)(?::\w+)?\b",                              # with the fi/sv suffix "ÖVP:n"
+            # bare "FN" is also the UN in sv/da/no ("i FN"), so only after French words;
+            # \x20, not a space: _any_space would make the lookbehinds variable-width
+            r"(?:(?<=\ble\x20)|(?<=\bdu\x20)|(?<=\bau\x20)|(?<=députés\x20)|(?<=élus\x20)"
+            r"|(?<=eurodéputés\x20))FN(?![\w-])",
+        ],
     },
 }
 for _canon, _spec in PATTERNS_MORE_2.items():
@@ -697,6 +712,9 @@ MAX_PASSES = 3   # a removal can join two fragments into a new match ("Grupo dos
 # Leftovers of a removed name (strip_residue).
 _EMPTY_BRACKETS_RE = re.compile(r"[(\[]\s*[)\]]")                      # "(PPE-DE)" -> "( )"
 _EMPTY_QUOTES_RE = re.compile(r'(?<=\s)"\s+"(?=\s)')                   # 'le groupe " "'
+# "parlamente, [name], a"; only right after a word and before a space: lv/ro write the
+# opening quote as ",," (",,savus”", "dezbatere ,, Pregatirea")
+_DOUBLE_COMMA_RE = re.compile(r"(?<=\w),(?:\s*,)+(?=\s)")
 # "the / supports", "předloženého /," after "Verts/ALE" or "Zelení/ALE" went; after a digit
 # or capital it is real text ("2009 / 2010", "A / B", "EU / NATO") and stays
 _LONE_SLASH_RE = re.compile(r"(?<=\w)(?<![\dA-ZÀ-Ý])\s/(?=[\s,.;:])(?!\s?\d)")
@@ -733,7 +751,7 @@ def clean_text(text: str, counts: Counter) -> str:
 
 
 def strip_residue(text: str, counts: Counter | None = None) -> str:
-    """Remove what a deleted name leaves behind: empty brackets and quotes, a hyphen
+    """Remove what a deleted name leaves behind: empty brackets and quotes, doubled commas, a hyphen
     orphaned from "-Fraktion", and a short transcript header before " – ". Runs on
     every row, not only on rows clean_text changed: the source already carries "()"
     where its own tooling dropped a group acronym. Counted once per changed row
@@ -742,6 +760,7 @@ def strip_residue(text: str, counts: Counter | None = None) -> str:
         return text
     new = _EMPTY_BRACKETS_RE.sub("", text)
     new = _EMPTY_QUOTES_RE.sub("", new)
+    new = _DOUBLE_COMMA_RE.sub(",", new)
     new = _ORPHAN_COMPOUND_RE.sub("", new)
     new = _LONE_SLASH_RE.sub(" ", new)
     m = _HEADER_RE.match(new)

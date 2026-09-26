@@ -24,6 +24,18 @@ The repair: "<U+XXXX>" escapes become the character they name; a letter + spacin
 accent becomes the single precomposed accented letter -- only where one exists, so
 the number sign "n° 5" is never read as an n with a ring.
 
+Transliterated rows (not repairable)
+------------------------------------
+A second kind of damage cannot be undone: in the 2017-2019 named-speaker rows (the
+ParlEE / EU Debates part, not LinkedEP) the text went through Windows-1252 and every
+letter that code page lacks lost its accent -- "rekne", "Dekuji", "Przewodniczaca",
+"Erdos" -- while á, é, š, ž survived. Nothing marks where the lost accents were, so
+is_transliterated() only detects such a row, for the cleaning step to drop: a text of
+at least TRANSLIT_MIN_CHARS in a language whose alphabet needs a letter outside
+cp1252 (TRANSLIT_LANGS), containing none. On the k=4 test split that flags 84 of the
+89 damaged rows and 1 of ~13k clean LinkedEP rows; shorter texts can lack ő/ű/č
+legitimately (Hungarian, Slovenian), so they are left alone.
+
 When it applies
 ---------------
 Escapes are always decoded: the text "<U+030C>" is never meant literally. Spacing
@@ -51,6 +63,7 @@ _COMBINING = {
     "¨": "̈",   # diaeresis
     "°": "̊",   # ring above
     "˚": "̊",
+    "¯": "̄",   # macron (Latvian/Lithuanian "siu¯lymą" -> "siūlymą")
     "ˇ": "̌",   # caron
     "˘": "̆",   # breve
     "˙": "̇",   # dot above
@@ -70,6 +83,25 @@ _ENGLISH_APOSTROPHE_RE = re.compile(r"(?:s|t|re|ve|ll|d|m)\b")
 _ELISION_PREFIX_RE = re.compile(r"(?i:\b(?:[ldjnmstc]|qu|dell|all|dall|nell|sull|coll|tutt|un|quell|"
                                 r"anch|buon|nessun|ciascun|dev|jusqu|lorsqu|puisqu|quoiqu))$")
 _VOWEL_OR_H_RE = re.compile(r"(?i:[aeiouyhàáâäãåæèéêëìíîïòóôöõøùúûü])")
+
+
+TRANSLIT_LANGS = {"bg", "cs", "el", "hr", "hu", "lt", "lv", "mt", "pl", "ro", "sk", "sl"}
+TRANSLIT_MIN_CHARS = 500
+
+
+def _outside_cp1252(text: str) -> bool:
+    try:
+        text.encode("cp1252")
+        return False
+    except UnicodeEncodeError:
+        return True
+
+
+def is_transliterated(text: str, lang: str | None) -> bool:
+    """True for a long text in a TRANSLIT_LANGS language with no letter outside
+    cp1252: its accents were stripped upstream and cannot be restored."""
+    return (lang in TRANSLIT_LANGS and bool(text) and len(text) >= TRANSLIT_MIN_CHARS
+            and not _outside_cp1252(text))
 
 
 def _composed(letter: str, accent: str) -> str | None:

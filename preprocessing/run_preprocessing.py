@@ -1,6 +1,6 @@
 """Run the whole classifier-track preprocessing pipeline, in order.
 
-The seven scripts in preprocessing/ have to run in a fixed sequence, each one
+The eight scripts in preprocessing/ have to run in a fixed sequence, each one
 reading what the previous wrote. This driver runs them for you, skips steps
 whose outputs already exist, and handles the one interpreter split in the chain
 (the fastText language-ID step; see PYTHON VERSIONS below).
@@ -15,10 +15,11 @@ Order
     1  fetch        fetch_raw_data.py           download ~9 GB of corpora
     2  rdf-query    europarl_rdf_query.py       LinkedEP *.ttl -> multi-europarl.csv
     3  lid-filter   europarl_lid_filter.py      -> multi-europarl-lang_id.csv   [fastText]
-    4  preprocess   preprocess_data.py          three corpora -> parquet
-    5  split        split_preprocessed_data.py  group-disjoint, balanced splits
-    6  clean-names  clean_party_names.py        -> cleaned/{split}.parquet
-    7  collapse     build_collapsed_splits.py   merge ECR+ID, re-split from scratch
+    4  chair        find_chair_speeches.py      -> chair_speeches.txt (dropped by step 5)
+    5  preprocess   preprocess_data.py          three corpora -> parquet
+    6  split        split_preprocessed_data.py  group-disjoint, balanced splits
+    7  clean-names  clean_party_names.py        -> cleaned/{split}.parquet
+    8  collapse     build_collapsed_splits.py   merge ECR+ID, re-split from scratch
 
 PYTHON VERSIONS
 ---------------
@@ -113,6 +114,11 @@ STEPS = [
         "blank cells whose language fastText disagrees with",
         outputs=[EUROPARL_DIR / "multi-europarl-lang_id.csv"],
         needs_fasttext=True,
+    ),
+    Step(
+        "chair", "find_chair_speeches.py",
+        "list the speeches the sitting's chair made (LinkedEP speaker-line label)",
+        outputs=[EUROPARL_DIR / "chair_speeches.txt"],
     ),
     Step(
         "preprocess", "preprocess_data.py",

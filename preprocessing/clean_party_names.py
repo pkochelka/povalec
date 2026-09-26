@@ -26,6 +26,13 @@ into their modern successor for counting:
     PSE / PES                  -> S&D
     PPE-DE / EPP-ED            -> PPE
     ENF / EFD / EFDD / ITS     -> ID
+    UEN / IND/DEM              -> ID   (2004-09 groups; counted here, not mapped)
+
+A few NATIONAL parties are removed too ("national" in the report): the ones whose
+MEPs name themselves routinely -- KKE's explanations of vote open with "The
+Communist Party of Greece voted against", UKIP's with "UKIP MEPs" -- which made
+the party name a near-perfect label proxy (KKE: 88/88 test rows Radical left, UKIP
+120/122 Sovereigntist right). The list is short and measured, not exhaustive.
 
 Three precision tiers, chosen so we delete *names*, not ordinary vocabulary:
 
@@ -46,6 +53,22 @@ Three precision tiers, chosen so we delete *names*, not ordinary vocabulary:
          without ever deleting the ideological vocabulary from ordinary
          sentences.
 
+  raw  - hand-written regexes, case-SENSITIVE: capitalised plurals that only
+         ever name the group ("the Greens", "Zelení"), acronyms that are only
+         safe next to a group word ("groupe ID", "ID-Fraktion"), and orphaned
+         halves of slash names ("/ALE").
+
+Spaces inside name patterns match any whitespace run: the cs/sk/fr translations
+write "socialistov a\xa0demokratov" with a no-break space, which a literal space
+never matched. Czech/Slovak/Polish names are written as stems ("Evropsk\\w*
+sjednocen\\w* levic\\w*"), because the nominative form alone missed every other
+case ("Skupina konfederace Evropské sjednocené levice").
+
+After the names go, their leftovers go too (see strip_residue): empty brackets
+"( )", orphaned "-Fraktion", and the transcript header before " – " ("au nom du
+groupe ID. –", "on behalf of the Group. –", "in writing. –"), which is session
+metadata, not speech, and whose shape still told the groups apart.
+
 The per-group report makes any coverage gaps visible; extend the dicts to close
 them. Set REPLACEMENT to e.g. "[GROUP]" if you would rather mask than delete.
 """
@@ -65,10 +88,10 @@ import pyarrow.parquet as pq
 
 try:                                    # run as a script from the repo root ...
     from preprocessing.clean_person_names import strip_names
-    from preprocessing.fix_diacritics import fix_diacritics
+    from preprocessing.fix_diacritics import fix_diacritics, is_transliterated
 except ImportError:                     # ... or from inside preprocessing/
     from clean_person_names import strip_names
-    from fix_diacritics import fix_diacritics
+    from fix_diacritics import fix_diacritics, is_transliterated
 
 DATA_DIR = Path("data/EuroParl Custom")
 OUT_DIR = DATA_DIR / "cleaned"      # what build_collapsed_splits.py reads
@@ -84,7 +107,7 @@ REPLACEMENT = " "            # what a removed name becomes (whitespace then coll
 # more for a multilingual instrument than that cue. True brings the removal back.
 REMOVE_PERSON_NAMES = False
 
-CANON = ["PPE", "S&D", "ALDE", "Greens/EFA", "ECR", "GUE/NGL", "ID"]
+CANON = ["PPE", "S&D", "ALDE", "Greens/EFA", "ECR", "GUE/NGL", "ID", "national"]
 
 # --------------------------------------------------------------------------- #
 # Word meaning "(political) group" in each of the 21 corpus languages.         #
@@ -133,8 +156,10 @@ PATTERNS: dict[str, dict[str, list[str]]] = {
             r"Euroopan kansanpuolue", r"kristillisdemokraat\w*",
             r"Ευρωπαϊκό Λαϊκό Κόμμα",
             r"Europejskiej Partii Ludowej", r"Chrześcijańscy Demokraci",
-            r"Evropská lidová strana", r"Křesťansk\w* demokrat\w*",
-            r"Európska ľudová strana", r"Kresťansk\w* demokrat\w*",
+            r"Evropsk\w* lidov\w* stran\w*", r"Křesťansk\w* demokrat\w*",
+            r"Európsk\w* ľudov\w* stran\w*", r"Kresťansk\w* demokrat\w*",
+            r"Europejsk\w* Parti\w* Ludow\w*",
+            r"evropsk\w* lidovc\w*", r"európsk\w* ľudovc\w*",   # "evropští lidovci"
             r"Európai Néppárt", r"Kereszténydemokrat\w*",
             r"Euroopa Rahvapartei",
             r"Evropska ljudska stranka",
@@ -160,7 +185,7 @@ PATTERNS: dict[str, dict[str, list[str]]] = {
             r"Progressieve Alliantie van Socialisten", r"socialisten en democraten",
             r"Σοσιαλιστών και Δημοκρατών",
             r"Socjalistów i Demokratów",
-            r"socialistů a demokratů", r"socialistov a demokratov",
+            r"socialist\w* a demokrat\w*",                     # cs/sk, any case
             r"Szocialisták és Demokraták",
             r"socialistų ir demokratų",
             r"Alianța Progresistă a Socialiștilor", r"Socialiștilor și Democraților",
@@ -188,6 +213,8 @@ PATTERNS: dict[str, dict[str, list[str]]] = {
             r"Alleanza dei Liberali e dei Democratici",
             r"Alianza de los Liberales y Demócratas",
             r"liberalen en democraten",
+            r"Libéraux et (?:des )?Démocrates",
+            r"(?:Alianc\w* )?liberál\w* a demokrat\w*(?: (?:pro Evropu|za Európu))?",   # cs/sk
             r"Liberałów i Demokratów", r"Liberálisok és Demokraták",
             r"Liberaalide ja Demokraatide", r"Liberāļu un demokrātu",
             r"Liberalų ir demokratų", r"Liberalilor și Democraților",
@@ -209,7 +236,7 @@ PATTERNS: dict[str, dict[str, list[str]]] = {
             r"Aliança Livre Europeia", r"Vrije Europese Alliantie",
             r"Europeiska fria alliansen", r"Euroopan vapaa allianssi",
             r"Ελεύθερη Ευρωπαϊκή Συμμαχία", r"Wolne Przymierze Europejskie",
-            r"Evropská svobodná aliance", r"Európsku slobodnú alianciu",
+            r"Evropsk\w* svobodn\w* alianc\w*", r"Európsk\w* slobodn\w* alianci\w*",
             r"Európai Szabad Szövetség", r"Euroopa Vabaliit",
             r"Evropska svobodna zveza", r"Eiropas Brīvā apvienība",
             r"Europos laisvojo aljanso", r"Alianța Liberă Europeană",
@@ -220,6 +247,12 @@ PATTERNS: dict[str, dict[str, list[str]]] = {
             r"grön\w*", r"grøn\w*", r"vihre\w*", r"zielon\w*", r"zelen\w*",
             r"zöld\w*", r"roheli\w*", r"zaļ\w*", r"žali\w*",
             r"πρασιν\w*", r"πράσιν\w*", r"зелен\w*",
+        ],
+        "raw": [
+            # capitalised plurals: the group/party, never the colour
+            r"\b(?:Greens|Verts|Grünen|Verdes|Groenen|Gröna|Grønne|Vihreät|"
+            r"Zieloni|Zelení|Zelených|Zelenými|Zöldek)\b",
+            r"/\s?(?:ALE|EFA)\b",               # "Verts/ALE" after "Verts" went
         ],
     },
     "ECR": {
@@ -263,8 +296,12 @@ PATTERNS: dict[str, dict[str, list[str]]] = {
             r"Yhtyneen vasemmiston", r"Pohjoismaiden vihreä vasemmisto",
             r"Ενωτικής Αριστεράς",
             r"Zjednoczona Lewica Europejska", r"Nordycką Zieloną Lewicę",
-            r"Evropská sjednocená levice", r"Severská zelená levice",
-            r"Európska zjednotená ľavica", r"Severská zelená ľavica",
+            r"Evropsk\w* sjednocen\w* levic\w*", r"Seversk\w* zelen\w* levic\w*",
+            r"Európsk\w* zjednoten\w* ľavic\w*", r"(?:Seversk|Nordick)\w* zelen\w* ľavic\w*",
+            r"Zjednoczon\w* Lewic\w* Europejsk\w*", r"Nordyck\w* Zielon\w* Lewic\w*",
+            # only GUE/NGL ever called itself "confederal"
+            r"conf[eé]d[eé]ral\w*", r"konföderal\w*", r"konfederatívn\w*",
+            r"skupin\w* konfederac\w*",
             r"Egységes Európai Baloldal", r"Északi Zöld Baloldal",
             r"Ühendatud Vasakliit", r"Apvienotā kreisā",
             r"Vieningosios kairiųjų", r"Stânga Unită Europeană",
@@ -279,8 +316,16 @@ PATTERNS: dict[str, dict[str, list[str]]] = {
         ],
     },
     "ID": {
-        "acr": ["EFDD", "EFD", "ENF", "ID Group", "ITS"],
+        "acr": ["EFDD", "EFD", "ENF", "ID Group", "ITS", "IND/DEM", "UEN"],
+        "raw": [
+            # bare "ID" is an identity document; only next to a group word is it the group
+            r"\b(?:groupe|gruppo|grupo|grupy|grupa|grupul|skupin\w*|[Gg]roup|ομάδας)\s+ID\b",
+            r"\bID(?=[\s\-]?(?:Fraktion|Fractie|[Gg]roup|[Gg]ruppe\w*|fraktion\w*|ryhm\w*))",
+        ],
         "name": [
+            r"Independence ?(?:/|and) ?Democracy", r"Ind[ée]pendance ?(?:/|et) ?(?:de la )?D[ée]mocratie",
+            r"Unabhängigkeit ?(?:/|und) ?Demokratie",
+            r"Union pour l['’]Europe des Nations", r"Union für das Europa der Nationen",
             r"Identity and Democracy",
             r"Europe of Freedom and Direct Democracy", r"Europe of Freedom and Democracy",
             r"Europe of Nations and Freedom", r"Union for Europe of the Nations",
@@ -302,6 +347,24 @@ PATTERNS: dict[str, dict[str, list[str]]] = {
         ],
         "anch": [],
     },
+    "national": {
+        "acr": ["KKE", "UKIP", "PiS", "Fidesz"],
+        "name": [
+            r"Communist Party of Greece", r"Κομμουνιστικό Κόμμα Ελλάδας",
+            r"Kommunistische Partei Griechenlands", r"parti communiste (?:de|grec)\w*(?: Grèce)?",
+            r"Partito comunista (?:di Grecia|greco)", r"Partido Comunista (?:de Grecia|Griego|da Grécia)",
+            r"Komunistick\w* stran\w* (?:Řecka|Grécka)", r"(?:Řeck|Gréck)\w* komunistick\w* stran\w*",
+            r"Komunistyczn\w* Parti\w* Grecji",
+            r"Sinn F[ée]in", r"Rassemblement national", r"Prawo i Sprawiedliwo\w*",
+            r"Northern League", r"Ligue du Nord", r"Lega Nord",
+        ],
+        "raw": [
+            # generic phrases in lower case; only the capitalised form is the party
+            r"\bFront [Nn]ational\b", r"\bLaw and Justice\b", r"\bDroit et [Jj]ustice\b",
+            r"\bLega\b",
+        ],
+        "anch": [],
+    },
 }
 
 
@@ -317,8 +380,13 @@ PATTERNS: dict[str, dict[str, list[str]]] = {
 # regex group names can't contain / or &, so map safe name -> canonical label
 _SAFE = {
     "PPE": "PPE", "SD": "S&D", "ALDE": "ALDE", "GREENS": "Greens/EFA",
-    "ECR": "ECR", "GUENGL": "GUE/NGL", "ID": "ID",
+    "ECR": "ECR", "GUENGL": "GUE/NGL", "ID": "ID", "NAT": "national",
 }
+
+
+def _any_space(pattern: str) -> str:
+    """A literal space in a pattern matches any whitespace run, no-break space included."""
+    return pattern.replace(r"\ ", " ").replace(" ", r"\s+")
 
 
 def _subpattern(spec: dict[str, list[str]]) -> str:
@@ -326,14 +394,16 @@ def _subpattern(spec: dict[str, list[str]]) -> str:
 
     acr = sorted(spec.get("acr", []), key=len, reverse=True)
     if acr:
-        parts.append(r"\b(?:%s)\b" % "|".join(re.escape(a) for a in acr))
+        parts.append(r"\b(?:%s)\b" % "|".join(_any_space(re.escape(a)) for a in acr))
 
-    ci = list(spec.get("name", []))
+    parts.extend(_any_space(p) for p in spec.get("raw", []))
+
+    ci = [_any_space(p) for p in spec.get("name", [])]
     anch = spec.get("anch", [])
     if anch:
         ide = "(?:%s)" % "|".join(anch)          # ideology words, matched once
-        ci.append(rf"{GW}{_CONN}\s+{ide}")        # "Fraktion der Sozialdemokraten"
-        ci.append(rf"{ide}{_CONN}\s+{GW}")        # "Socialist Group"
+        ci.append(rf"{GW}{_CONN}[\s\-]+{ide}")    # "Fraktion der Sozialdemokraten"
+        ci.append(rf"{ide}{_CONN}[\s\-]+{GW}")    # "Socialist Group", "Renew-Fraktion"
     if ci:
         parts.append(r"(?i:\b(?:%s)\b)" % "|".join(ci))
 
@@ -345,6 +415,19 @@ COMBINED_RE = re.compile(
 )
 _WS_RE = re.compile(r"[^\S\n]{2,}")          # runs of spaces/tabs (keep newlines)
 _SPACE_PUNCT_RE = re.compile(r"\s+([,.;:!?])")
+MAX_PASSES = 3   # a removal can join two fragments into a new match ("Grupo dos [X] conservadores")
+
+# Leftovers of a removed name (strip_residue).
+_EMPTY_BRACKETS_RE = re.compile(r"[(\[]\s*[)\]]")                      # "(PPE-DE)" -> "( )"
+_EMPTY_QUOTES_RE = re.compile(r'(?<=\s)"\s+"(?=\s)')                   # 'le groupe " "'
+_LONE_SLASH_RE = re.compile(r"(?<![\d\w])\s/\s(?![\d])")                  # "návrhu / o" after "Zelení/ALE"
+_ORPHAN_COMPOUND_RE = re.compile(                                       # "der -Fraktion"
+    r"(?<![\w/])-(?=(?:Fraktion|Fractie|[Gg]ruppe|gruppen|ryhm|frakcij)\w*\b)")
+# The transcript header before the speech: "au nom du groupe ID. – ", "in writing. – ",
+# "blue-card answer. – ", or a bare "– " once the whole header was a name. The full stop
+# is required: "The EU budget – which ..." is speech, not a header.
+_HEADER_RE = re.compile(r"^(?:(?P<head>[^\n–—.]{1,80})\.)?[^\S\n]*[–—][^\S\n]+(?=\S)")
+MAX_HEADER_WORDS = 8
 
 
 def clean_text(text: str, counts: Counter) -> str:
@@ -356,20 +439,50 @@ def clean_text(text: str, counts: Counter) -> str:
         counts[_SAFE[m.lastgroup]] += 1
         return REPLACEMENT
 
-    new = COMBINED_RE.sub(_repl, text)
+    new = text
+    for _ in range(MAX_PASSES):
+        step = COMBINED_RE.sub(_repl, new)
+        if step == new:
+            break
+        new = step
     # Only tidy whitespace if we actually removed something, so untouched rows
     # stay byte-identical to the source.
     if new != text:
         new = _WS_RE.sub(" ", new)
-        new = _SPACE_PUNCT_RE.sub(r"\1", new)
+        new = _SPACE_PUNCT_RE.sub(r"\1", new).lstrip()   # a name that opened the text
+    return new
+
+
+def strip_residue(text: str, counts: Counter | None = None) -> str:
+    """Remove what a deleted name leaves behind: empty brackets and quotes, a hyphen
+    orphaned from "-Fraktion", and a short transcript header before " – ". Runs on
+    every row, not only on rows clean_text changed: the source already carries "()"
+    where its own tooling dropped a group acronym. Counted once per changed row
+    under "residue"."""
+    if not text:
+        return text
+    new = _EMPTY_BRACKETS_RE.sub("", text)
+    new = _EMPTY_QUOTES_RE.sub("", new)
+    new = _ORPHAN_COMPOUND_RE.sub("", new)
+    new = _LONE_SLASH_RE.sub(" ", new)
+    m = _HEADER_RE.match(new)
+    if m and len((m.group("head") or "").split()) <= MAX_HEADER_WORDS:
+        new = new[m.end():]
+    if new != text:
+        new = _WS_RE.sub(" ", new)
+        new = _SPACE_PUNCT_RE.sub(r"\1", new).lstrip()
+        if counts is not None:
+            counts["residue"] += 1
     return new
 
 
 def _clean_chunk(chunk: tuple[list, list]) -> tuple[list, Counter, Counter]:
-    """Worker: clean a list of texts, returning (cleaned, party_counts, address_counts).
+    """Worker: clean a list of texts, returning (cleaned, keep, party_counts, address_counts).
 
     Accents are repaired first (fix_diacritics), so the name patterns see whole
-    words; then party names; then titled person names and stray leading
+    words; a row whose accents were stripped upstream (is_transliterated) gets
+    keep=False and is dropped by the caller; then party names and their residue
+    (strip_residue); then titled person names and stray leading
     punctuation (clean_person_names.strip_names). address_counts is keyed (language, kind), plus
     (language, "rows"), so the report can show a rate per language.
 
@@ -379,20 +492,27 @@ def _clean_chunk(chunk: tuple[list, list]) -> tuple[list, Counter, Counter]:
     texts, langs = chunk
     local: Counter = Counter()
     addr: Counter = Counter()
-    cleaned = []
+    cleaned, keep = [], []
     for text, lang in zip(texts, langs):
+        addr[(lang, "rows")] += 1
         if text:
             kinds: Counter = Counter()
-            text = strip_names(clean_text(fix_diacritics(text, kinds), local), kinds,
-                               names=REMOVE_PERSON_NAMES)
+            text = fix_diacritics(text, kinds)
+            if is_transliterated(text, lang):       # accents lost upstream: drop the row
+                addr[(lang, "translit")] += 1
+                cleaned.append(text)
+                keep.append(False)
+                continue
+            text = strip_residue(clean_text(text, local), kinds)
+            text = strip_names(text, kinds, names=REMOVE_PERSON_NAMES)
             for kind, n in kinds.items():
                 addr[(lang, kind)] += n
-        addr[(lang, "rows")] += 1
         cleaned.append(text)
-    return cleaned, local, addr
+        keep.append(True)
+    return cleaned, keep, local, addr
 
 
-ADDRESS_KINDS = ["diacritics", "lead_punct", "name"]
+ADDRESS_KINDS = ["diacritics", "translit", "residue", "lead_punct", "name"]
 
 
 def print_address_report(addr: Counter) -> None:
@@ -439,16 +559,19 @@ def process_split(split: str) -> tuple[Counter, Counter]:
                 chunks = [(texts[i:i + PAR_CHUNK], langs[i:i + PAR_CHUNK])
                           for i in range(0, len(texts), PAR_CHUNK)]
                 cleaned: list = []
-                for part, local, local_addr in ex.map(_clean_chunk, chunks):
+                keep: list = []
+                for part, part_keep, local, local_addr in ex.map(_clean_chunk, chunks):
                     cleaned.extend(part)
+                    keep.extend(part_keep)
                     counts.update(local)
                     addr.update(local_addr)
                 new_col = pa.array(cleaned, type=field.type)
                 group = group.set_column(text_idx, field, new_col)
-                writer.write_table(group)
                 rows += group.num_rows
+                group = group.filter(pa.array(keep, type=pa.bool_()))
+                writer.write_table(group)
                 print(f"  {split}: {rows:,} rows processed", end="\r")
-                del group, texts, langs, chunks, cleaned, new_col
+                del group, texts, langs, chunks, cleaned, keep, new_col
                 gc.collect()
                 try:
                     pool.release_unused()

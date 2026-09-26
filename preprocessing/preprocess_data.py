@@ -4,6 +4,7 @@ from pathlib import Path
 from urllib.parse import unquote
 
 from utils import write_parquet_chunked
+from preprocessing.find_chair_speeches import chair_formula_mask, load_chair_ids
 
 pd.options.future.infer_string = False
 
@@ -77,11 +78,21 @@ def collapse(series):
     return " ".join(str(v) for v in series.dropna())
 
 
-def preprocess_multiparl():
+def speech_id(uri):
+    """".../eu/plenary/2001-01-17-Speech-3-217" -> "2001-01-17-Speech-3-217"."""
+    return str(uri).rsplit("/", 1)[-1]
+
+
+def preprocess_multiparl(chair_ids):
     print("=== multiparl ===")
     _cols = ["Unnamed: 0", "EU Party", "date", "speaker"] + LANG_COLS
     df = pd.read_csv(MULTIPARL_CSV, low_memory=False, usecols=_cols)
     print(f"  Loaded {len(df):,} rows")
+
+    # The sitting's chair (find_chair_speeches.py): procedure, or another MEP's words.
+    chair = df["Unnamed: 0"].map(speech_id).isin(chair_ids)
+    print(f"  {df.loc[chair, 'Unnamed: 0'].nunique():,} chair speeches dropped")
+    df = df[~chair]
 
     df = df.dropna(subset=["EU Party"])
     df["truncated_party"] = df["EU Party"].map(eu_party_code)
@@ -118,7 +129,7 @@ def preprocess_multiparl():
     print(f"  Saved to {MULTIPARL_PARQUET}\n")
 
 
-def preprocess_parlee():
+def preprocess_parlee(chair_ids):
     print("=== ParlEE ===")
     df = pd.read_csv(PARLEE_CSV, low_memory=False)
     print(f"  Loaded {len(df):,} rows")
@@ -128,9 +139,21 @@ def preprocess_parlee():
     df_speeches = (
         df.sort_values(["date", "speechnumber", "sentencenumber"])
           .groupby(["date", "speechnumber"], as_index=False)
-          .agg({"text": " ".join, "party": "first", "language": "first", "speaker": "first"})
+          .agg({"text": " ".join, "party": "first", "language": "first", "speaker": "first",
+                "agenda": "first"})
     )
     print(f"  {len(df_speeches):,} speeches after grouping")
+
+    # The sitting's chair. (date, speechnumber) is the LinkedEP speech id, so LinkedEP's
+    # speaker-line label covers ParlEE up to 2017-07-06; the English chair formulas
+    # cover the rest (find_chair_speeches.py has both, and their measured accuracy).
+    iso = pd.to_datetime(df_speeches["date"], dayfirst=True, errors="coerce").dt.strftime("%Y-%m-%d")
+    by_label = (iso + "-Speech-" + df_speeches["speechnumber"].astype(str)).isin(chair_ids)
+    by_formula = chair_formula_mask(df_speeches.assign(date=iso))
+    chair = by_label | by_formula
+    print(f"  {chair.sum():,} chair speeches dropped ({by_label.sum():,} by LinkedEP label, "
+          f"{(by_formula & ~by_label).sum():,} more by formula)")
+    df_speeches = df_speeches[~chair]
 
     df_speeches["EU Party"] = df_speeches["party"].map(PARLEE_PARTY_MAPPING)
     df_speeches = df_speeches.dropna(subset=["EU Party"])
@@ -159,6 +182,10 @@ def preprocess_eu_debates():
 
     df = df[~df["speaker_party"].isin(["NI", "N/A"])]
     print(f"  {len(df):,} rows after dropping NI and N/A (non-inscrits)")
+    # The chair ("EUROPARL President"), Commission and Council all come with party N/A, so
+    # the line above already dropped them; this states it, and would catch a change.
+    df = df[df["speaker_role"] == "MEP"]
+    print(f"  {len(df):,} rows spoken as MEP")
 
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df["text"] = df["text"].str.strip()
@@ -187,6 +214,7 @@ def preprocess_eu_debates():
 
 
 if __name__ == "__main__":
-    preprocess_parlee()
-    preprocess_multiparl()
+    chair_ids = load_chair_ids()
+    preprocess_parlee(chair_ids)
+    preprocess_multiparl(chair_ids)
     preprocess_eu_debates()

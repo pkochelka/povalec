@@ -126,7 +126,7 @@ GW = r"(?:%s)" % "|".join(GROUP_WORD)
 # at most two short (<=4-letter) function words between group-word and ideology
 # word, but never a coordinating conjunction (which would signal a *second*
 # group) and never across a comma/number.
-_CONJ = r"(?:and|und|et|och|og|ja|y|e|i|és|ir|и|και)"
+_CONJ = r"(?:and|und|et|och|og|ja|y|e|i|és|ir|и|και|un|in|en|a|și|şi)"
 _CONN = rf"(?:\s+(?!{_CONJ}\b)[^\W\d_]{{1,4}}){{0,2}}"
 
 
@@ -500,7 +500,6 @@ PATTERNS_MORE: dict[str, dict[str, list[str]]] = {
             r"Venstrefløjs Fællesgruppe", r"Nordisk Grønne? Venstre",
             r"yhtynee\w* vasemmisto\w*", r"Pohjoismaiden vihre\w* vasemmisto\w*",
             r"Συνομοσπονδιακ\w*", r"(?:Ευρωπαϊκ\w* )?Ενωτικ\w* Αριστερ\w*", r"Αριστερ\w* των Πρ[αά]σ[ιί]νων",
-            r"(?:των )?Βόρει\w* Χωρ\w*",
             r"Konfederacyjn\w*", r"konfederativn\w*", r"Konfederaln\w*",
             r"Egységes Európai Baloldal\w*", r"Északi Zöld Baloldal\w*",
             r"Evropsk\w* združen\w* levic\w*", r"nordijsk\w* levic\w*",
@@ -574,6 +573,82 @@ for _canon, _spec in PATTERNS_MORE.items():
     for _tier, _pats in _spec.items():
         PATTERNS[_canon].setdefault(_tier, []).extend(_pats)
 
+# --------------------------------------------------------------------------- #
+# PATCH block, 2026-09-26: leaks still found in the test splits after a full    #
+# clean-names run with everything above (~0.2% of rows; el, sl, hu, da, cs      #
+# most). Merged into PATTERNS like the rest, so a run from raw applies it; and  #
+# compiled on its own as PATCH_RE, so patch_cleaned.py can apply ONLY this      #
+# block to an existing cleaned/ without re-running the full bank. Hence the     #
+# "tail" entries: in already-cleaned text the head of a name is gone and only   #
+# its tail is left ("groupe de l' et Démocrates"), which the full name no      #
+# longer matches. When you add a round of patterns, put them here (and empty    #
+# the block into PATTERNS_MORE after the next full run) so a patch stays cheap. #
+# --------------------------------------------------------------------------- #
+PATTERNS_PATCH: dict[str, dict[str, list[str]]] = {
+    "PPE": {
+        "name": [r"Cre[șş]tin\s*[\-–]\s*[Dd]emocra(?:t|[țţ])\w*"],   # "Creştin – Democrat"
+    },
+    "S&D": {
+        "name": [
+            r"Progres[ií]vn\w* alianc\w*",                            # cs "Progresivní aliance"
+            r"(?:Det )?Progressive (?:Forbund|Alliance) af Socialdemokrater(?: og Demokrater)?",
+            r"(?:(?:Sotsiaal)?[Dd]emokraatide |Sotsialistide )?(?:ja [Dd]emokraatide )?Progressiivse Liid\w*",
+            r"(?:Demokraták )?Progresszív Szövetség\w*",
+            r"Alliance [Pp]rogressiste des [Ss]ocialistes et (?:des )?[Dd]émocrates",
+            r"Alleanza [Pp]rogressista (?:dei |di )?[Ss]ocialisti e (?:dei )?[Dd]emocratici",
+            r"Partido de los Socialistas Europeos", r"Partito dei [Ss]ocialisti [Ee]uropei",
+            r"Κόμμ\w* των Ευρωπα[ιί]ων Σοσιαλιστ[ώω]ν",
+        ],
+        "raw": [
+            # tails in already-cleaned text: the head went in an earlier run
+            r"(?i:\b(?:groupe|grupo)\s+(?:de\s+l['’]\s*|de\s+la\s+|do\s+|da\s+)?)(?:et|e|y)\s+(?:des\s+|dos\s+)?D[ée]mocra\w*",
+            r"(?i:\bgruppo\s+(?:dell['’]\s*|del\s+)?)e\s+(?:dei\s+)?Democratici",
+        ],
+        "anch": [r"sociālist\w*"],                                   # lv "Sociālistu grupa"
+    },
+    "ALDE": {
+        "name": [r"Συμμαχ\w* (?:των )?Δημοκρατ[ώω]ν και (?:των )?Φιλελε[υύ]θ[εέ]ρ\w*(?: για την Ευρώπη)?"],
+    },
+    "Greens/EFA": {
+        "name": [r"Den Europæiske Fri Alliance"],
+        "raw": [r"[/–]\s?Zelen(?:e|ih|i)\b"],                         # sl "Skupina Zelenih/... – Zelene"
+    },
+    "GUE/NGL": {
+        "name": [
+            r"(?:Den )?(?:Europæiske )?Venstrefløjs Fællesgruppe",
+            r"(?:al )?St[âa]ng\w* Unit\w* Europe(?:an|n)\w*",
+        ],
+        "raw": [
+            r"\b[șş]i Unite Europene\b",                              # ro tail of "Stângii Unite Europene"
+            # capital Χ only: "των Βορείων χωρών" is also just "the northern countries"
+            r"(?:των\s+)?Β[οό]ρε[ιί]\w*\s+Χωρ\w*",
+        ],
+    },
+    "ECR": {
+        "name": [r"Europäisch\w* Konservativ\w* und Reformist\w*"],
+    },
+    "ID": {
+        "acr": ["ENL"],                                               # fr ENF, "Europe des nations et des libertés"
+        "name": [
+            r"(?:Unió )?a Nemzetek Európájáért(?: Unió\w*)?",
+            r"Szabadság és (?:Közvetlen )?Demokrácia Európáj\w*",
+            r"Evrop\w* svobode in (?:neposredne )?demokracije",
+            r"Europa Libert[ăa][țţ]ii [șş]i (?:a )?Democra[țţ]iei(?: Directe)?",
+        ],
+        "raw": [
+            # ordinary phrases in lower case ("sosiaalinen ja demokraattinen Eurooppa")
+            r"\bVaba ja Demokraatliku Euroopa\w*", r"\bVapaa ja demokraattinen Eurooppa\w*",
+            r"\bKansakuntien Eurooppa\b-?",
+        ],
+    },
+    "national": {
+        "acr": ["Fidesz-KDNP", "KDNP"],                              # "Fidesz – KDNP" left "- KDNP"
+    },
+}
+for _canon, _spec in PATTERNS_PATCH.items():
+    for _tier, _pats in _spec.items():
+        PATTERNS[_canon].setdefault(_tier, []).extend(_pats)
+
 
 # --------------------------------------------------------------------------- #
 # Build ONE combined regex over all groups so each speech is scanned a single  #
@@ -620,9 +695,13 @@ def _subpattern(spec: dict[str, list[str]]) -> str:
     return "|".join(parts)
 
 
-COMBINED_RE = re.compile(
-    "|".join(rf"(?P<{safe}>{_subpattern(PATTERNS[canon])})" for safe, canon in _SAFE.items())
-)
+def _combine(patterns: dict[str, dict[str, list[str]]]) -> re.Pattern:
+    return re.compile("|".join(rf"(?P<{safe}>{_subpattern(patterns[canon])})"
+                               for safe, canon in _SAFE.items() if canon in patterns))
+
+
+COMBINED_RE = _combine(PATTERNS)
+PATCH_RE = _combine(PATTERNS_PATCH)      # only the PATCH block, for patch_cleaned.py
 _WS_RE = re.compile(r"[^\S\n]{2,}")          # runs of spaces/tabs (keep newlines)
 _SPACE_PUNCT_RE = re.compile(r"\s+([,.;:!?])")
 MAX_PASSES = 3   # a removal can join two fragments into a new match ("Grupo dos [X] conservadores")
@@ -642,10 +721,12 @@ _HEADER_RE = re.compile(r"^(?:(?P<head>[^\n–—.]{1,80})\.)?[^\S\n]*[–—][^
 MAX_HEADER_WORDS = 8
 
 
-def clean_text(text: str, counts: Counter) -> str:
-    """Remove every group/party name from `text`, tallying hits into `counts`."""
+def clean_text(text: str, counts: Counter, regex: re.Pattern | None = None) -> str:
+    """Remove every group/party name from `text`, tallying hits into `counts`.
+    `regex` defaults to the full bank; patch_cleaned.py passes PATCH_RE."""
     if not text:
         return text
+    regex = regex or COMBINED_RE
 
     def _repl(m: re.Match) -> str:
         counts[_SAFE[m.lastgroup]] += 1
@@ -653,7 +734,7 @@ def clean_text(text: str, counts: Counter) -> str:
 
     new = text
     for _ in range(MAX_PASSES):
-        step = COMBINED_RE.sub(_repl, new)
+        step = regex.sub(_repl, new)
         if step == new:
             break
         new = step

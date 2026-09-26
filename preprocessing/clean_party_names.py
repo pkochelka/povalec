@@ -574,17 +574,12 @@ for _canon, _spec in PATTERNS_MORE.items():
         PATTERNS[_canon].setdefault(_tier, []).extend(_pats)
 
 # --------------------------------------------------------------------------- #
-# PATCH block, 2026-09-26: leaks still found in the test splits after a full    #
-# clean-names run with everything above (~0.2% of rows; el, sl, hu, da, cs      #
-# most). Merged into PATTERNS like the rest, so a run from raw applies it; and  #
-# compiled on its own as PATCH_RE, so patch_cleaned.py can apply ONLY this      #
-# block to an existing cleaned/ without re-running the full bank. Hence the     #
-# "tail" entries: in already-cleaned text the head of a name is gone and only   #
-# its tail is left ("groupe de l' et Démocrates"), which the full name no      #
-# longer matches. When you add a round of patterns, put them here (and empty    #
-# the block into PATTERNS_MORE after the next full run) so a patch stays cheap. #
+# Second round, 2026-09-26: leaks still found in the rebuilt test splits after  #
+# a full run with everything above (~0.2% of rows; el, sl, hu, da, cs most):   #
+# more word orders and spellings, and a few names in languages PATTERNS_MORE   #
+# had not reached. Merged into PATTERNS the same way.                          #
 # --------------------------------------------------------------------------- #
-PATTERNS_PATCH: dict[str, dict[str, list[str]]] = {
+PATTERNS_MORE_2: dict[str, dict[str, list[str]]] = {
     "PPE": {
         "name": [r"Cre[șş]tin\s*[\-–]\s*[Dd]emocra(?:t|[țţ])\w*"],   # "Creştin – Democrat"
     },
@@ -598,11 +593,6 @@ PATTERNS_PATCH: dict[str, dict[str, list[str]]] = {
             r"Alleanza [Pp]rogressista (?:dei |di )?[Ss]ocialisti e (?:dei )?[Dd]emocratici",
             r"Partido de los Socialistas Europeos", r"Partito dei [Ss]ocialisti [Ee]uropei",
             r"Κόμμ\w* των Ευρωπα[ιί]ων Σοσιαλιστ[ώω]ν",
-        ],
-        "raw": [
-            # tails in already-cleaned text: the head went in an earlier run
-            r"(?i:\b(?:groupe|grupo)\s+(?:de\s+l['’]\s*|de\s+la\s+|do\s+|da\s+)?)(?:et|e|y)\s+(?:des\s+|dos\s+)?D[ée]mocra\w*",
-            r"(?i:\bgruppo\s+(?:dell['’]\s*|del\s+)?)e\s+(?:dei\s+)?Democratici",
         ],
         "anch": [r"sociālist\w*"],                                   # lv "Sociālistu grupa"
     },
@@ -619,7 +609,6 @@ PATTERNS_PATCH: dict[str, dict[str, list[str]]] = {
             r"(?:al )?St[âa]ng\w* Unit\w* Europe(?:an|n)\w*",
         ],
         "raw": [
-            r"\b[șş]i Unite Europene\b",                              # ro tail of "Stângii Unite Europene"
             # capital Χ only: "των Βορείων χωρών" is also just "the northern countries"
             r"(?:των\s+)?Β[οό]ρε[ιί]\w*\s+Χωρ\w*",
         ],
@@ -645,7 +634,7 @@ PATTERNS_PATCH: dict[str, dict[str, list[str]]] = {
         "acr": ["Fidesz-KDNP", "KDNP"],                              # "Fidesz – KDNP" left "- KDNP"
     },
 }
-for _canon, _spec in PATTERNS_PATCH.items():
+for _canon, _spec in PATTERNS_MORE_2.items():
     for _tier, _pats in _spec.items():
         PATTERNS[_canon].setdefault(_tier, []).extend(_pats)
 
@@ -701,7 +690,6 @@ def _combine(patterns: dict[str, dict[str, list[str]]]) -> re.Pattern:
 
 
 COMBINED_RE = _combine(PATTERNS)
-PATCH_RE = _combine(PATTERNS_PATCH)      # only the PATCH block, for patch_cleaned.py
 _WS_RE = re.compile(r"[^\S\n]{2,}")          # runs of spaces/tabs (keep newlines)
 _SPACE_PUNCT_RE = re.compile(r"\s+([,.;:!?])")
 MAX_PASSES = 3   # a removal can join two fragments into a new match ("Grupo dos [X] conservadores")
@@ -721,12 +709,10 @@ _HEADER_RE = re.compile(r"^(?:(?P<head>[^\n–—.]{1,80})\.)?[^\S\n]*[–—][^
 MAX_HEADER_WORDS = 8
 
 
-def clean_text(text: str, counts: Counter, regex: re.Pattern | None = None) -> str:
-    """Remove every group/party name from `text`, tallying hits into `counts`.
-    `regex` defaults to the full bank; patch_cleaned.py passes PATCH_RE."""
+def clean_text(text: str, counts: Counter) -> str:
+    """Remove every group/party name from `text`, tallying hits into `counts`."""
     if not text:
         return text
-    regex = regex or COMBINED_RE
 
     def _repl(m: re.Match) -> str:
         counts[_SAFE[m.lastgroup]] += 1
@@ -734,7 +720,7 @@ def clean_text(text: str, counts: Counter, regex: re.Pattern | None = None) -> s
 
     new = text
     for _ in range(MAX_PASSES):
-        step = regex.sub(_repl, new)
+        step = COMBINED_RE.sub(_repl, new)
         if step == new:
             break
         new = step

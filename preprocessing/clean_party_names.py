@@ -301,7 +301,7 @@ PATTERNS: dict[str, dict[str, list[str]]] = {
             r"Zjednoczon\w* Lewic\w* Europejsk\w*", r"Nordyck\w* Zielon\w* Lewic\w*",
             # only GUE/NGL ever called itself "confederal"
             r"conf[eé]d[eé]ral\w*", r"konföderal\w*", r"konfederatívn\w*",
-            r"skupin\w* konfederac\w*",
+            r"skupin\w*,? konfederac\w*",                      # "moje skupina, Konfederace"
             r"Egységes Európai Baloldal", r"Északi Zöld Baloldal",
             r"Ühendatud Vasakliit", r"Apvienotā kreisā",
             r"Vieningosios kairiųjų", r"Stânga Unită Europeană",
@@ -321,31 +321,42 @@ PATTERNS: dict[str, dict[str, list[str]]] = {
             # bare "ID" is an identity document; only next to a group word is it the group
             r"\b(?:groupe|gruppo|grupo|grupy|grupa|grupul|skupin\w*|[Gg]roup|ομάδας)\s+ID\b",
             r"\bID(?=[\s\-]?(?:Fraktion|Fractie|[Gg]roup|[Gg]ruppe\w*|fraktion\w*|ryhm\w*))",
+            # Case-SENSITIVE on purpose: every one of these is also an ordinary phrase in
+            # lower case ("fought for independence and democracy", "a Europe of freedom and
+            # democracy", "questions of identity and democracy"); the group is always
+            # written capitalised.
+            r"\bIndependence ?(?:/|and) ?Democracy\b", r"\bInd[ée]pendance ?(?:/|et) ?(?:de la )?D[ée]mocratie\b",
+            r"\bUnabhängigkeit ?(?:/|und) ?Demokratie\b",
+            r"\b(?:%s)\b" % "|".join([
+                r"Identity and Democracy",
+                r"Europe of Freedom and Direct Democracy", r"Europe of Freedom and Democracy",
+                r"Europe of Nations and Freedom",
+                r"Identität und Demokratie", r"Europa der Nationen und der Freiheit",
+                r"Europa der Freiheit und der direkten Demokratie",
+                r"Identité et Démocratie", r"Europe des Nations et des Libertés",
+                r"Europe de la [Ll]iberté et de la [Dd]émocratie directe",
+                r"Identità e Democrazia", r"Europa delle Nazioni e della Libertà",
+                r"Identidad y Democracia", r"Europa de las Naciones y de las Libertades",
+                r"Identidade e Democracia",
+                r"Identiteit en Democratie", r"Europa van Vrijheid en Directe Democratie",
+                r"Ταυτότητα και Δημοκρατία",
+                r"Tożsamość i Demokracja", r"Europa Wolności i Demokracji Bezpośredniej",
+                r"Identita a [Dd]emokracie", r"Identita a [Dd]emokracia",
+                r"Identitás és Demokrácia",
+                r"Identiteet ja [Dd]emokraatia", r"Identitāte un [Dd]emokrātija",
+                r"Tapatybė ir [Dd]emokratija",
+                r"Identitate [șş]i Democra[țţ]ie", r"Идентичност и [Дд]емокрация",
+            ]),
         ],
         "name": [
-            r"Independence ?(?:/|and) ?Democracy", r"Ind[ée]pendance ?(?:/|et) ?(?:de la )?D[ée]mocratie",
-            r"Unabhängigkeit ?(?:/|und) ?Demokratie",
             r"Union pour l['’]Europe des Nations", r"Union für das Europa der Nationen",
-            r"Identity and Democracy",
-            r"Europe of Freedom and Direct Democracy", r"Europe of Freedom and Democracy",
-            r"Europe of Nations and Freedom", r"Union for Europe of the Nations",
-            r"Identität und Demokratie", r"Europa der Nationen und der Freiheit",
-            r"Europa der Freiheit und der direkten Demokratie",
-            r"Identité et Démocratie", r"Europe des Nations et des Libertés",
-            r"Europe de la liberté et de la démocratie directe",
-            r"Identità e Democrazia", r"Europa delle Nazioni e della Libertà",
-            r"Identidad y Democracia", r"Europa de las Naciones y de las Libertades",
-            r"Identidade e Democracia",
-            r"Identiteit en Democratie", r"Europa van Vrijheid en Directe Democratie",
-            r"Ταυτότητα και Δημοκρατία",
-            r"Tożsamość i Demokracja", r"Europa Wolności i Demokracji Bezpośredniej",
-            r"Identita a demokracie", r"Identita a demokracia",
-            r"Identitás és Demokrácia",
-            r"Identiteet ja demokraatia", r"Identitāte un demokrātija",
-            r"Tapatybė ir demokratija",
-            r"Identitate și Democrație", r"Идентичност и демокрация",
+            r"Úni\w* za Európu národov", r"Uni\w* pro Evropu národů", r"Uni\w* na rzecz Europy Narodów",
+            r"Union for Europe of the Nations",
         ],
-        "anch": [],
+        "anch": [
+            r"Independence and Democracy", r"Ind[ée]pendance et (?:de la )?D[ée]mocratie",
+            r"Unabhängigkeit und Demokratie", r"Identity and Democracy", r"Identität und Demokratie",
+        ],
     },
     "national": {
         "acr": ["KKE", "UKIP", "PiS", "Fidesz"],
@@ -366,6 +377,202 @@ PATTERNS: dict[str, dict[str, list[str]]] = {
         "anch": [],
     },
 }
+
+# --------------------------------------------------------------------------- #
+# Case forms, word orders and historic group names, found 2026-09-26 by listing #
+# what follows and precedes a group word in every corpus language of the       #
+# cleaned test split (the names above are mostly nominative-only, and UEN,     #
+# ELDR, IND/DEM, EFD, ENF were missing in most languages). Merged into         #
+# PATTERNS below. "name" entries are distinctive enough to remove anywhere;    #
+# names that double as ordinary phrases ("a Europe of nations", "une Europe de #
+# la liberté et de la démocratie", "independence and democracy") go in "anch", #
+# removed only next to a group word, so the ideological phrase itself stays.  #
+# --------------------------------------------------------------------------- #
+PATTERNS_MORE: dict[str, dict[str, list[str]]] = {
+    "PPE": {
+        "acr": ["EVP-ED", "EVP", "ΕΛΚ-ΕΔ", "ΕΛΚ", "ЕНП"],
+        "name": [
+            r"Europäisch\w* Volkspartei\w*",
+            r"Démocrates européens", r"Demócratas Europeos", r"Democratas Europeus",
+            r"Democratic[io][\s\-]cristian[io]", r"Democratici europei",
+            r"Europeiska folkpartiet\w*", r"Europademokrat\w*",
+            r"Europæisk\w* Folkepart\w*", r"Europæiske Demokrater",
+            r"Euroopan kansanpuolue\w*",
+            r"Ευρωπαϊκ\w* Λαϊκ\w* Κόμμ\w*", r"Χριστιανοδημοκρ[αά]τ\w*",
+            r"Chrześcijańsk\w* Demokrat\w*",
+            r"Evropsk\w* stran\w* lidov\w*",                     # cs word order "Evropské strany lidové"
+            r"Európai Néppárt\w*",
+            r"Evropsk\w* ljudsk\w* strank\w*", r"Krščansk\w* demokrat\w*",
+            r"Euroopa Rahvapartei\w*", r"Eiropas Tautas partij\w*", r"Europos liaudies partij\w*",
+            r"Partidul\w* Popular\w* European", r"Cre[șş]tin[\s\-]?[Dd]emocra(?:t|[țţ])\w*",
+            # the second half of PPE-DE, with its conjunction (safe: never a plain phrase)
+            r"und europäischer Demokraten", r"en (?:de )?Europese Democraten",
+            r"i Europejskich Demokratów", r"a Evropských demokratů", r"a európskych demokratov",
+            r"és (?:az )?Európai Demokraták\w*", r"in Evropskih demokratov", r"ja Euroopa [Dd]emokraatide",
+            r"un Eiropas Demokrātu", r"ir Europos demokratų", r"[șş]i (?:al? )?Democra[țţ]ilor Europeni",
+            r"и Европейските демократи", r"και (?:των )?Ευρωπα[ιί]ων Δημοκρατ[ώω]ν", r"ja Euroopan demokraattien",
+            r"kristlik\w* demokraat\w*", r"krikščionių demokrat\w*", r"Kristīg\w* demokrāt\w*",
+            r"Европейск\w* народн\w* парти\w*", r"Християндемократ\w*",
+        ],
+        "anch": [
+            r"Europe\w* Democrat\w*", r"Europäisch\w* Demokrat\w*", r"Europese democraten",
+            r"Euroopan demokraat\w*", r"Ευρωπα[ιί]\w* Δημοκρατ\w*", r"Europejsk\w* Demokrat\w*",
+            r"Evropsk\w* demokrat\w*", r"Európsk\w* demokrat\w*", r"Európai Demokrat\w*",
+            r"Euroopa Demokraat\w*", r"Eiropas Demokrāt\w*", r"Europos demokrat\w*",
+        ],
+    },
+    "S&D": {
+        "acr": ["SPE"],
+        "name": [
+            r"Progressiv\w* Allianz\w*", r"Sozialdemokratisch\w* Partei Europas",
+            r"Parti des socialistes européens", r"Partido dos Socialistas Europeus",
+            r"Aliança Progressista\w*", r"Partij van de Europese Sociaaldemocraten",
+            r"Progressiva förbundet\w*", r"Europeiska socialdemokraternas parti",
+            r"Europæiske Socialdemokrat\w*", r"Sosialistien ja demokraattien",
+            r"Προοδευτικ\w* Συμμαχ\w*", r"Σοσιαλιστικ\w* Κόμμ\w*",
+            r"Postępow\w* Sojusz\w*", r"Pokrokov\w* alianc\w*", r"Progresívn\w* alianci\w*",
+            r"Európai Szocialist\w*", r"[Nn]apredn\w* zavezništv\w*",
+            r"Sotsiaaldemokraat\w* ja demokraat\w*", r"Sociālistu un demokrātu", r"progresīv\w* alians\w*",
+            r"pažang\w* aljans\w*", r"Alian[țţ]\w* Progresist\w*", r"Sociali[șş]tilor Europeni", r"Sociali[șş]tilor [șş]i (?:a )?Democra[țţ]ilor",
+            r"Euroopan sosia?alidemokraatti\w* puolue\w*", r"Europeiska socialdemokratiska partiet\w*",
+            r"Прогресивни\w* алианс\w*",
+        ],
+        "anch": [
+            r"sociaal[\s\-]?democrat\w*", r"sozialist\w*", r"socialist\w* europe\w*",
+            r"europe\w* socialist\w*", r"evropsk\w* socialist\w*", r"sociáln\w* demokrat\w*", r"európsk\w* socialist\w*",
+            r"evropskih socialistov", r"Euroopa Sotsialist\w*", r"европейските социалисти",
+        ],
+    },
+    "ALDE": {
+        "name": [
+            r"European Liberal,? Democrat and Reform Party",
+            r"Allianz der Liberalen und Demokraten(?: für Europa)?",
+            r"Alliance des démocrates et des libéraux pour l['’]Europe",
+            r"Parti européen des libéraux,? démocrates et réformateurs",
+            r"Alleanza dei Democratici e dei Liberali per l['’]Europa",
+            r"Partito europeo dei liberali,? democratici e riformatori",
+            r"Alianza de los Demócratas y Liberales por Europa",
+            r"Partido Europeo de los Liberales,? Demócratas y Reformistas",
+            r"Aliança dos (?:Democratas e Liberais|Liberais e Democratas) pela Europa",
+            r"Alleanza dei Liberali e dei Democratici per l['’]Europa",
+            r"Alianza de los Liberales y Demócratas por Europa",
+            r"Alliance des libéraux et des démocrates pour l['’]Europe",
+            r"Partido Europeu dos Liberais,? Democratas e Reformistas",
+            r"Alliantie van Liberalen en Democraten voor Europa",
+            r"Alliansen liberaler och demokrater för Europa", r"Alliancen af Liberale og Demokrater for Europa",
+            r"Συμμαχ\w* (?:των )?Φιλελε[υύ]θ[εέ]ρ\w*(?: και (?:των )?Δημοκρατ[ώω]ν)?(?: για την Ευρώπη)?",
+            r"Porozumieni\w* (?:Liberałów i Demokratów )?na rzecz Europy",
+            r"[Zz]avezništv\w* liberalc\w* in demokrat\w* za Evropo",
+            r"(?:Euroopa )?Demokraatide ja Liberaalide Liid\w*",
+            r"Alian[țţ]\w* Liberalilor (?:[șş]i Democra[țţ]ilor )?pentru Europa",
+            r"Алианс\w* на либерал\w* и демократ\w* за Европа",
+            r"Liberal\w* und Demokratisch\w* Partei\w*",
+            r"Parti européen des libéraux", r"Alleanza dei Democratici\w*", r"Partito europeo dei liberali",
+            r"Alianza de los Demócratas", r"Partido Europeo de los Liberales",
+            r"Aliança dos Democratas", r"Partido Europeu dos Liberais",
+            r"Alliantie van Liberalen", r"Europese Liberale\w*",
+            r"Alliansen liberaler", r"Alliancen af Liberale",
+            r"liberaalidemokraat\w*", r"liberaali- ja demokraattipuolue\w*",
+            r"Συμμαχ\w* των Φιλελε[υύ]θερ\w*", r"Porozumieni\w* Liberałów",
+            r"Szövetség\w* Európáért", r"[Zz]avezništv\w* liberalc\w*", r"Liberaalide Liid\w*",
+            r"aljans\w* už Europą", r"Alian[țţ]\w* Liberalilor", r"Alianc\w* liberálov",
+            r"Алианс\w* на либерал\w*",
+        ],
+        "anch": [r"φιλελε[υύ]θ[εέ]ρ\w*", r"liberalc\w*", r"liberaal\w*"],
+    },
+    "Greens/EFA": {
+        "name": [
+            r"Frei\w* Europäisch\w* Allianz", r"Euroopan vapa\w* allianssi\w*",
+            r"Ευρωπαϊκ\w* Ελεύθερ\w* Συμμαχ\w*", r"Ελεύθερ\w* Ευρωπαϊκ\w* Συμμαχ\w*",
+            r"Woln\w* Przymierz\w* Europejsk\w*", r"Európai Szabad Szövetség\w*",
+            r"Evropsk\w* svobodn\w* zvez\w*", r"Euroopa Vabaliid\w*", r"Eiropas Brīv\w* apvienīb\w*",
+            r"Europos laisv\w* aljans\w*", r"Alian[țţ]\w* Liber\w* Europe(?:an|n)\w*",
+            r"Европейски\w* свободен алианс\w*", r"Europæiske Fri Alliance",
+        ],
+        "raw": [r"\bVerzilor\b", r"\bΠρ[αά]σ[ιί]ν(?:ων|οι|ους)\b"],
+        "anch": [r"πρ[αά]σ[ιί]ν\w*"],
+    },
+    "GUE/NGL": {
+        "name": [
+            r"Verein\w* Europäisch\w* Link\w*", r"Nordisch\w* Grün\w* Link\w*",
+            r"Europe\w* Unitair\w* Links", r"Noord\w* Groen\w* Links",
+            r"enade vänster\w*", r"Nordisk\w* grön\w* vänster\w*",
+            r"Venstrefløjs Fællesgruppe", r"Nordisk Grønne? Venstre",
+            r"yhtynee\w* vasemmisto\w*", r"Pohjoismaiden vihre\w* vasemmisto\w*",
+            r"Συνομοσπονδιακ\w*", r"(?:Ευρωπαϊκ\w* )?Ενωτικ\w* Αριστερ\w*", r"Αριστερ\w* των Πρ[αά]σ[ιί]νων",
+            r"(?:των )?Βόρει\w* Χωρ\w*",
+            r"Konfederacyjn\w*", r"konfederativn\w*", r"Konfederaln\w*",
+            r"Egységes Európai Baloldal\w*", r"Északi Zöld Baloldal\w*",
+            r"Evropsk\w* združen\w* levic\w*", r"nordijsk\w* levic\w*",
+            r"Ühendatud Vasak\w*", r"Põhjamaade Roheliste Vasak\w*",
+            r"Apvienot\w* kreis\w*(?: un (?:Ziemeļvalstu [Zz]aļ\w* kreis\w* )?spēku)?", r"Ziemeļvalstu zaļ\w* kreis\w*", r"konfederāl\w*",
+            r"vieningųjų kairiųjų(?: jungtin\w*)?", r"Šiaurės šalių žali\w*(?: kairi\w*)?",
+            r"St[âa]ng\w* Unit\w* European\w*", r"St[âa]ng\w* Verde Nordic\w*",
+            r"Европейск\w* обединен\w* левиц\w*", r"Северн\w* зелен\w* левиц\w*", r"Конфедератив\w*",
+        ],
+    },
+    "ECR": {
+        "acr": ["EKR", "ЕКР"],
+        "name": [
+            r"Europäisch\w* Konservativ\w* und Reformer\w*", r"konservativa och reformist\w*",
+            r"Konservative og Reformister", r"konservatiiv\w* ja reformist\w*",
+            r"Konserwatyst\w* i Reformator\w*", r"konservativc\w* in reformist\w*",
+            r"консерватори и реформисти",
+        ],
+    },
+    "ID": {
+        "name": [
+            # UEN
+            r"Union for (?:a )?Europe of (?:the )?Nations", r"Unione per l['’]Europa delle Nazioni",
+            r"Unión por la Europa de las Naciones", r"União para a Europa das Nações",
+            r"Unie voor (?:een )?Europa van (?:de )?(?:Nati(?:es|ën|onen)|Nationale Staten)", r"Union(?:en)? för nationernas Europa",
+            r"Union(?:en)? for Nationernes Europa", r"Unioni (?:kansakuntien )?Euroopan puolesta", r"kansakuntien Euroopan puolesta",
+            r"Ένωσ\w* για την Ευρώπη των Εθνών", r"na rzecz Europy Narodów",
+            r"Nemzetek Európájáért Unió\w*", r"za Evropo narodov", r"Liit Rahvusriikide Euroopa eest", r"Rahvusriikide Euroopa\w*",
+            r"Nāciju Eiropa\w*", r"už tautų Europą", r"Uniun\w* pentru Europa Na[țţ]iunilor",
+            r"Съюз\w* за Европа на нациите",
+            # EDD (1999-2004)
+            r"Europe of Democracies and Diversities", r"Europe des démocraties et des différences",
+            r"Europa der Demokratien und der Unterschiede", r"Europa delle democrazie e delle diversità",
+            r"Europa de las Democracias y de las Diferencias", r"Europa das Democracias e das Diferenças",
+            r"Europa van Democratieën en Diversiteit", r"Demokrati\w* ja monimuotoisuuden Eurooppa\w*",
+            r"Demokratiernas och mångfaldens Europa", r"Demokratiernes og Mangfoldighedens Europa",
+        ],
+        "raw": [
+            # IND/DEM: only the capitalised official name, never "independence and democracy"
+            r"\bIndepend[eê]nci?[ae]\s*(?:/|e|y|and)\s*Democra\w*",
+            r"\bIndipendenza\s*(?:/|e)\s*Democrazia",
+            r"\bOnafhankelijkheid\s*(?:/|en)\s*Democratie",
+            r"\bSelvstændighed\s*(?:/|og)\s*Demokrati", r"\bSjälvständighet\s*(?:/|och)\s*demokrati",
+            r"\bItsenäisyys\s*(?:/|ja)\s*demokratia",
+            r"\bΑνεξαρτησία\s*(?:/|και)\s*Δημοκρατία",
+            r"\bNiepodległość\s*(?:/|i)\s*Demokracja", r"\bNezávislos[tť]\s*(?:/|a)\s*demokraci[ea]",
+            r"\bFüggetlenség\s*(?:/|és)\s*Demokrácia", r"\bNeodvisnost\s*(?:/|in)\s*[Dd]emokracija",
+            r"\bIseseisvus\s*(?:/|ja)\s*[Dd]emokraatia", r"\bNeatkarība\s*(?:/|un)\s*[Dd]emokrātija",
+            r"\bNepriklausomybė\s*(?:/|ir)\s*[Dd]emokratija",
+        ],
+        "anch": [
+            # the same names without "Union for": a group word must be next to them
+            r"Europe of (?:the )?Nations", r"Europe des [Nn]ations", r"Europa delle [Nn]azioni",
+            r"Europa de las [Nn]aciones", r"Europa das Nações", r"Europa der Nationen",
+            r"Europa van (?:de )?Nati\w*", r"Europe of Freedom and (?:Direct )?Democracy", r"για την Ευρώπη των Εθνών",
+            r"Europe de la liberté et de la démocratie(?: directe)?",
+            r"Europa der Freiheit und der (?:direkten )?Demokratie",
+            r"Evrop\w* svobod\w* a (?:přímé )?demokraci\w*", r"Európ\w* slobod\w* a (?:priamej )?demokraci\w*",
+            r"Ευρώπη της Ελευθερίας", r"Europa Wolności", r"Evropa narod\w* a svobod\w*",
+            # EFD / EFDD, ENF: ordinary phrases too ("un'Europa della libertà e della democrazia")
+            r"Europa della [Ll]ibertà e della [Dd]emocrazia(?: [Dd]iretta)?",
+            r"Europa de la Libertad y de la Democracia(?: Directa)?", r"Europa da Liberdade e da Democracia(?: Direta)?",
+            r"Frihet och direktdemokrati", r"Frihed og Direkte Demokrati",
+            r"Vapauden ja suoran demokratian Eurooppa\w*",
+            r"Europa das Nações e da Liberdade", r"Europa van Naties en Vrijheid",
+            r"Nationernas och frihetens Europa", r"Nationernes og Frihedens Europa",
+        ],
+    },
+}
+for _canon, _spec in PATTERNS_MORE.items():
+    for _tier, _pats in _spec.items():
+        PATTERNS[_canon].setdefault(_tier, []).extend(_pats)
 
 
 # --------------------------------------------------------------------------- #
@@ -398,8 +605,11 @@ def _subpattern(spec: dict[str, list[str]]) -> str:
 
     parts.extend(_any_space(p) for p in spec.get("raw", []))
 
-    ci = [_any_space(p) for p in spec.get("name", [])]
-    anch = spec.get("anch", [])
+    # longest first: at one start position the regex takes the FIRST alternative, so a
+    # short name listed earlier ("Allianz der Liberalen und Demokraten") would otherwise
+    # beat the full one and leave its tail ("für Europa") behind
+    ci = [_any_space(p) for p in sorted(spec.get("name", []), key=len, reverse=True)]
+    anch = [_any_space(p) for p in spec.get("anch", [])]
     if anch:
         ide = "(?:%s)" % "|".join(anch)          # ideology words, matched once
         ci.append(rf"{GW}{_CONN}[\s\-]+{ide}")    # "Fraktion der Sozialdemokraten"
@@ -420,7 +630,9 @@ MAX_PASSES = 3   # a removal can join two fragments into a new match ("Grupo dos
 # Leftovers of a removed name (strip_residue).
 _EMPTY_BRACKETS_RE = re.compile(r"[(\[]\s*[)\]]")                      # "(PPE-DE)" -> "( )"
 _EMPTY_QUOTES_RE = re.compile(r'(?<=\s)"\s+"(?=\s)')                   # 'le groupe " "'
-_LONE_SLASH_RE = re.compile(r"(?<![\d\w])\s/\s(?![\d])")                  # "návrhu / o" after "Zelení/ALE"
+# "the / supports", "předloženého /," after "Verts/ALE" or "Zelení/ALE" went; after a digit
+# or capital it is real text ("2009 / 2010", "A / B", "EU / NATO") and stays
+_LONE_SLASH_RE = re.compile(r"(?<=\w)(?<![\dA-ZÀ-Ý])\s/(?=[\s,.;:])(?!\s?\d)")
 _ORPHAN_COMPOUND_RE = re.compile(                                       # "der -Fraktion"
     r"(?<![\w/])-(?=(?:Fraktion|Fractie|[Gg]ruppe|gruppen|ryhm|frakcij)\w*\b)")
 # The transcript header before the speech: "au nom du groupe ID. – ", "in writing. – ",

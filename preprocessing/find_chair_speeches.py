@@ -62,7 +62,8 @@ CHAIR_LABEL_RE = re.compile(r"""(?:
   | Formand(?:en)? | Puhemies | (?:Ο\ |Η\ )?Πρόεδρος | Przewodnicząc[ya] | Předsedající | Předsed(?:a|kyně)
   | Predsedajúc[ia] | Predsed(?:a|níčka) | (?:Az\ )?Elnök | Predsedujoč[ia] | Predsedni(?:k|ca)
   | (?:Istungi\ )?Juhataja | Priekšsēdētāj[sa] | Sēdes\ vadītāj[sa] | (?:Posėdžio\ )?Pirminink(?:as|ė)
-  | Președinte(?:le)? | Președinta | Председател(?:ят|ката)? | Председателстващ(?:ият|ата)?
+  | Pre[șş]edinte(?:le)? | Pre[șş]edinta                   # ro: comma-below or legacy cedilla
+  | Председател(?:ят|ката)? | Председателстващ(?:ият|ата)?
   | (?:Il-)?Presidenti?                                    # en, and mt "Il-President"
   | Predsjedavajuć[ia] | Predsjedni(?:k|ca) | (?:An\ t)?Uachtarán
 )""", re.X | re.I)
@@ -154,7 +155,8 @@ def main() -> None:
     years = Counter(i[:4] for i in ids)
     print(f"  {len(ids):,} chair speeches -> {CHAIR_IDS}")
     print(f"  per year: {dict(sorted(years.items()))}")
-    print(f"  labels seen: {labels.most_common(30)}")
+    # All of them: a language whose label is missing shows up as an absence in the tail.
+    print(f"  labels seen: {labels.most_common()}")
 
 
 def load_chair_ids() -> set[str]:

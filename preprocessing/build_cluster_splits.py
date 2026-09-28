@@ -48,6 +48,9 @@ from preprocessing.build_collapsed_splits import COLUMNS, PARTY_COLUMN, balance_
 DATA_DIR = PROJECT_ROOT / "data" / "EuroParl Custom"
 DEFAULT_INPUT_DIR = DATA_DIR / "cleaned"
 DEFAULT_OUTPUT_DIR = DATA_DIR / "clusters_k4"
+# The human-annotated speeches (analysis/build_annotation_mix.py), kept in test on both
+# tracks. In the repo, not data/, so it syncs with preprocessing/.
+PINNED_TEST_FILE = PROJECT_ROOT / "preprocessing" / "pinned_test_speeches.csv"
 
 K = 4
 # Languages with fewer pool rows than this are dropped before the split. The corpus-wide
@@ -211,14 +214,22 @@ def print_language_capacity(train, target):
           + ", ".join(f"{r:g}: {n:,}" for r, n in yields.items()))
 
 
+def load_pinned(path=PINNED_TEST_FILE):
+    if path is None or not Path(path).exists():
+        print(f"No pinned-test file ({path}); splitting without pins")
+        return None
+    return pd.read_csv(path, encoding="utf-8-sig", keep_default_na=False)
+
+
 def split_and_write(pool, output_dir, seed, per_party, eval_set_size, metadata, metadata_name,
-                    language_ratio=1.0):
+                    language_ratio=1.0, pinned_file=PINNED_TEST_FILE):
     """Re-split a relabelled pool, balance its train split, and write the track.
 
     Shared by this group-level track and the national-party one
     (build_national_cluster_splits.py): same carve, same leak checks, same
     language-quota balancing (language_allocs), same four parquet files plus one
-    JSON of metadata.
+    JSON of metadata. The speeches in `pinned_file` (the human-annotated sample) are
+    forced into test on both tracks, so a model trained on either never sees them.
     """
     rng = np.random.default_rng(seed)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -226,7 +237,21 @@ def split_and_write(pool, output_dir, seed, per_party, eval_set_size, metadata, 
     thin = lang_counts[lang_counts < MIN_LANG_ROWS]
     print(f"Languages below {MIN_LANG_ROWS:,} pool rows, dropped: {thin.to_dict()}")
     pool = pool[~pool["language"].isin(thin.index)].reset_index(drop=True)
-    train, dev, test = split_dataframe(pool, eval_set_size=eval_set_size, seed=seed)
+    pinned = load_pinned(pinned_file)
+    train, dev, test = split_dataframe(pool, eval_set_size=eval_set_size, seed=seed, pinned=pinned)
+    if pinned is not None:
+        texts = set(pinned["text"])
+        where = {name: int(df["text"].isin(texts).sum())
+                 for name, df in (("train", train), ("dev", dev), ("test", test))}
+        print(f"Pinned speeches by exact text: {where} of {len(pinned)}")
+        assert where["train"] == where["dev"] == 0, "a pinned speech left test"
+        # ... nor any translation of one (same speaker and day)
+        day = lambda d: d["speaker"].astype(str) + "|" + pd.to_datetime(d["date"]).dt.strftime("%Y-%m-%d")
+        pin_days = set(day(pinned))
+        leaked = {name: int(day(df).isin(pin_days).sum()) for name, df in (("train", train), ("dev", dev))}
+        assert not any(leaked.values()), f"translations of pinned speeches outside test: {leaked}"
+        metadata = {**metadata, "pinned_test": {"file": str(pinned_file), "speeches": len(pinned),
+                                                "in_test_by_exact_text": where["test"]}}
     splits = {"train": train, "dev": dev, "test": test}
     for name, df in splits.items():
         counts = df[PARTY_COLUMN].value_counts()

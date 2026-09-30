@@ -134,7 +134,9 @@ def main() -> None:
     parser.add_argument("--positions", default=DEFAULT_POSITIONS, choices=POSITION_CHOICES,
                         help="ep-group: the europarty's own euandi answers, one position "
                              "vector per group. national: its national member parties, "
-                             "averaged within the group.")
+                             "averaged within the group. group-mean: those parties "
+                             "averaged into one vector first. cluster: the four k=4 party "
+                             "clusters, MEP-weighted (build_cluster_positions.py).")
     parser.add_argument("--override", action="store_true")
     args = parser.parse_args()
 

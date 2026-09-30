@@ -7,7 +7,15 @@ here so nothing has to import a CLI script to find out what a group's positions 
     ep-group     the europarty's own manifesto answers (country_iso == "eu"), one
                  position vector per group, nothing averaged across parties.
     national     the five countries' member parties in the same file, averaged.
-    group-mean   every national party that ran in 2024, averaged per group.
+    group-mean   the same member parties as `national`, but averaged into one position
+                 vector per group *before* the model is compared against it, so every
+                 group weighs the same and within-group disagreement cancels. Built by
+                 `analysis/build_group_positions.py`; see it for why this is not
+                 `national` restated.
+    cluster      the four k=4 party clusters (analysis/party_kmeans.py) instead of the
+                 EP groups: each cluster's MEP-weighted mean over its ~164 MEP-holding
+                 member parties in all 27 countries. The labels the cluster-track
+                 classifiers predict. Built by `analysis/build_cluster_positions.py`.
 
 **The basis is not recorded in the output filenames.** Change it and the existing
 vaa*.csv files are left in place, so every downstream plot silently keeps reading the
@@ -22,12 +30,15 @@ from utils import EP_GROUP_BY_PARTY
 
 PARTY_POSITIONS_PATH = "data/euandi_2024_data/euandi_2024_parties.jsonl"
 GROUP_POSITIONS_PATH = "data/euandi_2024_data/euandi_2024_group_positions.jsonl"
+CLUSTER_POSITIONS_PATH = "data/euandi_2024_data/euandi_2024_cluster_positions.jsonl"
 
-POSITION_CHOICES = ["ep-group", "national", "group-mean"]
+POSITION_CHOICES = ["ep-group", "national", "group-mean", "cluster"]
 DEFAULT_POSITIONS = "ep-group"
 
 
 def positions_path(positions: str) -> str:
+    if positions == "cluster":
+        return CLUSTER_POSITIONS_PATH
     return GROUP_POSITIONS_PATH if positions == "group-mean" else PARTY_POSITIONS_PATH
 
 
@@ -78,6 +89,8 @@ def load_party_positions(path: str, positions: str = DEFAULT_POSITIONS) -> pd.Da
     df = df[~is_europarty if positions == "national" else is_europarty].copy()
     df["statement_idx"] = df["statement_idx"].astype(int)
     df["statement"] = df["statement"].str.strip()
-    df["ep_group"] = df["short_name"].map(EP_GROUP_BY_PARTY)
+    # The cluster file names its group outright; everything else is mapped by party name.
+    mapped = df["short_name"].map(EP_GROUP_BY_PARTY)
+    df["ep_group"] = df["ep_group"].fillna(mapped) if "ep_group" in df.columns else mapped
     check_statement_order(df, path)
     return df

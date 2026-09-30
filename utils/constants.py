@@ -53,7 +53,11 @@ AXES = ["Ukraine", "Ecology", "Immigration", "Values", "Economy", "Europe", "Lef
 
 # EP groups, left-to-right as every figure orders them, with the palette they share.
 # One group keeps one colour across all figures -- do not re-spell these per script.
-PARTY_DISPLAY_ORDER = ["GUE/NGL", "S&D", "Greens/EFA", "ALDE", "PPE", "ECR", "ID", "ECR+ID"]
+# The four k=4 party clusters (analysis/party_kmeans.py, `--positions cluster`) follow,
+# left-to-right too; each borrows the colour of the EP group holding most of its seats.
+PARTY_DISPLAY_ORDER = ["GUE/NGL", "S&D", "Greens/EFA", "ALDE", "PPE", "ECR", "ID", "ECR+ID",
+                       "Radical left", "Progressive federalists",
+                       "Liberal-conservative centre-right", "Sovereigntist right"]
 PARTY_COLORS = {
     # GUE/NGL's own colour is a dark red a shade away from S&D's -- the two were
     # indistinguishable side by side. Pushed towards magenta: still a red of the left,
@@ -66,6 +70,10 @@ PARTY_COLORS = {
     "ECR":        "#0054A5",
     "ID":         "#2B3856",
     "ECR+ID":     "#164B75",
+    "Radical left":                      "#8E1B6B",
+    "Progressive federalists":           "#E2061D",
+    "Liberal-conservative centre-right": "#3399FF",
+    "Sovereigntist right":               "#2B3856",
 }
 FALLBACK_PARTY_COLOR = "#888888"
 

@@ -25,6 +25,7 @@ import pandas as pd
 from utils import EP_GROUP_BY_PARTY
 from analysis.plotting.plot_political_bias import load_questionnaire, setup_compass
 from analysis.plotting.plot_party_compass import EP_GROUP_ORDER, load_parties, party_stance_vector
+from analysis.core.positions import DEFAULT_POSITIONS, POSITION_CHOICES, positions_path
 
 STAR_SIZE = 520
 LABEL_FONTSIZE = 12
@@ -32,14 +33,16 @@ LIMIT_PADDING = 1.18
 # Labels are placed around the marker; coincident parties share one star, so these
 # only have to separate genuinely nearby points.
 LABEL_OFFSETS = [(9, 9), (9, -14), (-9, 9), (-9, -14)]
-# Which answers stand for an EP group, in the vocabulary evaluate_euandi.py uses:
+# Which answers stand for an EP group, in the vocabulary evaluate_euandi.py uses
+# (POSITION_CHOICES, from analysis.core.positions):
 #   ep-group   -- the europarty's own euandi answers, one position vector per group
 #   national   -- its member parties in the five countries euandi_2024_parties.jsonl
 #                 covers (DE, FR, IT, ES, GR), averaged within the group
-#   group-mean -- every national party that ran in 2024, averaged per group; read from
-#                 the file build_group_positions.py writes, not recomputed here
-POSITION_CHOICES = ["ep-group", "national", "group-mean"]
-DEFAULT_POSITIONS = "ep-group"
+#   group-mean -- the same member parties, averaged into one vector per group before
+#                 anything is compared against it; read from the file
+#                 build_group_positions.py writes, not recomputed here
+#   cluster    -- the four k=4 party clusters, MEP-weighted; read from the file
+#                 build_cluster_positions.py writes
 
 # Seven axes plus a group column do not fit a text-width table under their full names.
 AXIS_ABBREVIATION = {
@@ -51,12 +54,13 @@ TABCOLSEP = "2.75pt"
 
 def position_rows(dataset, basis):
     """The euandi answer vectors the basis is built from: the parties file for
-    `ep-group` and `national`, the precomputed group means for `group-mean`."""
-    if basis != "group-mean":
+    `ep-group` and `national`, the precomputed means for `group-mean` and `cluster`."""
+    if basis not in ("group-mean", "cluster"):
         return load_parties(dataset)
-    path = Path("data") / f"{dataset}_data" / f"{dataset}_group_positions.jsonl"
+    path = Path(positions_path(basis))
     if not path.exists():
-        raise SystemExit(f"{path} not found; build it with analysis/build_group_positions.py.")
+        builder = "build_cluster_positions.py" if basis == "cluster" else "build_group_positions.py"
+        raise SystemExit(f"{path} not found; build it with analysis/{builder}.")
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
             if line.strip()]
 
@@ -72,7 +76,7 @@ def party_positions(rows, dims, questionnaire):
         record = {
             "short_name": party["short_name"],
             "country_iso": party["country_iso"],
-            "ep_group": EP_GROUP_BY_PARTY.get(party["short_name"], "Other"),
+            "ep_group": party.get("ep_group") or EP_GROUP_BY_PARTY.get(party["short_name"], "Other"),
         }
         for column, dimension in enumerate(dims):
             sign = party_signs[:, column]
@@ -88,7 +92,7 @@ def ep_group_positions(positions, dims, basis):
     while `national` averages the member parties here. Parties outside the seven groups
     are dropped."""
     in_group = positions[positions["ep_group"] != "Other"]
-    if basis in ("ep-group", "group-mean"):
+    if basis in ("ep-group", "group-mean", "cluster"):
         selected = in_group[in_group["country_iso"] == "eu"]
         return selected[["ep_group", *dims]].reset_index(drop=True)
 

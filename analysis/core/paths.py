@@ -97,4 +97,8 @@ JUDGE_COLUMNS = ["paraphrase", "language", "variant", "statement", "llm_stance"]
 
 # Party slugs are upper-case, so the non-greedy slug in PARTY_PROB_COLUMN always
 # splits correctly; this only restores the punctuation the slug dropped.
-SLUG_TO_LABEL = {"ECR_ID": "ECR+ID", "GUE_NGL": "GUE/NGL", "Greens_EFA": "Greens/EFA", "S_D": "S&D"}
+SLUG_TO_LABEL = {"ECR_ID": "ECR+ID", "GUE_NGL": "GUE/NGL", "Greens_EFA": "Greens/EFA", "S_D": "S&D",
+                 # the k=4 cluster labels of the cluster-track classifiers
+                 "Radical_left": "Radical left", "Progressive_federalists": "Progressive federalists",
+                 "Liberal_conservative_centre_right": "Liberal-conservative centre-right",
+                 "Sovereigntist_right": "Sovereigntist right"}

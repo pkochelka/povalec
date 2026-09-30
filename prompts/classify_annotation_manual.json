@@ -1,0 +1,15 @@
+{
+  "labels": [
+    "GUE/NGL",
+    "S&D+Greens/EFA",
+    "ALDE+PPE",
+    "ECR+ID"
+  ],
+  "label_descriptions": {
+    "GUE/NGL": "(The Left): radical left. Against cuts to public spending and critical of capitalism, NATO and the EU's focus on free trade and business, in favour of state ownership of key companies (energy, railways). Examples: Die Linke (Germany), Podemos (Spain).",
+    "S&D+Greens/EFA": "(Socialists & Democrats, Greens/EFA): pro-EU centre-left. Supports strong welfare state, workers' rights, climate protection, personal freedoms, and the rights of minorities and regions. Examples: Partito Democratico (Italy), PSOE (Spain), Grüne (Germany).",
+    "ALDE+PPE": "(Renew/ALDE, EPP): pro-EU centre-right and liberal. Supports free markets, balanced budgets, low public debt, and Christian-democratic or liberal values. Examples: CDU/CSU (Germany), VVD (Netherlands).",
+    "ECR+ID": "(ECR, Identity & Democracy): nationalist right. Eurosceptic, national sovereignty, restrictive on immigration, traditional values. Examples: PiS (Poland), FdI (Italy), Rassemblement National (France)."
+  },
+  "prompt": "You are annotating a text in English, Czech or Slovak. Decide which of four ideological blocs (based on pre-2024 elections European Parliament political groups) best matches the author's views, based only on the text. Some texts come directly from the plenary discussions of the European Parliament, some are AI-generated.\n\nThe four blocs:\n{descriptions}\n\nHow to decide. Read the whole text before deciding. General tips:\n- Left and pro-EU -> S&D+Greens/EFA.\n- Left and against the system -> GUE/NGL.\n- Pro-EU with a focus on markets or fiscal discipline -> ALDE+PPE.\n- Pro-EU with a focus on social protection or climate -> S&D+Greens/EFA.\n- Conservative and pro-EU -> ALDE+PPE.\n- Conservative and against the EU or focused on immigration -> ECR+ID.\nIf the text argues for positions of more than one bloc, put the stronger one as choice, the other as secondary_choice, and lower your confidence. If the text has no clear signal (many texts do not), still choose one bloc but lower your confidence.\n\nText:\n\"\"\"\n{text}\n\"\"\"\n\nWhat to record:\n- choice: exactly one of {labels}\n- secondary_choice: if a different bloc is plausible, name it here, otherwise an empty string\n- confidence: 1 = guess, 2 = leaning towards one bloc, 3 = clear evidence\n- reason: one short sentence in English giving the main evidence\n\nReturn STRICT JSON, no extra text:\n{{\"choice\": \"<one of: {labels}>\", \"secondary_choice\": \"<one of: {labels}, or empty>\", \"confidence\": <1, 2 or 3>, \"reason\": \"<one short sentence in English>\"}}"
+}

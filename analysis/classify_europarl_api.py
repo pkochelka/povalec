@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Zero-shot LLM baseline for the 6-class EU party classification task.
+"""Zero-shot LLM baseline for the EU party classification task.
 
 Prompts an OpenAI-compatible endpoint to assign each EuroParl speech to one of
-the six EU groups (ECR and ID collapsed into a single ECR+ID group, matching
-the collapsed/ split track), caches each response to disk so runs are
+the labels listed in the prompt file -- by default the six EU groups (ECR and ID
+collapsed into a single ECR+ID group, matching the collapsed/ split track);
+prompts/classify_europarl_cluster.json targets the four party clusters. Caches each response to disk so runs are
 resumable, and prints a classification report comparable to the trained
 mmBERT model.
 """
@@ -28,8 +29,8 @@ from analysis.europarl_classification import (
     load_split,
 )
 
-LABELS = ["ALDE", "ECR+ID", "GUE/NGL", "Greens/EFA", "PPE", "S&D"]
-LABEL_TO_ID = {label: index for index, label in enumerate(LABELS)}
+# Aliases for the EU-group labels; ignored for any alias whose target is not
+# among the prompt file's labels.
 LABEL_ALIASES = {
     "EPP": "PPE",
     "RENEW": "ALDE",
@@ -67,6 +68,7 @@ CACHE_SAVE_INTERVAL_SECONDS = 60
 @dataclass(frozen=True)
 class ClassifierConfig:
     model: str
+    labels: tuple
     prompt_template: str
     descriptions: dict
     max_tokens: int
@@ -96,25 +98,26 @@ def subsample(df, limit, seed):
 
 
 def build_prompt(config, text):
-    descriptions = "\n".join(f"- {label}: {config.descriptions[label]}" for label in LABELS)
+    descriptions = "\n".join(f"- {label}: {config.descriptions[label]}" for label in config.labels)
     return config.prompt_template.format(
         descriptions=descriptions,
-        labels=", ".join(LABELS),
+        labels=", ".join(config.labels),
         text=text[:MAX_TEXT_CHARS],
     )
 
 
-def normalize_label(raw):
+def normalize_label(raw, labels):
     if not isinstance(raw, str):
         return None
     candidate = raw.strip().strip('"').strip("'")
-    if candidate in LABELS:
+    if candidate in labels:
         return candidate
     upper = candidate.upper()
-    for label in LABELS:
+    for label in labels:
         if upper == label.upper():
             return label
-    return LABEL_ALIASES.get(upper)
+    alias = LABEL_ALIASES.get(upper)
+    return alias if alias in labels else None
 
 
 def classify_speech(text, config):
@@ -136,7 +139,7 @@ def classify_speech(text, config):
             if not parsed or "choice" not in parsed:
                 raise ValueError(f"could not extract choice from: {content!r}")
             return {
-                "choice": normalize_label(parsed.get("choice")),
+                "choice": normalize_label(parsed.get("choice"), config.labels),
                 "raw_choice": parsed.get("choice"),
                 "reason": parsed.get("reason", ""),
             }
@@ -159,7 +162,12 @@ def load_cache(cache_path):
 
 
 def classify_pending(df, results, cache_path, config, max_workers):
-    pending = [i for i in range(len(df)) if i not in results]
+    # Rows that exhausted their retries (e.g. 429s while another process held the
+    # key's parallel-request slots) are retried on resume rather than kept as FAILED.
+    pending = [
+        i for i in range(len(df))
+        if i not in results or str(results[i].get("reason", "")).startswith("FAILED")
+    ]
     print(f"Pending: {len(pending)} / {len(df)}")
 
     lock = threading.Lock()
@@ -182,7 +190,7 @@ def classify_pending(df, results, cache_path, config, max_workers):
                     save_checkpoint(cache_path, results)
                     last_save = time.time()
                 print(f"\n=== after {len(results)} total ({done} this run) ===")
-                print(evaluation_report(results, df), flush=True)
+                print(evaluation_report(results, df, config.labels), flush=True)
             elif time.time() - last_save > CACHE_SAVE_INTERVAL_SECONDS:
                 with lock:
                     save_checkpoint(cache_path, results)
@@ -191,11 +199,12 @@ def classify_pending(df, results, cache_path, config, max_workers):
     save_checkpoint(cache_path, results)
 
 
-def evaluation_report(results, df):
+def evaluation_report(results, df, labels):
+    label_to_id = {label: index for index, label in enumerate(labels)}
     pairs = [
-        (LABEL_TO_ID[df.at[index, PARTY_COLUMN]], LABEL_TO_ID[prediction["choice"]])
+        (label_to_id[df.at[index, PARTY_COLUMN]], label_to_id[prediction["choice"]])
         for index, prediction in results.items()
-        if prediction.get("choice") in LABEL_TO_ID and df.at[index, PARTY_COLUMN] in LABEL_TO_ID
+        if prediction.get("choice") in label_to_id and df.at[index, PARTY_COLUMN] in label_to_id
     ]
     if not pairs:
         return "  no parseable predictions yet."
@@ -209,7 +218,7 @@ def evaluation_report(results, df):
         f"  n={len(results)} parsed={len(pairs)} unparsable={len(results) - len(pairs)} "
         f"acc={accuracy:.4f} f1_macro={f1_macro:.4f}"
     )
-    report = classification_report_text(y_true, y_pred, LABELS)
+    report = classification_report_text(y_true, y_pred, labels)
     return f"{header}\n{report}"
 
 
@@ -232,7 +241,7 @@ def write_predictions_csv(results, df, output_csv):
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="deepseek-v4-pro")
-    parser.add_argument("--split", default="test", choices=["train", "dev", "test"])
+    parser.add_argument("--split", default="test", help="parquet stem in --data_dir, e.g. dev or dev_national")
     parser.add_argument("--data_dir", default=DEFAULT_DATA_DIR, type=Path)
     parser.add_argument("--prompt_file", default=DEFAULT_PROMPT_FILE, type=Path)
     parser.add_argument("--output_dir", default=DEFAULT_OUTPUT_DIR, type=Path)
@@ -249,12 +258,13 @@ def main():
     spec = json.loads(args.prompt_file.read_text(encoding="utf-8"))
     config = ClassifierConfig(
         model=args.model,
+        labels=tuple(spec["labels"]),
         prompt_template=spec["prompt"],
         descriptions=spec["label_descriptions"],
         max_tokens=args.max_tokens,
     )
 
-    df = load_split(args.split, args.data_dir, keep_labels=LABELS)
+    df = load_split(args.split, args.data_dir, keep_labels=config.labels)
     df = subsample(df, args.limit, args.seed)
     print(
         f"Loaded {args.split}: {len(df)} speeches across "
@@ -263,6 +273,8 @@ def main():
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     base_name = f"{args.model.replace('/', '_')}_{args.data_dir.name}_{args.split}"
+    if args.prompt_file.resolve() != DEFAULT_PROMPT_FILE.resolve():
+        base_name += f"_{args.prompt_file.stem}"
     if args.limit is not None:
         base_name += f"_n{args.limit}"
     cache_path = args.output_dir / f"{base_name}.cache.json"
@@ -276,7 +288,7 @@ def main():
     classify_pending(df, results, cache_path, config, args.max_workers)
     write_predictions_csv(results, df, output_csv)
 
-    report = evaluation_report(results, df)
+    report = evaluation_report(results, df, config.labels)
     print(f"\n=== FINAL ===\n{report}")
     report_path.write_text(
         f"model={args.model} split={args.split} n={len(df)}\n{'-' * 40}\n{report}\n",

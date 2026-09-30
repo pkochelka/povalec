@@ -1,4 +1,5 @@
 import argparse
+import json
 import subprocess
 import sys
 import os
@@ -6,7 +7,7 @@ import time
 
 from utils import ALL_LANGS_STR, VARIANTS, configure_stdout
 from analysis.core import classified_name, responses_name, scored_name, speeches_name, vaa_name
-from analysis.core.positions import positions_path
+from analysis.core.positions import POSITION_CHOICES, load_party_positions, positions_path
 
 configure_stdout()
 
@@ -20,18 +21,20 @@ MAX_RETRIES = 1
 POSITIONS = "ep-group"
 POSITIONS_PLACEHOLDER = "@positions@"
 TABLES_PLACEHOLDER = "@tables@"
+CLASSIFIER_PLACEHOLDER = "@classifier@"
 
 
 def _tables_dir(dataset):
     return os.path.join("data", f"{dataset}_results", "tables")
 
 
-def resolve_args(extra_args, positions, dataset):
-    """Fill the placeholders the script lists carry: the positions basis and the
-    dataset's tables directory."""
+def resolve_args(extra_args, positions, dataset, classifier=None):
+    """Fill the placeholders the script lists carry: the positions basis, the dataset's
+    tables directory and the classifier checkpoint."""
     return [
         arg.replace(POSITIONS_PLACEHOLDER, positions)
            .replace(TABLES_PLACEHOLDER, _tables_dir(dataset))
+           .replace(CLASSIFIER_PLACEHOLDER, classifier or CLASSIFIER_DIR)
         for arg in extra_args
     ]
 DATASETS = ["euandi_2024"]
@@ -67,6 +70,8 @@ def _result(dataset, model_dir, filename):
 # That is the case this staleness check exists for -- the classifier was retrained and the
 # *_classified.csv files from the previous checkpoint were left in place for a week.
 CROSSENCODER_DIR = "mmbert-small-stance-crossencoder"
+# The default EP-group (ECR+ID) classifier; --classifier swaps in another checkpoint,
+# e.g. a cluster-track one (runs/<track>-k4-<trainer>/model) for --positions cluster.
 CLASSIFIER_DIR = "mmBERT-base-balanced-collapsed"
 
 
@@ -92,13 +97,13 @@ PER_VARIANT_SCRIPTS = [
      lambda dataset, model_dir, variant, positions: [
          _result(dataset, model_dir, scored_name(LANGUAGES, variant, "speeches")), positions_path(positions)]),
     ("classify_speeches.py", _DIR, "--llm",
-     ["--source", "speeches", "--model_dir", "./mmBERT-base-balanced-collapsed"],
+     ["--source", "speeches", "--model_dir", CLASSIFIER_PLACEHOLDER],
      lambda dataset, model_dir, variant: _result(dataset, model_dir, classified_name(LANGUAGES, variant, "speeches")),
-     lambda dataset, model_dir, variant, positions: [_result(dataset, model_dir, speeches_name(LANGUAGES, variant)), CLASSIFIER_DIR]),
+     lambda dataset, model_dir, variant, positions: [_result(dataset, model_dir, speeches_name(LANGUAGES, variant)), CLASSIFIER_PLACEHOLDER]),
     ("classify_speeches.py", _DIR, "--llm",
-     ["--source", "reasons", "--model_dir", "./mmBERT-base-balanced-collapsed"],
+     ["--source", "reasons", "--model_dir", CLASSIFIER_PLACEHOLDER],
      lambda dataset, model_dir, variant: _result(dataset, model_dir, classified_name(LANGUAGES, variant, "reasons")),
-     lambda dataset, model_dir, variant, positions: [_result(dataset, model_dir, responses_name(LANGUAGES, variant)), CLASSIFIER_DIR]),
+     lambda dataset, model_dir, variant, positions: [_result(dataset, model_dir, responses_name(LANGUAGES, variant)), CLASSIFIER_PLACEHOLDER]),
 ]
 
 # (script, directory, extra args). Scripts that read the euandi positions take
@@ -183,7 +188,7 @@ def newest_mtime(path):
     return os.path.getmtime(path) if os.path.exists(path) else None
 
 
-def skip_reason(output_path, inputs, dataset, model_dir, variant, positions, override):
+def skip_reason(output_path, inputs, dataset, model_dir, variant, positions, classifier, override):
     """Why this step can be skipped, or None if it must run.
 
     Skipping used to be `os.path.exists(output)`, which never re-derived anything: a
@@ -198,7 +203,8 @@ def skip_reason(output_path, inputs, dataset, model_dir, variant, positions, ove
         return None
 
     stale = []
-    for source in inputs(dataset, model_dir, variant, positions):
+    for source in resolve_args(inputs(dataset, model_dir, variant, positions),
+                               positions, dataset, classifier):
         source_mtime = newest_mtime(source)
         if source_mtime is None:
             continue          # a missing input is the step's own problem to report
@@ -214,17 +220,17 @@ def selected(script, only):
     return not only or any(fragment in script for fragment in only)
 
 
-def run_per_variant_scripts(override, only, positions):
+def run_per_variant_scripts(override, only, positions, classifier):
     for dataset in DATASETS:
         for model_dir in MODEL_DIRS:
             for variant in VARIANTS:
                 for script, script_dir, model_arg_name, raw_args, output_path, inputs in PER_VARIANT_SCRIPTS:
                     if not selected(script, only):
                         continue
-                    extra_args = resolve_args(raw_args, positions, dataset)
+                    extra_args = resolve_args(raw_args, positions, dataset, classifier)
                     label = f"{script} {' '.join(extra_args)}: model={model_dir}, variant='{variant}', dataset='{dataset}'"
                     reason = skip_reason(output_path, inputs, dataset, model_dir, variant,
-                                         positions, override)
+                                         positions, classifier, override)
                     if reason:
                         print(f"Skipping ({reason}): {label}", flush=True)
                         continue
@@ -246,9 +252,28 @@ def run_per_dataset_scripts(scripts, only, positions):
                 continue
             extra_args = resolve_args(raw_args, positions, dataset)
             label = f"{script} {' '.join(extra_args)}: dataset='{dataset}'"
+            if not os.path.exists(os.path.join(script_dir, script)):
+                print(f"Skipping (script not in this checkout): {label}", flush=True)
+                continue
             print(f"Running: {label}", flush=True)
             cmd = build_plotting_cmd(script, script_dir, dataset, extra_args)
             run_with_retries(cmd, label)
+
+
+def check_classifier_labels(classifier, positions):
+    """Fail early when the classifier predicts a different set of groups than the
+    positions basis scores against -- a cluster checkpoint with EP-group positions, or
+    the reverse. Nothing downstream would raise: the tables and figures would just
+    compare the two methods over their (empty or partial) intersection."""
+    with open(os.path.join(classifier, "manifest.json"), encoding="utf-8") as f:
+        labels = set(json.load(f)["label2id"])
+    groups = load_party_positions(positions_path(positions), positions)["ep_group"]
+    groups = set(groups.dropna().replace({"ECR": "ECR+ID", "ID": "ECR+ID"}))
+    if labels != groups:
+        raise SystemExit(
+            f"classifier {classifier} predicts {sorted(labels)}, but the {positions!r} "
+            f"positions basis has groups {sorted(groups)}. Pair a cluster checkpoint with "
+            f"--positions cluster and an EP-group one with the other bases.")
 
 
 def main():
@@ -268,17 +293,32 @@ def main():
     parser.add_argument(
         "--positions",
         default=POSITIONS,
-        choices=["ep-group", "national", "group-mean"],
+        choices=POSITION_CHOICES,
         help=f"Whose euandi answers stand for an EP group, for evaluate_euandi.py and "
              f"every plotting script that reads the positions back. Default: {POSITIONS}. "
              f"Changing it needs --override, since the vaa*.csv filenames do not carry "
              f"the basis.",
     )
+    parser.add_argument(
+        "--classifier",
+        default=CLASSIFIER_DIR,
+        help=f"Party-classifier checkpoint for classify_speeches.py (a directory with "
+             f"manifest.json). Its labels must be the positions basis's groups: a "
+             f"cluster-track checkpoint needs --positions cluster. Default: {CLASSIFIER_DIR}. "
+             f"The *_classified.csv filenames do not carry the checkpoint either, so a "
+             f"new one needs --override (or a checkpoint newer than those files).",
+    )
     args = parser.parse_args()
     only = [fragment for fragment in (args.only or "").split(",") if fragment]
-    print(f"EP group positions basis: {args.positions}\n", flush=True)
+    if not os.path.exists(positions_path(args.positions)):
+        builder = "build_cluster_positions.py" if args.positions == "cluster" else "build_group_positions.py"
+        raise SystemExit(f"{positions_path(args.positions)} not found; build it with analysis/{builder}")
+    if selected("classify_speeches.py", only):
+        check_classifier_labels(args.classifier, args.positions)
+    print(f"EP group positions basis: {args.positions}", flush=True)
+    print(f"Classifier: {args.classifier}\n", flush=True)
 
-    run_per_variant_scripts(args.override, only, args.positions)
+    run_per_variant_scripts(args.override, only, args.positions, args.classifier)
     run_per_dataset_scripts(PER_DATASET_PLOTTING_SCRIPTS, only, args.positions)
     run_per_dataset_scripts(PER_DATASET_TABLE_SCRIPTS, only, args.positions)
 

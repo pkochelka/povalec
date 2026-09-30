@@ -36,6 +36,7 @@ from .paths import (
     vaa_name,
 )
 from .positions import (
+    CLUSTER_POSITIONS_PATH,
     DEFAULT_POSITIONS,
     GROUP_POSITIONS_PATH,
     PARTY_POSITIONS_PATH,

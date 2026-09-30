@@ -43,9 +43,10 @@ from utils import ALL_LANGS
 
 USER_DATASET_PATH = "data/euandi_2024_data/EU&I2024 user dataset.dta"
 
-# Same 30-of-36 statement selection as build_group_positions.STATEMENT_COLUMNS,
-# zero-padded to the user dataset's variable names. Position i is questionnaire
-# statement_idx i (0-based), which is also row i of the response CSVs.
+# EU&I's user dataset carries all 36 statement variables it ever served; these are the
+# 30 that were administered in 2024, in `statements.jsonl` order and zero-padded to the
+# dataset's variable names. Position i is questionnaire statement_idx i (0-based), which
+# is also row i of the response CSVs.
 STATEMENT_COLUMNS = [
     "s01", "s02", "s03", "s04", "s05", "s06", "s07", "s08", "s09", "s10",
     "s12", "s13", "s15", "s16", "s17", "s18", "s19", "s20", "s22", "s23",

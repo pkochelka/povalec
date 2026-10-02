@@ -3,8 +3,8 @@ Strip European Parliament political-group / party names out of the speech text,
 after repairing detached accents (fix_diacritics.py), then titled person names and
 stray leading punctuation (clean_person_names.py).
 
-Reads  data/EuroParl Custom/{train,dev,test}.parquet
-Writes data/EuroParl Custom/cleaned/{train,dev,test}.parquet
+Reads  data/EuroParl Custom/{train,dev,test,non_inscrits}.parquet
+Writes data/EuroParl Custom/cleaned/{train,dev,test,non_inscrits}.parquet
 and prints, per split, how many name occurrences were removed for each of the
 seven canonical EP groups, and per language how many rows had their accents
 repaired and how many titled names ("Mr Morillon") and stray leading punctuation
@@ -95,7 +95,8 @@ except ImportError:                     # ... or from inside preprocessing/
 
 DATA_DIR = Path("data/EuroParl Custom")
 OUT_DIR = DATA_DIR / "cleaned"      # what build_collapsed_splits.py reads
-SPLITS = ["train", "dev", "test"]
+# non_inscrits: the unsplit non-attached rows only the national-party track reads.
+SPLITS = ["train", "dev", "test", "non_inscrits"]
 TEXT_COL = "text"
 PAR_CHUNK = 4_000            # rows per task handed to a worker process
 N_WORKERS = max(1, (os.cpu_count() or 2) - 2)   # leave a couple cores for I/O

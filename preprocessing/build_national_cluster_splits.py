@@ -1,6 +1,6 @@
 """Build a k-cluster track (k=4 by default) labelled by each speech's NATIONAL party.
 
-Reads  data/EuroParl Custom/cleaned/{train,dev,test}.parquet
+Reads  data/EuroParl Custom/cleaned/{train,dev,test,non_inscrits}.parquet
        data/EuroParl Custom/national_parties/speeches.parquet   (build_national_party_map.py)
 Writes data/EuroParl Custom/clusters_k{k}_national/{train,dev,test,train_balanced}.parquet
        data/EuroParl Custom/clusters_k{k}_national/labels.json
@@ -11,6 +11,9 @@ This one looks up every row's national party instead, maps it onto the EU&I 2024
 it became (see build_national_party_map.py), and labels the row with that party's
 cluster in analysis/party_kmeans.py's k-cluster fit. A Romanian S&D speech (PSD, in the PSD-PNL list) and a German S&D speech (SPD)
 can therefore land in different clusters, as the parties themselves do.
+
+Non-attached (NI) speeches are included: they have no EP group, but their national
+party is clustered like any other (Smer-SD, BSW, KKE, ...). The group tracks leave them out.
 
 Rows whose national party does not map onto a clustered 2024 party are DROPPED -- UK
 parties, parties that no longer exist, independents, and LinkedEP parties last seen
@@ -154,7 +157,7 @@ def main():
                         parties["ABBREVIATON"].str.strip() + " (" + parties["COUNTRY"].str.strip() + ")"))
 
     speeches = pd.read_parquet(args.speeches)
-    pool = resolve(load_pool(args.input_dir), speeches, args.max_gap_days)
+    pool = resolve(load_pool(args.input_dir, non_inscrits=True), speeches, args.max_gap_days)
     pool["cluster"] = pool["pui"].map(lambda p: cluster_of.get(int(p)) if pd.notna(p) else None)
     print("Row -> national party:")
     coverage = report(pool)

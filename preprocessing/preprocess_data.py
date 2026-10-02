@@ -34,6 +34,13 @@ MULTIPARL_PARTY_MAPPING = {
     "TGI":     np.nan,        "NA":   np.nan,
 }
 
+# Non-attached MEPs carry no EP group, so the group tracks cannot use them. They are
+# still written out, labelled NI_LABEL, because the national-party track labels speeches
+# by national party and can. split_preprocessed_data sets them aside in their own file
+# before splitting, so the group tracks are built exactly as without them.
+NI_LABEL = "NI"
+MULTIPARL_NI_CODE = "NA"
+
 PARLEE_PARTY_MAPPING = {
     "EPP-ED":     "PPE",        "EPP":        "PPE",
     "PES":        "S&D",        "S&D":        "S&D",
@@ -43,7 +50,7 @@ PARLEE_PARTY_MAPPING = {
     "ECR":        "ECR",        "UEN":        "ECR",
     "EFD":        "ID",         "EFDD":       "ID",
     "ENF":        "ID",         "ID":         "ID",         "IND/DEM": "ID",
-    "NI":         np.nan,       "PECH":       np.nan,
+    "NI":         NI_LABEL,     "PECH":       np.nan,
 }
 
 LANG_NAME_TO_CODE = {
@@ -103,7 +110,13 @@ def preprocess_multiparl(chair_ids):
     if not unknown.empty:
         print(f"  WARNING: unmapped EU Party codes (dropped): {unknown.value_counts().to_dict()}")
 
+    non_attached = set(df.loc[df["truncated_party"] == MULTIPARL_NI_CODE, "Unnamed: 0"])
     df = df.groupby("Unnamed: 0", as_index=False).agg(collapse)
+    # Labelled only where no EP group was found, so a speech that also carries a group
+    # code keeps exactly the label it had before non-attached speeches were kept.
+    ni = df["party_group_std"].isna() & df["Unnamed: 0"].isin(non_attached)
+    df.loc[ni, "party_group_std"] = NI_LABEL
+    print(f"  {ni.sum():,} non-attached speeches kept as {NI_LABEL}")
     df = df.dropna(subset=["party_group_std"])
     print(f"  {len(df):,} speeches after party filtering")
 
@@ -180,8 +193,9 @@ def preprocess_eu_debates():
     df = pd.read_json(EU_DEBATES_JSONL, lines=True)
     print(f"  Loaded {len(df):,} rows")
 
-    df = df[~df["speaker_party"].isin(["NI", "N/A"])]
-    print(f"  {len(df):,} rows after dropping NI and N/A (non-inscrits)")
+    df = df[df["speaker_party"] != "N/A"]
+    print(f"  {len(df):,} rows after dropping N/A; "
+          f"{(df['speaker_party'] == NI_LABEL).sum():,} non-attached (NI) rows kept")
     # The chair ("EUROPARL President"), Commission and Council all come with party N/A, so
     # the line above already dropped them; this states it, and would catch a change.
     df = df[df["speaker_role"] == "MEP"]

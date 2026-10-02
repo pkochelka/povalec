@@ -28,6 +28,9 @@ MAX_EVAL_SHARE   = 0.25
 MAX_EVAL_GROUP_SHARE = 0.10
 
 COLUMNS = ["date", "EU Party", "text", "language", "speaker"]
+# preprocess_data.NI_LABEL; not imported, so this module does not pull in the chair step.
+NI_LABEL     = "NI"
+NON_INSCRITS = "non_inscrits"   # <OUTPUT_DIR>/non_inscrits.parquet, then cleaned/ likewise
 
 # Dev and test are class-balanced: every EU Party contributes the same number of
 # rows, and within each party the language mix follows the corpus-wide language
@@ -99,9 +102,14 @@ def carve(sub, targets, rng, max_share=MAX_EVAL_SHARE, max_group_share=MAX_EVAL_
     return np.concatenate(selected), leftover
 
 
-def load_combined():
+def load_combined(with_non_inscrits=False):
     """Merge the three preprocessed sources and apply dedup / length / language
     filters.
+
+    Non-attached (NI) rows are taken out of every source before anything else, so the
+    returned pool is the one the group tracks were always built from. With
+    `with_non_inscrits`, returns (pool, non_inscrits): the NI rows under the same
+    filters, minus any text that also occurs elsewhere in its source or in the pool.
 
     Deduplication is two-stage, by design:
       1. WITHIN each source, every text that occurs more than once is removed
@@ -118,13 +126,18 @@ def load_combined():
         "ParlEE":     PARLEE_PARQUET,
         "EU Debates": EU_DEBATES_PARQUET,
     }
-    frames = []
+    frames, ni_frames = [], []
     for name, path in sources.items():
         src = pd.read_parquet(path)
+        is_ni = src["EU Party"] == NI_LABEL
+        repeated = src["text"].duplicated(keep=False)
+        ni_frames.append(src[is_ni & ~repeated])
+        src = src[~is_ni]
         before = len(src)
         src = src.drop_duplicates(subset=["text"], keep=False)
         print(f"  {name}: {before:,} -> {len(src):,} rows "
-              f"(dropped {before - len(src):,} rows with >1 in-source occurrence)")
+              f"(dropped {before - len(src):,} rows with >1 in-source occurrence); "
+              f"{(is_ni & ~repeated).sum():,} NI rows set aside")
         frames.append(src)
 
     df = pd.concat(frames, ignore_index=True)
@@ -141,7 +154,15 @@ def load_combined():
     df = df.dropna(subset=["EU Party"]).reset_index(drop=True)
     print(f"After length + language filter: {len(df):,} rows "
           f"({len(kept_langs)} languages kept)")
-    return df
+    if not with_non_inscrits:
+        return df
+
+    ni = pd.concat(ni_frames, ignore_index=True)
+    ni = ni[~ni["text"].isin(set(df["text"]))].drop_duplicates(subset=["text"])
+    ni = ni[(ni["text"].str.len() >= MIN_TEXT_LEN) & ni["language"].isin(kept_langs)]
+    ni = ni.reset_index(drop=True)
+    print(f"Non-attached (NI) rows after the same filters: {len(ni):,}")
+    return df, ni
 
 
 def pinned_rows(df, pinned):
@@ -239,7 +260,7 @@ def split_dataframe(df, eval_set_size=EVAL_SET_SIZE, seed=RANDOM_STATE, pinned=N
 
 
 def main():
-    df = load_combined()
+    df, non_inscrits = load_combined(with_non_inscrits=True)
     train, dev, test = split_dataframe(df)
 
     print(f"\nTrain: {len(train):,}  Dev: {len(dev):,}  Test: {len(test):,}")
@@ -251,6 +272,10 @@ def main():
         path = OUTPUT_DIR / f"{name}.parquet"
         write_parquet_chunked(split[COLUMNS], path)
         print(f"  Saved {name} -> {path}")
+    # Unsplit: only the national-party track reads these, and it re-splits its own pool.
+    path = OUTPUT_DIR / f"{NON_INSCRITS}.parquet"
+    write_parquet_chunked(non_inscrits[COLUMNS], path)
+    print(f"  Saved {len(non_inscrits):,} non-attached rows -> {path}")
 
 
 if __name__ == "__main__":

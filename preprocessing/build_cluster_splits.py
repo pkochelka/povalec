@@ -135,10 +135,18 @@ def label_mapping(parties):
     return mapping, report
 
 
-def load_pool(input_dir):
-    """The three cleaned splits reunioned into one pool and deduplicated on text."""
-    frames = [pd.read_parquet(input_dir / f"{name}.parquet")[COLUMNS]
-              for name in ("train", "dev", "test")]
+def load_pool(input_dir, non_inscrits=False):
+    """The three cleaned splits reunioned into one pool and deduplicated on text.
+
+    `non_inscrits` also takes in the non-attached rows split_preprocessed_data set aside
+    (EU Party "NI"). Only a track that labels rows by national party can use them; here,
+    relabelled_pool would reject the label."""
+    names = ("train", "dev", "test") + (("non_inscrits",) if non_inscrits else ())
+    missing = [name for name in names if not (input_dir / f"{name}.parquet").exists()]
+    if missing:
+        raise SystemExit(f"{input_dir} has no {', '.join(missing)}.parquet; "
+                         "rebuild from the preprocess step")
+    frames = [pd.read_parquet(input_dir / f"{name}.parquet")[COLUMNS] for name in names]
     pool = pd.concat(frames, ignore_index=True)
     before = len(pool)
     # As in build_collapsed_splits: name-cleaning can make distinct speeches identical.

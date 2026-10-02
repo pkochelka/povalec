@@ -17,8 +17,8 @@ Order
     3  lid-filter   europarl_lid_filter.py      -> multi-europarl-lang_id.csv   [fastText]
     4  chair        find_chair_speeches.py      -> chair_speeches.txt (dropped by step 5)
     5  preprocess   preprocess_data.py          three corpora -> parquet
-    6  split        split_preprocessed_data.py  group-disjoint, balanced splits
-    7  clean-names  clean_party_names.py        -> cleaned/{split}.parquet
+    6  split        split_preprocessed_data.py  group-disjoint, balanced splits (+ non_inscrits)
+    7  clean-names  clean_party_names.py        -> cleaned/{split,non_inscrits}.parquet
     8  collapse     build_collapsed_splits.py   merge ECR+ID, re-split from scratch
 
 PYTHON VERSIONS
@@ -65,6 +65,9 @@ DATA_DIR = PROJECT_ROOT / "data"
 EUROPARL_DIR = DATA_DIR / "EuroParl Custom"
 
 SPLITS = ("train", "dev", "test")
+# Non-attached speeches, set aside unsplit by `split` and name-cleaned by `clean-names`;
+# only the national-party cluster track reads them.
+NON_INSCRITS = "non_inscrits"
 
 # Bindings load_lid_model() in europarl_lid_filter.py tries, in its order.
 FASTTEXT_MODULES = ("fasttext", "fasttext_predict")
@@ -132,12 +135,12 @@ STEPS = [
     Step(
         "split", "split_preprocessed_data.py",
         "group-disjoint, class-balanced train/dev/test",
-        outputs=[EUROPARL_DIR / f"{split}.parquet" for split in SPLITS],
+        outputs=[EUROPARL_DIR / f"{split}.parquet" for split in SPLITS + (NON_INSCRITS,)],
     ),
     Step(
         "clean-names", "clean_party_names.py",
         "repair detached accents; strip EP group names and titled person names",
-        outputs=[EUROPARL_DIR / "cleaned" / f"{split}.parquet" for split in SPLITS],
+        outputs=[EUROPARL_DIR / "cleaned" / f"{split}.parquet" for split in SPLITS + (NON_INSCRITS,)],
     ),
     Step(
         "collapse", "build_collapsed_splits.py",

@@ -94,7 +94,7 @@ def cluster_parties(seed, k=K):
     df = pk.load_parties(PROJECT_ROOT / pk.RAW_CSV)
     pk.check_raw_columns(df, PROJECT_ROOT / pk.PARTIES_CODEBOOK)
     df = df[df["meps"] >= 1].reset_index(drop=True)
-    X = KNNImputer(n_neighbors=5).fit_transform(pk.answer_matrix(df))
+    X = KNNImputer(n_neighbors=5).fit_transform(pk.feature_matrix(df))
     df["cluster"] = pk.order_clusters(pk.fit(X, k, seed).labels_, df)
     df["cluster_name"] = [pk.CLUSTER_NAMES[k][c] for c in df["cluster"]]
 

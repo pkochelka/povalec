@@ -19,8 +19,6 @@ MODELS = [
     #{"model": "openai/gpt-5.6-luna", "model_dir": "gpt-5.6-luna"},
     {"model": "kimi-k3",      "model_dir":"kimi-k3"},
     #{"model": "gemma4",      "model_dir":"gemma-4-31b"},
-    #{"model": "phi4:14b-q8_0",      "model_dir":"phi-4-14b"},
-    #{"model": "gemma4:31b-it-q8_0",      "model_dir":"gemma-4-31b-it"},
     #{"model": "deepseek/deepseek-v4-pro",      "model_dir":"deepseek-v4-pro"},
     #{"model": "mistralai/mistral-small-2603",      "model_dir":"mistral-small-2603"},
     #{"model": "x-ai/grok-4.3",      "model_dir":"grok-4.3"},

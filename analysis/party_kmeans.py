@@ -15,13 +15,15 @@ holds up to s10):
     across groups (PSD-PNL S&D/EPP, GL-PvdA G/EFA/S&D, ...). The party's "real" group is
     the one holding most of its seats; the seat crosstab splits them exactly.
 
-**Features.** All 36 statements, unstandardised -- every item is already on the same
-five-point scale, and z-scoring would up-weight near-consensus items. The repo has text
-for 30 of them (the questionnaire file), and those 30 are not s1..s30 -- see
-RAW_COLUMN_FOR_QUESTIONNAIRE. The other six are clustered on but reported by number.
+**Features.** The 30 statements the VAA track uses (FEATURE_COLS), unstandardised --
+every item is already on the same five-point scale, and z-scoring would up-weight
+near-consensus items. The raw file has 36; the six the questionnaire leaves out are not
+clustered on, so the clusters are fitted on exactly the statements their positions and
+the models' answers are compared over. Those 30 are not s1..s30 -- see
+RAW_COLUMN_FOR_QUESTIONNAIRE.
 
 **Missing answers.** ~8% of cells for the MEP-holding parties, concentrated in a handful
-of parties (one misses 25 of 36). k-means needs complete rows, so gaps are filled by
+of parties (one misses most of them). k-means needs complete rows, so gaps are filled by
 KNN imputation (5 nearest parties, nan-euclidean). Filling with 0 would drag sparse
 parties toward the centre and manufacture a "moderate" cluster. `--max-missing` drops
 sparse parties instead, which is the sensitivity check for this choice.
@@ -64,6 +66,8 @@ S_COLS = [f"s{i}" for i in range(1, N_STATEMENTS + 1)]
 RAW_COLUMN_FOR_QUESTIONNAIRE = [f"s{i}" for i in (
     1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 15, 16, 17,
     18, 19, 20, 22, 23, 24, 25, 27, 28, 29, 30, 31, 34, 35, 36)]
+# What k-means is fitted on: the VAA track's 30, not all 36 raw statements.
+FEATURE_COLS = RAW_COLUMN_FOR_QUESTIONNAIRE
 SEAT_COLS = [("POLITICAL_GROUP_1", "MEPs_1"), ("POLITICAL_GROUP_2", "MEPs_2"),
              ("POLITICAL_GROUP_3", "MEPs_3")]
 # The raw file's own 0-100 summary placements, used to read the clusters, not to fit them.
@@ -109,10 +113,15 @@ def load_parties(path: Path) -> pd.DataFrame:
     return df
 
 
-def answer_matrix(df: pd.DataFrame) -> np.ndarray:
-    raw = df[S_COLS].to_numpy(dtype=float)
+def answer_matrix(df: pd.DataFrame, cols: list[str] = S_COLS) -> np.ndarray:
+    raw = df[cols].to_numpy(dtype=float)
     raw[raw < 0] = np.nan
     return raw / 50.0 - 1.0
+
+
+def feature_matrix(df: pd.DataFrame) -> np.ndarray:
+    """The k-means input, before imputation: FEATURE_COLS on [-1, 1], NaN = no answer."""
+    return answer_matrix(df, FEATURE_COLS)
 
 
 def statement_texts(path: Path) -> dict[str, str]:
@@ -313,7 +322,7 @@ def describe_clusters(df: pd.DataFrame, X: np.ndarray, texts: dict[str, str], to
         diff = centroid - overall
         print("  most distinctive statements (cluster mean vs all, on -1..1):")
         for i in np.argsort(-np.abs(diff))[:top]:
-            s = S_COLS[i]
+            s = FEATURE_COLS[i]
             print(f"    {s:>4} {centroid[i]:+.2f} ({diff[i]:+.2f})  {texts.get(s, '[text not in repo]')}")
         biggest = sub.nlargest(12, "meps")
         print("  largest members: " + ", ".join(f"{r.label} {r.meps}" for r in biggest.itertuples()))
@@ -324,7 +333,7 @@ def main():
     parser.add_argument("--k", type=int, help="override the automatic choice of k")
     parser.add_argument("--min-stability", type=float, default=0.75,
                         help="mean bootstrap ARI a k must reach to be eligible")
-    parser.add_argument("--max-missing", type=int, default=N_STATEMENTS,
+    parser.add_argument("--max-missing", type=int, default=len(FEATURE_COLS),
                         help="drop parties with more unanswered statements than this")
     parser.add_argument("--n-boot", type=int, default=100)
     parser.add_argument("--seed", type=int, default=0)
@@ -335,7 +344,7 @@ def main():
     df = load_parties(RAW_CSV)
     check_raw_columns(df)
     df = df[df["meps"] >= 1].reset_index(drop=True)
-    raw = answer_matrix(df)
+    raw = feature_matrix(df)
     n_missing = np.isnan(raw).sum(axis=1)
     keep = n_missing <= args.max_missing
     df, raw = df[keep].reset_index(drop=True), raw[keep]

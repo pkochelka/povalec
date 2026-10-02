@@ -24,6 +24,12 @@ Outputs (under --out-dir, inside the gitignored data/ tree):
 Usage, from the repository root with the package installed:
   python analysis/vaa_null_model_topics.py
   python analysis/vaa_null_model_topics.py --source speeches
+  python analysis/vaa_null_model_topics.py --clusters mean      # k=4 clusters, see below
+
+`--clusters mean|parties` scores against the k=4 party clusters instead of the EP groups,
+with the cluster positions of vaa_null_model_clusters.py (`--pooling` there; `--weight
+seats` needs `mean`). Those outputs are named null_model_topics_clusters_<pooling>_
+<weight>_<source>_*.
 """
 import argparse
 from pathlib import Path
@@ -97,8 +103,10 @@ def render_summary(table, groups, models, topic_rows, args, sigma):
     focus = args.focus
     lines = [
         f"# VAA null model by topic -- {args.source} track", "",
-        f"Positions: `{args.positions}`, ECR+ID "
-        f"{'separate' if args.no_collapse_ecr_id else 'collapsed'}. Null draws: {args.draws} "
+        f"Positions: `{args.positions}`"
+        + ("" if args.clusters else
+           f", ECR+ID {'separate' if args.no_collapse_ecr_id else 'collapsed'}")
+        + f". Null draws: {args.draws} "
         f"per null and level, seed {args.seed}, normal null sigma = {sigma:.3f}. Statements "
         "per topic in parentheses; a statement can load on several topics.", "",
         "Win share = share of vectors (or cells) the group has the highest agreement on over "
@@ -210,10 +218,20 @@ def main():
     parser.add_argument("--sigma", type=float, default=DEFAULT_SIGMA,
                         help="Stance std of the normal null, in stance units where one Likert "
                              "step is 0.5.")
-    parser.add_argument("--focus", default="S&D", help="Group for the overview tables.")
+    parser.add_argument("--focus", default=None,
+                        help="Group for the overview tables (default: S&D, or its cluster).")
+    parser.add_argument("--clusters", default=None, choices=["mean", "parties"],
+                        help="Score against the k=4 clusters with this pooling instead of "
+                             "the EP groups (see vaa_null_model_clusters.py).")
+    parser.add_argument("--weight", default="equal", choices=["equal", "seats"],
+                        help="Party weights in the cluster mean (--clusters mean only).")
     parser.add_argument("--out-dir", default=None,
                         help="default: data/<dataset>_results/tables/null_model")
     args = parser.parse_args()
+    if args.clusters == "parties" and args.weight == "seats":
+        parser.error("--weight seats needs --clusters mean (party rows are averaged unweighted)")
+    if args.weight == "seats" and not args.clusters:
+        parser.error("--weight only applies with --clusters")
 
     results_root = Path("data") / f"{args.dataset}_results"
     model_dirs = [results_root / m for m in args.models]
@@ -224,8 +242,23 @@ def main():
     print(f"Loading real {args.source} runs")
     runs = load_runs(model_dirs, args.source)
     models = [m for m in args.models if m in runs.index.get_level_values("model")]
-    P, party_group, groups = positions_tensor(args.positions, not args.no_collapse_ecr_id,
-                                              runs.shape[1])
+    if args.clusters:
+        from analysis import vaa_null_model_clusters as vc
+        parties = vc.cluster_parties(0, vc.K)
+        P, party_group, groups = vc.cluster_tensor(
+            parties, vc.party_answers(parties, runs.shape[1]), args.clusters, args.weight)
+        groups = list(groups)
+        args.focus = args.focus or vc.DEFAULT_FOCUS
+        # render_summary prints these two in its "Positions:" line.
+        args.positions = (f"k={vc.K} clusters, {args.weight}-weighted national-party mean"
+                          if args.clusters == "mean" else f"k={vc.K} clusters, member parties as rows")
+        args.no_collapse_ecr_id = False
+        stem = f"null_model_topics_clusters_{args.clusters}_{args.weight}_{args.source}"
+    else:
+        P, party_group, groups = positions_tensor(args.positions, not args.no_collapse_ecr_id,
+                                                  runs.shape[1])
+        args.focus = args.focus or "S&D"
+        stem = f"null_model_topics_{args.source}"
     topic_rows = {axis: rows for axis, rows in
                   statement_rows_per_axis(args.dataset, runs.shape[1]).items() if len(rows)}
     sigma = args.sigma
@@ -242,7 +275,6 @@ def main():
     real = real_levels(runs)
     table = score_topics(real, null, P, party_group, groups, args.source, topic_rows)
 
-    stem = f"null_model_topics_{args.source}"
     table.to_csv(out_dir / f"{stem}_win_shares.csv", index=False)
     summary = render_summary(table, groups, models, topic_rows, args, sigma)
     (out_dir / f"{stem}_summary.md").write_text(summary, encoding="utf-8")

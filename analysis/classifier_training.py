@@ -268,11 +268,12 @@ def train_and_evaluate(data, tokenizer, hf_token, device):
     best_epoch = max(1, round(best["epoch"]))
     print(f"Best dev {BEST_METRIC}={best[f'eval_{BEST_METRIC}']:.4f} at epoch {best_epoch}")
 
-    # Per-class bias that flattens the argmax marginal to uniform, fit on dev only.
+    # Per-class bias that matches the argmax marginal to the dev label shares, fit on dev only.
     metrics_fn.current_languages = data.dev_langs
-    dev_logits = trainer.predict(data.dev).predictions
-    biases = fit_uniform_bias(dev_logits, data.num_labels)
-    print("Uniform-marginal bias (fit on dev): "
+    dev_predictions = trainer.predict(data.dev)
+    dev_shares = np.bincount(dev_predictions.label_ids, minlength=data.num_labels)
+    biases = fit_uniform_bias(dev_predictions.predictions, data.num_labels, target=dev_shares)
+    print("Dev-marginal bias (fit on dev): "
           + ", ".join(f"{name}={b:+.3f}" for name, b in zip(data.target_names, biases)))
 
     metrics_fn.current_languages = data.test_langs

@@ -194,8 +194,8 @@ def main():
 
     bias = np.zeros(len(labels))
     if args.calibrate:
-        dev_logits, _, _ = logits_for(args.calibrate_split)
-        bias = fit_uniform_bias(dev_logits, len(labels))
+        dev_logits, dev_y, _ = logits_for(args.calibrate_split)
+        bias = fit_uniform_bias(dev_logits, len(labels), target=np.bincount(dev_y, minlength=len(labels)))
         print("\n=== Per-class logit bias (fit on " + args.calibrate_split + ") ===")
         for label, b in zip(labels, bias):
             print(f"  {label:<14}{b:+.4f}")

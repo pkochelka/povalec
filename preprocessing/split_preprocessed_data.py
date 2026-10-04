@@ -102,6 +102,35 @@ def carve(sub, targets, rng, max_share=MAX_EVAL_SHARE, max_group_share=MAX_EVAL_
     return np.concatenate(selected), leftover
 
 
+def trim_to_language_floor(df, idx, rng, required=()):
+    """Cut an eval split down to equal party counts within every language.
+
+    carve() fills each (party, language) quota only as far as its caps allow, so a
+    party thin in a language (Radical left in Romanian) ends up short there and the
+    split's class marginal drifts from uniform. Each language is trimmed to its
+    smallest party count, which makes the split balanced by construction, overall and
+    per language. `required` rows (the pinned sample) are never trimmed; a cell whose
+    pinned rows alone exceed the floor keeps them and is reported.
+
+    The trimmed rows are dropped, not returned to train: their speech groups are
+    already claimed by this split, so the rest of each group is in it."""
+    required = set(pd.Index(required).intersection(idx))
+    cells = df.loc[idx, ["EU Party", "language"]]
+    floor = cells.groupby(["language", "EU Party"], observed=True).size() \
+                 .unstack(fill_value=0).min(axis=1)
+    keep = []
+    for (party, lang), rows in cells.groupby(["EU Party", "language"], observed=True).groups.items():
+        rows = rows.to_numpy()
+        pinned = np.array([r for r in rows if r in required], dtype=rows.dtype)
+        free = np.array([r for r in rows if r not in required], dtype=rows.dtype)
+        take = max(0, int(floor[lang]) - len(pinned))
+        if len(pinned) > floor[lang]:
+            print(f"  WARNING: {party}/{lang} keeps {len(pinned)} pinned rows, above the "
+                  f"language floor of {int(floor[lang])}")
+        keep.extend([pinned, rng.choice(free, size=min(take, len(free)), replace=False)])
+    return np.concatenate(keep)
+
+
 def load_combined(with_non_inscrits=False):
     """Merge the three preprocessed sources and apply dedup / length / language
     filters.
@@ -199,6 +228,10 @@ def split_dataframe(df, eval_set_size=EVAL_SET_SIZE, seed=RANDOM_STATE, pinned=N
     claimed first by the test carve, and the pinned rows themselves are always selected.
     They count toward test's per-party, per-language quotas, so test stays balanced.
 
+    After carving, dev and test are each trimmed to the smallest party count in every
+    language (trim_to_language_floor), so both are exactly class-uniform; expect them
+    to come out below `eval_set_size` when a party is thin in some language.
+
     `df` must already be deduped/filtered and carry the date/EU Party/text/
     language/speaker columns. A speech `group` (speaker+date) never crosses
     splits, so no translation of a speech can leak between train and dev/test.
@@ -253,10 +286,19 @@ def split_dataframe(df, eval_set_size=EVAL_SET_SIZE, seed=RANDOM_STATE, pinned=N
         test_parts.append(test_idx)
         train_parts.append(rest2.index.to_numpy())
 
+    # carve() leaves parties short where its caps bind; level every language to its
+    # smallest party so dev and test are uniform over classes.
+    splits = {}
+    for name, parts, req in [("dev", dev_parts, ()), ("test", test_parts, required)]:
+        carved = np.concatenate(parts)
+        kept = trim_to_language_floor(df, carved, rng, required=req)
+        counts = df.loc[kept, "EU Party"].value_counts()
+        print(f"  {name}: {len(carved):,} carved -> {len(kept):,} after per-language "
+              f"floor trim ({counts.min():,}-{counts.max():,} per party)")
+        splits[name] = df.loc[kept]
+
     train = df.loc[np.concatenate(train_parts)]
-    dev   = df.loc[np.concatenate(dev_parts)]
-    test  = df.loc[np.concatenate(test_parts)]
-    return train, dev, test
+    return train, splits["dev"], splits["test"]
 
 
 def main():

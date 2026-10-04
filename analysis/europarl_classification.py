@@ -27,12 +27,17 @@ def load_split(split, data_dir, max_chars=None, keep_labels=None):
     return df.reset_index(drop=True)
 
 
-def fit_uniform_bias(logits, num_labels, iters=500, lr=0.5, eps=1e-9):
+def fit_uniform_bias(logits, num_labels, iters=500, lr=0.5, eps=1e-9, target=None):
     """Additive per-class logit bias so that argmax(logits + bias) has a uniform
     marginal. Iterative prior-shift matching; keeps the bias whose hard prediction
     histogram is closest (L1) to uniform. Fit on the uniform dev split, applied at
-    inference to undo the trained model's residual majority-class lean."""
-    target = np.full(num_labels, 1.0 / num_labels)
+    inference to undo the trained model's residual majority-class lean.
+
+    `target` overrides the uniform marginal, e.g. with the dev label shares when a
+    class is short in dev; forcing 1/K onto it would over-predict that class."""
+    if target is None:
+        target = np.full(num_labels, 1.0 / num_labels)
+    target = np.asarray(target, dtype=float) / np.sum(target)
     target_log = np.log(target)
     bias = np.zeros(num_labels)
     best_bias, best_dist = bias.copy(), np.inf

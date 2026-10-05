@@ -4,7 +4,9 @@
 `rank_consistency_tables.py` and `refusal_analysis.py` imported a 1560-line plotting
 module — pulling in matplotlib and its module-level state — to spell a model's name.
 """
-from utils import PARTY_DISPLAY_ORDER
+import re
+
+from utils import PARTY_DISPLAY_ORDER, PARTY_SHORT
 
 MODEL_DISPLAY_NAME = {
     "deepseek-v4-pro": "DeepSeek V4 Pro",
@@ -39,6 +41,43 @@ def party_sort_key(party):
     """Sort EP groups left-to-right as every figure orders them, unknowns last."""
     return (PARTY_DISPLAY_ORDER.index(party) if party in PARTY_DISPLAY_ORDER
             else len(PARTY_DISPLAY_ORDER), party)
+
+
+# Longest name first, so no full name is matched inside another.
+_PARTY_SHORT_RE = re.compile("|".join(
+    re.escape(name) for name in sorted(PARTY_SHORT, key=len, reverse=True)))
+
+
+def short_party(text):
+    """Any text with the cluster names swapped for their nicknames (PARTY_SHORT):
+    "Radical left" -> "Rad-left", also inside "Radical left (n=120)". Display only --
+    never apply it to a value that is looked up, joined on or written to a data file."""
+    if not isinstance(text, str):
+        return text
+    return _PARTY_SHORT_RE.sub(lambda match: PARTY_SHORT[match.group(0)], text)
+
+
+def use_short_party_labels():
+    """Make every matplotlib text in this process show the cluster nicknames.
+
+    The full names reach a figure through tick labels, legends, titles, annotations and
+    heatmap axes in some twenty scripts; renaming each of those paths would miss one.
+    Every matplotlib Text sets its string through Text.set_text (the constructor too), so
+    shortening there covers them all -- and it happens before layout, so tight_layout,
+    legend measuring and bbox_inches="tight" size the figure for the short names.
+    Colours and orders stay keyed by the full names, which the data still carries.
+    Call once per script, after importing matplotlib; repeated calls are harmless."""
+    from matplotlib.text import Text
+
+    if getattr(Text.set_text, "_shortens_parties", False):
+        return
+    original = Text.set_text
+
+    def set_text(self, s):
+        return original(self, short_party(s))
+
+    set_text._shortens_parties = True
+    Text.set_text = set_text
 
 
 def count(n, noun):

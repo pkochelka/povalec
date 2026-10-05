@@ -26,6 +26,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
+from analysis.core.labels import use_short_party_labels
+use_short_party_labels()   # cluster nicknames in every label (utils.PARTY_SHORT)
 import numpy as np
 import pyarrow.parquet as pq
 

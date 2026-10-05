@@ -76,6 +76,16 @@ PARTY_COLORS = {
     "Sovereigntist right":               "#2B3856",
 }
 FALLBACK_PARTY_COLOR = "#888888"
+# Display-only nicknames for the k=4 clusters: the full names took most of a figure's
+# width. Data, model labels and file names keep the full names; figures and tables
+# shorten them at the last moment (analysis.core.labels.short_party). The paper spells
+# the full names out once.
+PARTY_SHORT = {
+    "Radical left":                      "Rad-left",
+    "Progressive federalists":           "Prog-fed",
+    "Liberal-conservative centre-right": "Lib-con",
+    "Sovereigntist right":               "Sov-right",
+}
 
 # EU&I party short_name -> EP group. The EU-level ("europarty") half is separate from the
 # national half because only the first is invertible: every EP group has exactly one

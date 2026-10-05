@@ -4,6 +4,8 @@ from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
+from analysis.core.labels import use_short_party_labels
+use_short_party_labels()   # cluster nicknames in every label (utils.PARTY_SHORT)
 import pandas as pd
 
 from utils import VARIANT_LABELS, VARIANT_PATTERN

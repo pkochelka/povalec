@@ -19,6 +19,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.patheffects
 import matplotlib.pyplot as plt
+from analysis.core.labels import short_party, use_short_party_labels
+use_short_party_labels()   # cluster nicknames in every label (utils.PARTY_SHORT)
 import numpy as np
 import pandas as pd
 
@@ -131,7 +133,7 @@ def format_position(value):
 def position_table_rows(groups, dims):
     indexed = groups.set_index("ep_group")
     return [
-        [group, *(format_position(indexed.at[group, dimension]) for dimension in dims)]
+        [short_party(group), *(format_position(indexed.at[group, dimension]) for dimension in dims)]
         for group in ordered_groups(groups)
     ]
 

@@ -31,6 +31,8 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from analysis.core.labels import use_short_party_labels
+use_short_party_labels()   # cluster nicknames in every label (utils.PARTY_SHORT)
 from matplotlib.patches import Patch
 
 from analysis.core import MODEL_DISPLAY_NAME, model_display_name

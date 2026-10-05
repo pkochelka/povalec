@@ -14,7 +14,7 @@ import re
 import numpy as np
 import pandas as pd
 
-from analysis.core import model_display_name
+from analysis.core import model_display_name, short_party
 from analysis.stats import (
     kendall_pvalue,
     pair_indices,
@@ -82,7 +82,7 @@ def concordance_body(spec, jobs, observed, replicates, parties, args):
             format_metric(values, sampled, "w"),
             format_metric(values, sampled, "icc"),
             format_metric(values, sampled, "top1", percent=True),
-            parties[values["winner"]],
+            short_party(parties[values["winner"]]),
         ]
         if args.pvalues:
             cells.insert(dimensions + 3,

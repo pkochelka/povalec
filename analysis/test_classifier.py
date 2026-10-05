@@ -26,6 +26,8 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from analysis.core.labels import use_short_party_labels
+use_short_party_labels()   # cluster nicknames in every label (utils.PARTY_SHORT)
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -162,8 +164,8 @@ def parse_args():
     parser.add_argument("--batch_size", default=32, type=int)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--calibrate", action="store_true",
-                        help="Fit a per-class logit bias on --calibrate_split to flatten the "
-                             "predicted marginal toward uniform, then apply it to --split.")
+                        help="Fit a per-class logit bias on --calibrate_split that matches the "
+                             "predicted marginal to that split's label shares, then apply it to --split.")
     parser.add_argument("--calibrate_split", default="dev")
     parser.add_argument("--plot", default=None, nargs="?", const="",
                         help="Save the row-normalised confusion matrix as a PNG. With no "

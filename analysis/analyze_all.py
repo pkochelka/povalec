@@ -138,7 +138,9 @@ PER_DATASET_TABLE_SCRIPTS = [
       "--output", os.path.join(TABLES_PLACEHOLDER, "vaa_agreement_ci.md")]),
     ("compare_position_bases.py", _DIR,
      [*_MODELS_ARG, "--collapse-ecr-id", "--languages", LANGUAGES,
-      "--output", os.path.join(TABLES_PLACEHOLDER, "position_bases_comparison.md")]),
+      "--output", os.path.join(TABLES_PLACEHOLDER, "position_bases_comparison.md")]),    # Reads plots/argmax_share_methods.csv, which plot_argmax_shares.py writes above.
+    ("argmax_share_table.py", os.path.join(_DIR, "tables"),
+     ["--output", os.path.join(TABLES_PLACEHOLDER, "argmax_share_table.tex")]),
 ]
 
 

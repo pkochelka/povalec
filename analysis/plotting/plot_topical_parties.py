@@ -22,6 +22,8 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from analysis.core.labels import use_short_party_labels
+use_short_party_labels()   # cluster nicknames in every label (utils.PARTY_SHORT)
 
 from analysis import plotting  # noqa: F401  (package import for the module below)
 from analysis.plotting import plot_classified_parties as pcp

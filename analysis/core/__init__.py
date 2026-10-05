@@ -11,7 +11,10 @@ statistics and table builder — imported eighteen loaders from
 matplotlib and a figure module's state, and a plot script was the authority on how a
 results CSV is read.
 """
-from .labels import MODEL_DISPLAY_NAME, count, model_display_name, party_sort_key
+from .labels import (
+    MODEL_DISPLAY_NAME, count, model_display_name, party_sort_key, short_party,
+    use_short_party_labels,
+)
 from .paths import (
     CHOICE_COLUMN,
     FRAMING_FOR_VARIANT,

@@ -72,7 +72,7 @@ def load_bloc_replicates(model_dirs, bloc_df, languages, bootstrap_draws, seed):
 
 def plot_bloc_boxes(replicates_per_model, output_path, ylim, title):
     """plot_models_party_boxes with the bloc order fixed: the shared PARTY_DISPLAY_ORDER
-    knows GUE/NGL and ECR+ID but not the two merged centre blocs, and would sort them
+    knows GUE/NGL and ECR+ID but not the two merged center blocs, and would sort them
     to the end."""
     models = sorted(replicates_per_model)
     model_cmap = plt.get_cmap("tab20", max(len(models), 2))

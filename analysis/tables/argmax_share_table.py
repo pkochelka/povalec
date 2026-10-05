@@ -11,11 +11,11 @@ nothing is recomputed here. The blocks are laid out side by side in `--columns` 
 so the table fills the page width rather than running down a whole column.
 
 When the null-model outputs are present it also writes a second table, every share minus
-its 0-centred normal null: vaa_null_model_argmax.py's for the Direct and Indirect rows,
+its 0-centered normal null: vaa_null_model_argmax.py's for the Direct and Indirect rows,
 classifier_null_model.py's (the same stance distribution, carried over to the
 classifier) for Reasons and Prose. The Mean row is then the mean of the four
 differences. A positive cell is a share a group wins beyond what random stances around
-the centre would already give it.
+the center would already give it.
 
     python -m analysis.tables.argmax_share_table --dataset euandi_2024
 """
@@ -57,7 +57,7 @@ def load_shares(csv_path, variant):
 
 def load_nulls(null_dir, positions, variant):
     """Null share per method label (rows) and group (columns), or None when either null
-    is missing. The VAA null is framing-free (a 0-centred null is symmetric under
+    is missing. The VAA null is framing-free (a 0-centered null is symmetric under
     negation), so it serves every variant; the classifier null is read per variant."""
     vaa_path = null_dir / f"null_model_argmax{output_suffix(positions)}_shares.csv"
     classifier_path = null_dir / f"{output_stem(positions)}_shares.csv"
@@ -241,14 +241,14 @@ def main():
     if nulls is None:
         return
     caption = (
-        "Argmax share of each group minus its 0-centred null (percentage points), per "
+        "Argmax share of each group minus its 0-centered null (percentage points), per "
         "evaluation method and their mean; the largest value in each row is in bold. The null "
         "draws every stance from a normal distribution around the neutral answer "
         "($\\sigma$ = one Likert step): for Direct and Indirect as random Likert answers "
         "scored against the positions, for Reasons and Prose as the classifier's group "
         "shares per statement and stance level, reweighted to the same stance distribution. "
         "Positive values are shares a group wins beyond its position relative to the "
-        "centre. " + methods_note)
+        "center. " + methods_note)
     tex = render(minus_null(shares, nulls)[parties], parties, args.columns, caption,
                  "tab:argmax_shares_minus_null", signed=True)
     null_output = output.with_name(f"{output.stem}_minus_null{output.suffix}")

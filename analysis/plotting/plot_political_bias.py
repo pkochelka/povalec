@@ -997,7 +997,7 @@ def draw_axis_anchors(ax, anchors, dim):
         box = annotation.get_window_extent(renderer)
         # A group sitting at either end of the axis would otherwise hang off the panel --
         # and on a grid, straight into the neighbouring one. Pull it back inside; the
-        # line it names is right there, so a centred name is not worth a collision.
+        # line it names is right there, so a centered name is not worth a collision.
         shift = max(0.0, panel.x0 - box.x0) - max(0.0, box.x1 - panel.x1)
         span = (box.x0 + shift - ANCHOR_LANE_PAD, box.x1 + shift + ANCHOR_LANE_PAD)
         lane = next((i for i, taken in enumerate(lanes)

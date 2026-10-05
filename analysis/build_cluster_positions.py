@@ -7,7 +7,7 @@ the EU&I 2024 party answers -- the same labels the cluster-track classifiers
 (runs/<track>-k4-<trainer>) predict, so VAA agreement and classifier probabilities are
 reported over one set of groups:
 
-    Radical left | Progressive federalists | Liberal-conservative centre-right |
+    Radical left | Progressive federalists | Liberal-conservative center-right |
     Sovereigntist right
 
 A cluster's position on a statement is the mean of its member parties' answers, each
@@ -100,7 +100,7 @@ def main() -> None:
         rms = float(np.sqrt(np.mean(np.square(values)))) if values else float("nan")
         print(f"  {record['ep_group']:<34} {len(record['member_parties']):>3} parties, "
               f"{record['meps']:>3} MEPs, {answered}/{len(record['responses'])} statements, "
-              f"RMS from centre {rms:.3f}")
+              f"RMS from center {rms:.3f}")
 
 
 if __name__ == "__main__":

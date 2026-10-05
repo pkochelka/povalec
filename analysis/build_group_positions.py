@@ -80,7 +80,7 @@ def mean_responses(members: list[dict], statements: list[str]) -> list[dict]:
 
     A statement no member answered keeps a `normalized_answer` of `null` rather than a
     zero: zero is a real position on this scale ("neutral") and inventing it would pull
-    the group toward the centre of every axis the statement loads on.
+    the group toward the center of every axis the statement loads on.
     """
     answers: dict[int, list[float]] = {}
     for party in members:

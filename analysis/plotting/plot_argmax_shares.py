@@ -479,7 +479,7 @@ def side_by_side_shape(figure, renderer, blocks, legend_font_scale, room, stacke
 
 def place_legends_side_by_side(figure, renderer, panel, top, blocks, legend_font_scale,
                                gap=0.02, margin=0.005):
-    """Set the legends in one row under the panel, centred on it. True if they fit.
+    """Set the legends in one row under the panel, centered on it. True if they fit.
 
     `gap` and `margin` are fractions of the figure's width: the space kept between the
     legends, and the space kept outside them. The row is measured against the FIGURE rather
@@ -505,10 +505,10 @@ def place_legends_side_by_side(figure, renderer, panel, top, blocks, legend_font
     ncols, widths = shape
 
     total = sum(widths) + gap_pixels * (len(blocks) - 1)
-    # Centred on the panel where there is room for that, and pushed back inside the figure
-    # where there is not -- an off-centre row reads as a mistake, a clipped one as damage.
-    centred = figure_pixels * (panel.x0 + panel.width / 2) - total / 2
-    left = min(max(centred, margin * figure_pixels),
+    # Centered on the panel where there is room for that, and pushed back inside the figure
+    # where there is not -- an off-center row reads as a mistake, a clipped one as damage.
+    centered = figure_pixels * (panel.x0 + panel.width / 2) - total / 2
+    left = min(max(centered, margin * figure_pixels),
                figure_pixels * (1 - margin) - total)
     for (handles, title, _), ncol, width in zip(blocks, ncols, widths):
         figure.legend(
@@ -533,10 +533,10 @@ def stack_legends_below(ax, blocks, legend_font_scale, gap=0.04, side_by_side=Fa
     the fraction is not. Here the tick labels are drawn first and measured, each legend is
     placed below the last thing measured, and the arithmetic then holds at any type size.
 
-    These legends are also centred under the panel rather than expanded to its width: an
+    These legends are also centered under the panel rather than expanded to its width: an
     expanded legend gives every column the same slice of the width whatever is in it, and
     at this type size a patch plus a label overruns the slice and prints over the next
-    column. Centred, the columns are sized to their contents instead.
+    column. Centered, the columns are sized to their contents instead.
 
     The measurement is against where the axes finally sits, so the layout is settled
     before measuring. The legends then hang off the figure rather than the axes, and are

@@ -119,15 +119,15 @@ def ranks_ascending(values):
 
 def pearson_matrix(vectors):
     """Pairwise Pearson correlation between raters' vectors, (..., raters,
-    raters), over the last axis -- the Gram matrix of the centred, unit-norm
+    raters), over the last axis -- the Gram matrix of the centered, unit-norm
     rows. Used both for Spearman rho (on re-ranked data, see spearman_matrix)
     and directly on data that must NOT be re-ranked, such as the concatenated
     per-language rank blocks the language-stratified rho is built from: ranking
     that concatenation as one vector would destroy the per-language grouping
     (see language_pair_rho)."""
-    centred = vectors - vectors.mean(axis=-1, keepdims=True)
-    norms = np.sqrt((centred ** 2).sum(axis=-1, keepdims=True))
-    unit = safe_divide(centred, norms)
+    centered = vectors - vectors.mean(axis=-1, keepdims=True)
+    norms = np.sqrt((centered ** 2).sum(axis=-1, keepdims=True))
+    unit = safe_divide(centered, norms)
     return unit @ np.swapaxes(unit, -1, -2)
 
 

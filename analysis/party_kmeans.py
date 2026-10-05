@@ -25,7 +25,7 @@ RAW_COLUMN_FOR_QUESTIONNAIRE.
 **Missing answers.** ~8% of cells for the MEP-holding parties, concentrated in a handful
 of parties (one misses most of them). k-means needs complete rows, so gaps are filled by
 KNN imputation (5 nearest parties, nan-euclidean). Filling with 0 would drag sparse
-parties toward the centre and manufacture a "moderate" cluster. `--max-missing` drops
+parties toward the center and manufacture a "moderate" cluster. `--max-missing` drops
 sparse parties instead, which is the sensitivity check for this choice.
 
 **Choosing k (2..7).** Silhouette, Calinski-Harabasz, Davies-Bouldin, the inertia

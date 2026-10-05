@@ -81,9 +81,9 @@ K_RANGE = range(2, 8)
 # the LR_ECON order `order_clusters` fixes; they only hold for the default seed/imputation.
 CLUSTER_NAMES = {
     2: ["Pro-European mainstream", "Sovereigntist right"],
-    3: ["Progressive left", "Sovereigntist right", "Liberal-conservative centre-right"],
+    3: ["Progressive left", "Sovereigntist right", "Liberal-conservative center-right"],
     4: ["Radical left", "Progressive federalists", "Sovereigntist right",
-        "Liberal-conservative centre-right"],
+        "Liberal-conservative center-right"],
 }
 
 # Reference categorical palette (dataviz skill, light mode), in fixed slot order. A

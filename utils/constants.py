@@ -57,7 +57,7 @@ AXES = ["Ukraine", "Ecology", "Immigration", "Values", "Economy", "Europe", "Lef
 # left-to-right too; each borrows the colour of the EP group holding most of its seats.
 PARTY_DISPLAY_ORDER = ["GUE/NGL", "S&D", "Greens/EFA", "ALDE", "PPE", "ECR", "ID", "ECR+ID",
                        "Radical left", "Progressive federalists",
-                       "Liberal-conservative centre-right", "Sovereigntist right"]
+                       "Liberal-conservative center-right", "Sovereigntist right"]
 PARTY_COLORS = {
     # GUE/NGL's own colour is a dark red a shade away from S&D's -- the two were
     # indistinguishable side by side. Pushed towards magenta: still a red of the left,
@@ -72,7 +72,7 @@ PARTY_COLORS = {
     "ECR+ID":     "#164B75",
     "Radical left":                      "#8E1B6B",
     "Progressive federalists":           "#E2061D",
-    "Liberal-conservative centre-right": "#3399FF",
+    "Liberal-conservative center-right": "#3399FF",
     "Sovereigntist right":               "#2B3856",
 }
 FALLBACK_PARTY_COLOR = "#888888"
@@ -83,7 +83,7 @@ FALLBACK_PARTY_COLOR = "#888888"
 PARTY_SHORT = {
     "Radical left":                      "Rad-left",
     "Progressive federalists":           "Prog-fed",
-    "Liberal-conservative centre-right": "Lib-con",
+    "Liberal-conservative center-right": "Lib-con",
     "Sovereigntist right":               "Sov-right",
 }
 

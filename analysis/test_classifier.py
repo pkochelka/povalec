@@ -26,7 +26,7 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from analysis.core.labels import use_short_party_labels
+from analysis.core.labels import party_sort_key, use_short_party_labels
 use_short_party_labels()   # cluster nicknames in every label (utils.PARTY_SHORT)
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -90,6 +90,10 @@ def plot_confusion_matrix(y_true, y_pred, labels, output_path, subtitle=""):
     and the off-diagonal darkness then shows which pairs the model confuses. Counts
     ride along under each percentage so a cell can be checked against the support."""
     cm = confusion_matrix(y_true, y_pred, labels=range(len(labels)))
+    # Left-to-right, as every other figure orders the groups, not by label id.
+    order = sorted(range(len(labels)), key=lambda i: party_sort_key(labels[i]))
+    cm = cm[np.ix_(order, order)]
+    labels = [labels[i] for i in order]
     row_sums = cm.sum(axis=1, keepdims=True)
     recall = np.divide(cm, row_sums, out=np.zeros_like(cm, dtype=float), where=row_sums > 0)
 

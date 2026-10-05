@@ -100,5 +100,5 @@ JUDGE_COLUMNS = ["paraphrase", "language", "variant", "statement", "llm_stance"]
 SLUG_TO_LABEL = {"ECR_ID": "ECR+ID", "GUE_NGL": "GUE/NGL", "Greens_EFA": "Greens/EFA", "S_D": "S&D",
                  # the k=4 cluster labels of the cluster-track classifiers
                  "Radical_left": "Radical left", "Progressive_federalists": "Progressive federalists",
-                 "Liberal_conservative_centre_right": "Liberal-conservative centre-right",
+                 "Liberal_conservative_center_right": "Liberal-conservative center-right",
                  "Sovereigntist_right": "Sovereigntist right"}

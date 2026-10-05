@@ -138,9 +138,14 @@ PER_DATASET_TABLE_SCRIPTS = [
       "--output", os.path.join(TABLES_PLACEHOLDER, "vaa_agreement_ci.md")]),
     ("compare_position_bases.py", _DIR,
      [*_MODELS_ARG, "--collapse-ecr-id", "--languages", LANGUAGES,
-      "--output", os.path.join(TABLES_PLACEHOLDER, "position_bases_comparison.md")]),    # Reads plots/argmax_share_methods.csv, which plot_argmax_shares.py writes above.
+      "--output", os.path.join(TABLES_PLACEHOLDER, "position_bases_comparison.md")]),    # The 0-centred null of every argmax method, VAA and classifier, which the table
+    # below subtracts; both are cheap (CPU, minutes) and named by the positions basis.
+    ("vaa_null_model_argmax.py", _DIR, _POSITIONS_ARGS),
+    ("classifier_null_model.py", _DIR, _POSITIONS_ARGS),
+    # Reads plots/argmax_share_methods.csv, which plot_argmax_shares.py writes above, and
+    # the two nulls; writes argmax_share_table.tex and argmax_share_table_minus_null.tex.
     ("argmax_share_table.py", os.path.join(_DIR, "tables"),
-     ["--output", os.path.join(TABLES_PLACEHOLDER, "argmax_share_table.tex")]),
+     [*_POSITIONS_ARGS, "--output", os.path.join(TABLES_PLACEHOLDER, "argmax_share_table.tex")]),
 ]
 
 

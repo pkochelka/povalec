@@ -40,7 +40,7 @@ DEFAULT_OUTPUT_DIR = DATA_DIR / "annotation_llm_results"
 CLUSTER_TO_BLOC = {
     "Radical left": "GUE/NGL",
     "Progressive federalists": "S&D+Greens/EFA",
-    "Liberal-conservative centre-right": "ALDE+PPE",
+    "Liberal-conservative center-right": "ALDE+PPE",
     "Sovereigntist right": "ECR+ID",
 }
 MAX_RETRIES = 5

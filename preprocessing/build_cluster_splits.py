@@ -9,7 +9,7 @@ The seven EP-group labels are replaced by the four "fictional EP groups" that k-
 finds in the EU&I 2024 party answers (analysis/party_kmeans.py, k=4):
 
     Radical left | Progressive federalists | Sovereigntist right |
-    Liberal-conservative centre-right
+    Liberal-conservative center-right
 
 **Why group-level, not speech-level.** The clusters are made of national parties, but
 the speech corpora only carry the speaker's EP group -- no national party survives
@@ -78,10 +78,10 @@ ANCHORS = {
     4: {"Radical left": ("Germany", "Linke"),
         "Progressive federalists": ("Germany", "SPD"),
         "Sovereigntist right": ("France", "RN"),
-        "Liberal-conservative centre-right": ("Germany", "CDU/CSU")},
+        "Liberal-conservative center-right": ("Germany", "CDU/CSU")},
     3: {"Progressive left": ("Germany", "SPD"),
         "Sovereigntist right": ("France", "RN"),
-        "Liberal-conservative centre-right": ("Germany", "CDU/CSU")},
+        "Liberal-conservative center-right": ("Germany", "CDU/CSU")},
     2: {"Pro-European mainstream": ("Germany", "CDU/CSU"),
         "Sovereigntist right": ("France", "RN")},
 }

@@ -42,7 +42,7 @@ pd.options.future.infer_string = False
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 from analysis import party_kmeans as pk
-from preprocessing.build_cluster_splits import (K, PARTY_COLUMN, add_language_ratio_arg,
+from preprocessing.build_cluster_splits import (K, MIN_LANG_ROWS, PARTY_COLUMN, add_language_ratio_arg,
                                                 cluster_parties, load_pool, split_and_write)
 from preprocessing.build_national_party_map import LINKEDEP_PREFIX, name_key
 from preprocessing.split_preprocessed_data import EVAL_SET_SIZE
@@ -140,6 +140,8 @@ def parse_args():
     parser.add_argument("--per-party", type=int, default=None,
                         help="Balanced-train rows per cluster (default: smallest cluster's count).")
     parser.add_argument("--eval-set-size", type=int, default=EVAL_SET_SIZE)
+    parser.add_argument("--min-lang-rows", type=int, default=MIN_LANG_ROWS,
+                        help="drop languages with fewer pool rows than this")
     parser.add_argument("--seed", type=int, default=42, help="split/balancing seed")
     parser.add_argument("--cluster-seed", type=int, default=0,
                         help="k-means seed; CLUSTER_NAMES were read off the seed-0 fit")
@@ -183,7 +185,7 @@ def main():
         "max_gap_days": args.max_gap_days,
         "coverage": coverage,
         "rows_by_cluster_and_party": rows_by_party,
-    }, "labels.json", args.language_ratio)
+    }, "labels.json", args.language_ratio, min_lang_rows=args.min_lang_rows)
 
 
 if __name__ == "__main__":

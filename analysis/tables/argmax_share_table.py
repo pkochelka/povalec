@@ -6,16 +6,18 @@ One block per model, one row per evaluation method plus the mean over the four m
 one column per party (cluster or EP group). The winning party of every row is set in
 bold, so the argmax reads off the table directly instead of off bar heights.
 
-Reads <results_dir>/plots/argmax_share_methods.csv, which plot_argmax_shares.py writes;
-nothing is recomputed here. The blocks are laid out side by side in `--columns` panels
+Reads <results_dir>/plots/argmax_share_methods.csv, which plot_argmax_shares.py writes,
+and the 0-centered null of every method through analysis/null_baseline.py -- the same
+numbers the figures subtract. The blocks are laid out side by side in `--columns` panels
 so the table fills the page width rather than running down a whole column.
 
-When the null-model outputs are present it also writes a second table, every share minus
-its 0-centered normal null: vaa_null_model_argmax.py's for the Direct and Indirect rows,
+The main table (--output, argmax_share_table.tex) is every share minus its null, in
+percentage points: vaa_null_model_argmax.py's for the Direct and Indirect rows,
 classifier_null_model.py's (the same stance distribution, carried over to the
-classifier) for Reasons and Prose. The Mean row is then the mean of the four
-differences. A positive cell is a share a group wins beyond what random stances around
-the center would already give it.
+classifier) for Reasons and Prose. The Mean row is the mean of the four differences. A
+positive cell is a share a group wins beyond what random stances around the center
+would already give it. The raw shares go next to it as <stem>_absolute.tex. A
+non-default --sigma tags the difference table: argmax_share_table_sigma0.25.tex.
 
     python -m analysis.tables.argmax_share_table --dataset euandi_2024
 """
@@ -28,8 +30,9 @@ import pandas as pd
 from analysis.core import model_display_name, party_sort_key, short_party
 from analysis.plotting.plot_argmax_shares import AVERAGE_LABEL, METHODS
 from analysis.tables.render import latex_escape
-from analysis.classifier_null_model import output_stem
-from analysis.vaa_null_model_argmax import WHOLE, output_suffix
+from analysis.null_baseline import CLASSIFIER_METHOD, VAA_METHOD, NullBaseline
+from analysis.vaa_null_model import DEFAULT_SIGMA
+from analysis.vaa_null_model_argmax import sigma_suffix
 from utils import PARTY_SHORT
 
 # plot_argmax_shares' method labels -> the shorter row labels used in the tables.
@@ -41,9 +44,7 @@ ROW_LABEL = {
     AVERAGE_LABEL: "Mean",
 }
 METHOD_ROWS = [label for _, label, _ in METHODS]
-# vaa_null_model_argmax names its two tracks by source; the table by method label.
-VAA_NULL_METHOD = {"likert": "direct Likert", "speeches": "indirect Likert"}
-NULL_SIDE = "normal"
+METHOD_KEY = {label: key for key, label, _ in METHODS}
 
 
 def load_shares(csv_path, variant):
@@ -55,27 +56,13 @@ def load_shares(csv_path, variant):
                           values="argmax_share", aggfunc="first")
 
 
-def load_nulls(null_dir, positions, variant):
-    """Null share per method label (rows) and group (columns), or None when either null
-    is missing. The VAA null is framing-free (a 0-centered null is symmetric under
-    negation), so it serves every variant; the classifier null is read per variant."""
-    vaa_path = null_dir / f"null_model_argmax{output_suffix(positions)}_shares.csv"
-    classifier_path = null_dir / f"{output_stem(positions)}_shares.csv"
-    missing = [path.name for path in (vaa_path, classifier_path) if not path.exists()]
-    if missing:
-        print(f"No null-model table: {', '.join(missing)} not in {null_dir} -- run "
-              "vaa_null_model_argmax.py and classifier_null_model.py first.")
-        return None
-    vaa = pd.read_csv(vaa_path)
-    vaa = vaa[(vaa["side"] == NULL_SIDE) & (vaa["topic"] == WHOLE)
-              & vaa["method"].isin(VAA_NULL_METHOD)]
-    vaa = vaa.assign(method=vaa["method"].map(VAA_NULL_METHOD))
-    classifier = pd.read_csv(classifier_path)
-    classifier = classifier[classifier["variant"] == variant].rename(
-        columns={"null_share": "argmax_share"})
-    nulls = pd.concat([vaa[["method", "ep_group", "argmax_share"]],
-                       classifier[["method", "ep_group", "argmax_share"]]])
-    return nulls.pivot_table(index="method", columns="ep_group", values="argmax_share")
+def load_nulls(null_dir, positions, variant, sigma=DEFAULT_SIGMA):
+    """Null share per method label (rows) and group (columns), over all statements, as
+    analysis/null_baseline.py serves it to the figures. Raises when a null is missing."""
+    baseline = NullBaseline.load(null_dir, positions, sigma)
+    keys = [*VAA_METHOD.values(), *CLASSIFIER_METHOD.values()]
+    label = {key: label for label, key in METHOD_KEY.items()}
+    return pd.DataFrame({label[key]: baseline.share(key, variant) for key in keys}).T
 
 
 def minus_null(shares, nulls):
@@ -192,6 +179,14 @@ def render(shares, parties, panels, caption, label, signed=False):
     return "\n".join(lines) + "\n"
 
 
+def sigma_words(sigma):
+    """The null's sigma for the caption, in Likert steps (one step = 0.5 stance units)."""
+    steps = sigma / 0.5
+    if np.isclose(steps, 1):
+        return "one Likert step"
+    return f"{steps:g} Likert steps" if steps > 1 else f"{steps:g} of a Likert step"
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--dataset", default="euandi_2024",
@@ -204,12 +199,17 @@ def parse_args():
     parser.add_argument("--columns", type=int, default=2,
                         help="Model blocks are laid out in this many side-by-side panels.")
     parser.add_argument("--output", type=Path, default=None,
-                        help="Default: <results_dir>/plots/argmax_share_table.tex. The "
-                             "minus-null table goes next to it, as <stem>_minus_null.tex.")
+                        help="The minus-null table. Default: "
+                             "<results_dir>/plots/argmax_share_table.tex; the raw shares go "
+                             "next to it, as <stem>_absolute.tex.")
     parser.add_argument("--positions", default="ep-group",
                         help="Basis the VAA null was run on; picks its file name.")
     parser.add_argument("--null_dir", type=Path, default=None,
                         help="Default: <results_dir>/tables/null_model")
+    parser.add_argument("--sigma", type=float, default=DEFAULT_SIGMA,
+                        help="Normal-null sigma to subtract (stance units, %(default)s = one "
+                             "Likert step). A non-default sigma reads and writes files "
+                             "tagged _sigma<value>.")
     return parser.parse_args()
 
 
@@ -228,30 +228,31 @@ def main():
         "Direct: Likert answers scored against party positions; Indirect: stance of the "
         "open-ended answers scored the same way; Reasons / Prose: classifier on the Likert "
         "reasons / open-ended answers." + (f" {latex_escape(legend)}." if legend else ""))
+    output = args.output or plots_dir / "argmax_share_table.tex"
+    # Loaded first, so a missing null stops the run before anything is written.
+    nulls = load_nulls(args.null_dir or results_dir / "tables" / "null_model",
+                       args.positions, args.variant, args.sigma)
+
     caption = ("Argmax share (\\%) of each group per evaluation method, and their mean, for "
                "every model; the largest share in each row is in bold. " + methods_note)
-    tex = render(shares, parties, args.columns, caption, "tab:argmax_shares")
-    output = args.output or plots_dir / "argmax_share_table.tex"
-    output.write_text(tex, encoding="utf-8")
-    print(tex)
-    print(f"Wrote {output}")
+    tex = render(shares, parties, args.columns, caption, "tab:argmax_shares_absolute")
+    absolute_output = output.with_name(f"{output.stem}_absolute{output.suffix}")
+    absolute_output.write_text(tex, encoding="utf-8")
+    print(f"Wrote {absolute_output}")
 
-    nulls = load_nulls(args.null_dir or results_dir / "tables" / "null_model",
-                       args.positions, args.variant)
-    if nulls is None:
-        return
     caption = (
         "Argmax share of each group minus its 0-centered null (percentage points), per "
         "evaluation method and their mean; the largest value in each row is in bold. The null "
         "draws every stance from a normal distribution around the neutral answer "
-        "($\\sigma$ = one Likert step): for Direct and Indirect as random Likert answers "
+        f"($\\sigma$ = {sigma_words(args.sigma)}): for Direct and Indirect as random Likert answers "
         "scored against the positions, for Reasons and Prose as the classifier's group "
         "shares per statement and stance level, reweighted to the same stance distribution. "
         "Positive values are shares a group wins beyond its position relative to the "
         "center. " + methods_note)
     tex = render(minus_null(shares, nulls)[parties], parties, args.columns, caption,
-                 "tab:argmax_shares_minus_null", signed=True)
-    null_output = output.with_name(f"{output.stem}_minus_null{output.suffix}")
+                 "tab:argmax_shares" + sigma_suffix(args.sigma).replace("_", "-"),
+                 signed=True)
+    null_output = output.with_name(f"{output.stem}{sigma_suffix(args.sigma)}{output.suffix}")
     null_output.write_text(tex, encoding="utf-8")
     print(tex)
     print(f"Wrote {null_output}")

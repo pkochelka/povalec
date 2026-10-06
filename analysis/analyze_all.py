@@ -49,7 +49,6 @@ MODEL_DIRS = [
     "deepseek-v4-pro",
     "qwen3.5-122b",
     "gpt-oss-120b",
-    "kimi-k2.7",
     "mistral-medium-3.5",
     "glm-5.2",
     "kimi-k3"
@@ -110,6 +109,14 @@ PER_VARIANT_SCRIPTS = [
 # --positions and must be given the same basis the vaa*.csv files were written with.
 _POSITIONS_ARGS = ["--positions", POSITIONS_PLACEHOLDER]
 
+# The 0-centered null of every argmax method, VAA and classifier. plot_argmax_shares.py
+# and argmax_share_table.py draw and tabulate every share minus it, so these run before
+# the plots; both are cheap (CPU, minutes) and named by the positions basis.
+PER_DATASET_NULL_SCRIPTS = [
+    ("vaa_null_model_argmax.py", _DIR, _POSITIONS_ARGS),
+    ("classifier_null_model.py", _DIR, _POSITIONS_ARGS),
+]
+
 PER_DATASET_PLOTTING_SCRIPTS = [
     ("plot_vaa_per_language.py",      _PLOTTING_DIR, []),
     ("plot_vaa_variants_grouped.py",  _PLOTTING_DIR, []),
@@ -138,12 +145,10 @@ PER_DATASET_TABLE_SCRIPTS = [
       "--output", os.path.join(TABLES_PLACEHOLDER, "vaa_agreement_ci.md")]),
     ("compare_position_bases.py", _DIR,
      [*_MODELS_ARG, "--collapse-ecr-id", "--languages", LANGUAGES,
-      "--output", os.path.join(TABLES_PLACEHOLDER, "position_bases_comparison.md")]),    # The 0-centered null of every argmax method, VAA and classifier, which the table
-    # below subtracts; both are cheap (CPU, minutes) and named by the positions basis.
-    ("vaa_null_model_argmax.py", _DIR, _POSITIONS_ARGS),
-    ("classifier_null_model.py", _DIR, _POSITIONS_ARGS),
+      "--output", os.path.join(TABLES_PLACEHOLDER, "position_bases_comparison.md")]),
     # Reads plots/argmax_share_methods.csv, which plot_argmax_shares.py writes above, and
-    # the two nulls; writes argmax_share_table.tex and argmax_share_table_minus_null.tex.
+    # the two nulls; writes argmax_share_table.tex (shares minus the null) and
+    # argmax_share_table_absolute.tex (raw shares).
     ("argmax_share_table.py", os.path.join(_DIR, "tables"),
      [*_POSITIONS_ARGS, "--output", os.path.join(TABLES_PLACEHOLDER, "argmax_share_table.tex")]),
 ]
@@ -326,6 +331,7 @@ def main():
     print(f"Classifier: {args.classifier}\n", flush=True)
 
     run_per_variant_scripts(args.override, only, args.positions, args.classifier)
+    run_per_dataset_scripts(PER_DATASET_NULL_SCRIPTS, only, args.positions)
     run_per_dataset_scripts(PER_DATASET_PLOTTING_SCRIPTS, only, args.positions)
     run_per_dataset_scripts(PER_DATASET_TABLE_SCRIPTS, only, args.positions)
 

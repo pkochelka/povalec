@@ -56,6 +56,8 @@ from analysis.europarl_classification import (
 MODEL_NAME = "jhu-clsp/mmBERT-base"
 MODEL_SLUG = MODEL_NAME.split("/")[-1]
 DATA_DIR = os.path.join(PROJECT_ROOT, "data", "EuroParl Custom", "collapsed")
+# train_cluster_track.py --trainer langmatched points this at train_langmatched.
+TRAIN_SPLIT = "train"
 OUTPUT_DIR = f"{MODEL_SLUG}-logitadj-collapsed"
 MAX_LEN = 512
 SEED = 42
@@ -322,7 +324,7 @@ def main():
     hf_token = os.getenv("HF_TOKEN")
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, token=hf_token)
-    data = prepare_training_data(DATA_DIR, tokenizer)
+    data = prepare_training_data(DATA_DIR, tokenizer, train_split=TRAIN_SPLIT)
 
     best_epoch, biases, y_test, y_pred = train_and_evaluate(data, tokenizer, hf_token, device)
 

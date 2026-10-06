@@ -62,6 +62,16 @@ Tables (--table; 'all' is internal, negation, crosslang, variants, bymodel):
   languages  raters are the questionnaire languages, one row per (method, model).
              The single-number version of "crosslang".
 
+Scores minus the null. By default every per-statement score is taken minus its
+0-centered normal null (sigma one Likert step) before anything is ranked, as the argmax
+figures and table are: VAA agreement minus the agreement one random answer would get on
+that statement (analysis/null_baseline.vaa_statement_null, closed form), classifier
+probability minus the mean probability the classifier gives a random-stance text on that
+statement, framing and language (classifier_null_model's _statements.csv). Rank 1 is then
+the group furthest ABOVE its null, not the group with the highest raw score. The one
+exception is crosslang's Jensen-Shannon divergence, which needs non-negative profiles and
+stays on the raw scores (its W does not). --absolute ranks the raw scores throughout.
+
 Run from the repo root -- writes to data/<dataset>_results/tables/ by default,
 next to the results it summarises rather than into analysis/ where the scripts
 live (pass --no-output for stdout only, or --output/--csv/--pairs-csv to choose):
@@ -333,8 +343,8 @@ def common_parties(scores):
 # (run x EP group x statement) tensor
 # --------------------------------------------------------------------------- #
 
-def score_tensor(scores, parties):
-    """(runs x EP groups x statements) scores, plus the run metadata frame.
+def score_tensor(scores, parties, column="score"):
+    """(runs x EP groups x statements) of `column`, plus the run metadata frame.
 
     Missing (group, statement) pairs stay NaN -- a party that answered "no opinion"
     has no position to agree with -- and are excluded from the statement means
@@ -350,7 +360,7 @@ def score_tensor(scores, parties):
         raise SystemExit("Duplicate (run, EP group, statement) scores; check the inputs.")
 
     tensor = np.full((len(cell_index), len(parties), len(statements)), np.nan)
-    tensor.reshape(-1)[flat] = scores["score"].to_numpy(dtype=float)
+    tensor.reshape(-1)[flat] = scores[column].to_numpy(dtype=float)
 
     cells = cell_index.set_names(CELL_KEYS).to_frame(index=False)
     cells["prompt"] = cells["framing"] + "/v" + cells["paraphrase"].astype(int).astype(str)
@@ -364,6 +374,43 @@ def score_tensor(scores, parties):
     if not complete.all():
         print(f"Dropped {int((~complete).sum())} runs that do not score every EP group.")
     return tensor[complete], cells[complete].reset_index(drop=True), statements
+
+
+CLASSIFIER_NULL_METHOD = {"clf-reasons": "reasons_clf", "clf-speeches": "speeches_clf"}
+
+
+def with_null(scores, party_df, null_dir, positions, sigma):
+    """`scores` plus a "null" column: what the 0-centered null gives that (method,
+    framing, language, statement, group) cell -- see the module docstring. Every scored
+    cell must find its null; a gap would rank a raw score against differences."""
+    from analysis.null_baseline import classifier_statement_null, vaa_statement_null
+    parts = []
+    vaa = scores[scores["method"].str.startswith("vaa-")]
+    if not vaa.empty:
+        parts.append(vaa.merge(vaa_statement_null(party_df, sigma)
+                               .rename(columns={"null_score": "null"}),
+                               on=["ep_group", "statement_idx"], how="left"))
+    classified = scores[scores["method"].isin(CLASSIFIER_NULL_METHOD)]
+    if not classified.empty:
+        null = classifier_statement_null(null_dir, positions, sigma).rename(
+            columns={"method": "null_method", "variant": "framing",
+                     "null_mean_probability": "null"})
+        parts.append(classified.assign(null_method=classified["method"].map(
+                         CLASSIFIER_NULL_METHOD))
+                     .merge(null, on=["null_method", "framing", "language",
+                                      "statement_idx", "ep_group"], how="left")
+                     .drop(columns="null_method"))
+    other = {method for method in scores["method"].unique()
+             if not method.startswith("vaa-") and method not in CLASSIFIER_NULL_METHOD}
+    if other:
+        raise SystemExit(f"No null model for method(s) {sorted(other)}; pass --absolute.")
+    merged = pd.concat(parts, ignore_index=True)
+    gaps = merged["score"].notna() & merged["null"].isna()
+    if gaps.any():
+        example = merged.loc[gaps, ["method", "framing", "language", "statement_idx",
+                                    "ep_group"]].drop_duplicates().head(5)
+        raise SystemExit(f"{int(gaps.sum())} scores have no null, e.g.:\n{example}")
+    return merged
 
 
 def statement_means(filled, valid, weights):
@@ -666,6 +713,15 @@ def augment_with_block_rho(job, values, means):
             "rho_lang": block_pair_rho(job, means, "language_weights", "languages")}
 
 
+def score_profiles_for(job, means, raw_means):
+    """The score profiles a job's metrics read: the raw means for a divergence job when
+    the run ranks differences from the null -- JSD needs non-negative profiles -- and
+    the means the ranks came from otherwise."""
+    if raw_means is not None and job["kind"] == "divergence":
+        return profiles_for(job, raw_means)
+    return profiles_for(job, means)
+
+
 def observed_metrics(job, rank_profiles, score_profiles):
     """Every metric the job's kind produces, categorical labels included."""
     return KINDS[job["kind"]]["metrics"](rank_profiles, score_profiles)
@@ -694,22 +750,28 @@ def squeeze_observed(values):
     return squeezed
 
 
-def bootstrap(jobs, tensor, statements, draws, seed, chunk=BOOTSTRAP_CHUNK):
-    """Percentile intervals for every job, all scored on the same statement draws."""
+def bootstrap(jobs, tensor, statements, draws, seed, chunk=BOOTSTRAP_CHUNK, raw_tensor=None):
+    """Percentile intervals for every job, all scored on the same statement draws.
+    `raw_tensor` is the scores before the null was subtracted, for the divergence jobs
+    (see score_profiles_for); None when `tensor` is raw already."""
     replicates = [{} for _ in jobs]
     if not draws:
         return [{} for _ in jobs]
     rng = np.random.default_rng(seed)
     valid = np.isfinite(tensor).astype(float)
     filled = np.nan_to_num(tensor)
+    raw_filled = None if raw_tensor is None else np.nan_to_num(raw_tensor)
     uniform = np.full(len(statements), 1.0 / len(statements))
     for start in range(0, draws, chunk):
         size = min(chunk, draws - start)
         weights = rng.multinomial(len(statements), uniform, size=size).astype(float)
         means = statement_means(filled, valid, weights)
+        raw_means = (None if raw_filled is None
+                     else statement_means(raw_filled, valid, weights))
         ranks = run_ranks(means)
         for job, store in zip(jobs, replicates):
-            values = job_metrics(job, profiles_for(job, ranks), profiles_for(job, means))
+            values = job_metrics(job, profiles_for(job, ranks),
+                                 score_profiles_for(job, means, raw_means))
             values = augment_with_block_rho(job, values, means)
             for key, value in values.items():
                 store.setdefault(key, []).append(value)
@@ -920,6 +982,15 @@ def parse_args():
                              "data/<dataset>_results/tables/rank_consistency_pairs.csv")
     parser.add_argument("--no-output", action="store_true",
                         help="Print to stdout only; do not write any file.")
+    parser.add_argument("--results_dir", type=Path, default=None,
+                        help="Read this results directory instead of the --dataset one.")
+    parser.add_argument("--absolute", action="store_true",
+                        help="Rank the raw scores instead of the scores minus their "
+                             "0-centered null.")
+    parser.add_argument("--sigma", type=float, default=None,
+                        help="Sigma of the null to subtract (default: the VAA null's).")
+    parser.add_argument("--null_dir", type=Path, default=None,
+                        help="Default: <results_dir>/tables/null_model")
     return parser.parse_args()
 
 
@@ -1084,9 +1155,18 @@ def main():
     if unknown:
         raise SystemExit(f"Unknown table(s): {unknown}. Available: {list(specs)}")
 
-    results_dir = Path("data") / f"{args.dataset}_results"
+    results_dir = args.results_dir or Path("data") / f"{args.dataset}_results"
     if not results_dir.exists():
         raise SystemExit(f"Directory not found: {results_dir} (run from the repo root)")
+    from analysis.vaa_null_model import DEFAULT_SIGMA
+    sigma = args.sigma or DEFAULT_SIGMA
+    if not args.absolute:
+        null_note = (" Every score is taken relative to its 0-centered null (stances drawn "
+                     f"from a normal distribution around the neutral answer, $\\sigma$ = "
+                     f"{sigma:g}): rank 1 is the group furthest above what random stances "
+                     "would give it.")
+        specs = {name: {**spec, "caption": spec["caption"] + null_note}
+                 if "caption" in spec else spec for name, spec in specs.items()}
 
     outputs = OutputPaths.resolve(args, results_dir / "tables")
 
@@ -1095,7 +1175,20 @@ def main():
     scores = keep_complete_models(scores, methods, args.allow_partial_models,
                                  args.min_method_coverage)
     parties = common_parties(scores)
-    tensor, cells, statements = score_tensor(scores, parties)
+    raw_tensor = None
+    if args.absolute:
+        tensor, cells, statements = score_tensor(scores, parties)
+    else:
+        scores = with_null(scores, party_df,
+                           args.null_dir or results_dir / "tables" / "null_model",
+                           args.positions, sigma)
+        raw_tensor, cells, statements = score_tensor(scores, parties)
+        null_tensor, null_cells, _ = score_tensor(scores, parties, column="null")
+        if not null_cells.equals(cells):
+            raise SystemExit("Null and score tensors do not line up run for run.")
+        tensor = raw_tensor - null_tensor
+        print(f"\nRanking scores minus their 0-centered null (sigma {sigma:g}); "
+              "crosslang JSD stays on the raw scores.")
     print(f"\n{len(cells)} runs, {len(parties)} EP groups ({', '.join(parties)}), "
           f"{len(statements)} statements.")
     if "bymodel" in wanted:
@@ -1106,16 +1199,21 @@ def main():
     table_slices, bymodel_slices = job_set.table_slices, job_set.bymodel_slices
     reliability_index, internal_index = job_set.reliability_index, job_set.internal_index
     topic_jobs, topic_observed = job_set.topic_jobs, job_set.topic_observed
+    all_statements = np.ones((1, len(statements)))
     observed_means = statement_means(np.nan_to_num(tensor), np.isfinite(tensor).astype(float),
-                                     np.ones((1, len(statements))))
+                                     all_statements)
+    observed_raw_means = (None if raw_tensor is None else statement_means(
+        np.nan_to_num(raw_tensor), np.isfinite(raw_tensor).astype(float), all_statements))
     observed_ranks = run_ranks(observed_means)
     observed = [squeeze_observed(augment_with_block_rho(
                     job, observed_metrics(job, profiles_for(job, observed_ranks),
-                                         profiles_for(job, observed_means)),
+                                         score_profiles_for(job, observed_means,
+                                                            observed_raw_means)),
                     observed_means))
                 for job in jobs]
     print(f"\nBootstrapping {args.bootstrap} statement draws over {len(jobs)} rows...")
-    replicates = bootstrap(jobs, tensor, statements, args.bootstrap, args.seed)
+    replicates = bootstrap(jobs, tensor, statements, args.bootstrap, args.seed,
+                           raw_tensor=raw_tensor)
 
     provenance = [
         "Generated by analysis/rank_consistency_tables.py -- do not edit by hand.",
@@ -1123,6 +1221,8 @@ def main():
         f"models={','.join(sorted(cells['model'].unique()))}",
         f"{len(cells)} runs, {len(parties)} EP groups, {len(statements)} statements, "
         f"bootstrap={args.bootstrap} seed={args.seed}",
+        "scores: raw" if args.absolute
+        else f"scores: minus 0-centered null, sigma={sigma:g} (crosslang JSD on raw)",
     ]
 
     # Between-party SD per (method, model scope) for the negation table's

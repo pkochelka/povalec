@@ -10,6 +10,11 @@ call time, so this wrapper points them elsewhere instead of forking them:
     --trainer logitadj   classifier_training.py
                          trains on train.parquet (natural priors) with logit-adjusted
                          cross-entropy, so the imbalance is corrected in the loss
+    --trainer langmatched
+                         classifier_training.py on train_langmatched.parquet
+                         (preprocessing/build_language_matched_split.py): every language
+                         downsampled to the pooled cluster mix, so the language carries no
+                         cluster information; logit-adjusted loss as above
 
     --track group        data/EuroParl Custom/clusters_k4            (build_cluster_splits.py)
     --track national     data/EuroParl Custom/clusters_k{k}_national (build_national_cluster_splits.py)
@@ -34,6 +39,7 @@ DATA_ROOT = PROJECT_ROOT / "data" / "EuroParl Custom"
 TRAINERS = {
     "balanced": ("analysis.classifier_training_for_balanced_collapsed", "train_balanced"),
     "logitadj": ("analysis.classifier_training", "train"),
+    "langmatched": ("analysis.classifier_training", "train_langmatched"),
 }
 
 
@@ -77,6 +83,8 @@ def main():
     trainer = importlib.import_module(module_name)
     trainer.DATA_DIR = str(data_dir)
     trainer.OUTPUT_DIR = str(run_dir / "model")
+    if hasattr(trainer, "TRAIN_SPLIT"):
+        trainer.TRAIN_SPLIT = train_split
     run_dir.mkdir(parents=True, exist_ok=True)
     os.chdir(run_dir)          # results_<tag>.txt is written to the working directory
     trainer.main()

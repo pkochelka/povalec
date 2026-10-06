@@ -19,6 +19,15 @@ predicted party per (text, language, prompt variant), which is what plot_classif
 already counts. The two euandi methods have no argmax of their own, so the analogue is
 built here: per (statement, language) the group with the highest mean agreement wins the
 cell, and cells with a tie split their credit equally, so the shares still sum to 1.
+
+By default every share is drawn minus its 0-centered normal null (analysis/null_baseline.py):
+the share a group would win if the stances were random around the neutral answer, which
+is how much of a raw share is only the group's position near the centre. Every figure,
+breakdowns included, then shows signed differences in percentage points -- each topic and
+language minus that slice's own null -- and the method stacks diverge from zero: what a
+method adds goes up, what it takes away goes down, and a black tick marks their net, the
+mean over methods. --absolute draws the raw shares as before. argmax_share_methods.csv
+always holds the raw shares; argmax_share_methods_minus_null.csv the differences.
 """
 import argparse
 import itertools
@@ -33,6 +42,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from analysis.core.labels import use_short_party_labels
 use_short_party_labels()   # cluster nicknames in every label (utils.PARTY_SHORT)
+from matplotlib import patheffects
 from matplotlib.patches import Patch
 
 from analysis.core import MODEL_DISPLAY_NAME, model_display_name
@@ -41,7 +51,9 @@ from analysis.plotting.plot_topical_parties import statement_rows_per_axis
 from analysis.evaluate_euandi import (
     DEFAULT_POSITIONS, POSITION_CHOICES, load_party_positions, positions_path,
 )
+from analysis.null_baseline import NullBaseline, minus_null
 from analysis.vaa_agreement_ci import stance_frame_for
+from analysis.vaa_null_model import DEFAULT_SIGMA
 from utils import ALL_LANGS, AXES, configure_stdout
 
 configure_stdout()
@@ -102,6 +114,72 @@ def language_colors(languages):
 ARGMAX_SHARE_LABEL = "Argmax share"
 POOLED_LABEL = "pooled"
 AVERAGE_LABEL = "average of methods"
+
+# Whether the shares are drawn minus their 0-centered null; main() sets it from
+# --absolute. Every value is then a signed difference in percentage points, so the axes,
+# value labels and stacks below all read it.
+MINUS_NULL = True
+
+
+def units(label):
+    """An axis label with the unit of the current mode: "Argmax share (%)" or, with the
+    null subtracted, "Argmax share − null (pp)"."""
+    return f"{label} − null (pp)" if MINUS_NULL else f"{label} (%)"
+
+
+def short_units(label):
+    """The same for the panels whose height is set by their rotated y label: "Share (%)",
+    or "Δ share (pp)" rather than the longer "Share − null (pp)"."""
+    return f"Δ {label.lower()} (pp)" if MINUS_NULL else f"{label} (%)"
+
+
+def limits_text(limits):
+    return "none" if limits is None else f"{limits[0]:.1f} .. {limits[1]:.1f}"
+
+
+def value_text(value):
+    """A bar's printed value: "31" as a share, "+4" / "−3" as a difference from the null,
+    with no "−0" for a difference that rounds to nothing."""
+    rounded = int(round(value))
+    if not MINUS_NULL or rounded == 0:
+        return f"{rounded}"
+    return f"+{rounded}" if rounded > 0 else f"−{-rounded}"
+
+
+def padded_limits(low, high):
+    """(bottom, top) of a value axis spanning [low, high] plus room for the value labels.
+    A share axis stands on zero as it always has; a difference axis keeps zero inside it
+    and pads whichever side has bars."""
+    if not MINUS_NULL:
+        return (0.0, min(100.0, high + pcp.PERCENT_HEADROOM))
+    return (min(low, 0.0) - pcp.PERCENT_HEADROOM, max(high, 0.0) + pcp.PERCENT_HEADROOM)
+
+
+def stack_onto(ax, positions, values, pos_bottoms, neg_bottoms, **bar_kwargs):
+    """One segment of a diverging stack: a positive value goes on top of the positive
+    segments so far, a negative one under the negative ones. Both running bottoms are
+    advanced in place. With no negative values this is the plain stack it replaces."""
+    bottoms = np.where(values >= 0, pos_bottoms, neg_bottoms)
+    ax.bar(positions, values, bottom=bottoms, **bar_kwargs)
+    pos_bottoms += np.clip(values, 0.0, None)
+    neg_bottoms += np.clip(values, None, 0.0)
+
+
+def mark_zero(ax, linewidth=1.0):
+    """The zero line a difference axis is read against."""
+    if MINUS_NULL:
+        ax.axhline(0.0, color="black", linewidth=linewidth, zorder=3)
+
+
+def mark_net(ax, positions, nets, width, linewidth):
+    """A black tick across each diverging stack at its net value -- the mean over methods,
+    which the stack's two halves no longer show by their height."""
+    if MINUS_NULL:
+        # A white halo keeps the tick readable on the dark group colours and the hatching.
+        ax.hlines(nets, positions - width / 2, positions + width / 2, colors="black",
+                  linewidth=linewidth, zorder=4,
+                  path_effects=[patheffects.withStroke(linewidth=linewidth * 2.2,
+                                                       foreground="white")])
 
 # Sized for figures that are read at a glance in a folder of PNGs rather than zoomed
 # into. At this size the legends no longer fit over the bars, so they sit under the
@@ -640,9 +718,12 @@ def draw_grouped_panel(ax, percentages, methods, parties):
                color=METHOD_COLORS[method], edgecolor="black", linewidth=0.4,
                label=METHOD_LABEL[method])
         for offset, percentage in zip(offsets, percentages[method]):
-            ax.text(offset, percentage + 0.4, f"{percentage:.0f}", ha="center", va="bottom",
+            below = percentage < 0
+            ax.text(offset, percentage + (-0.4 if below else 0.4), value_text(percentage),
+                    ha="center", va="top" if below else "bottom",
                     fontsize=VALUE_FONTSIZE, rotation=90)
-    ax.set_ylabel(f"{ARGMAX_SHARE_LABEL} (%)", fontsize=AXIS_LABEL_FONTSIZE)
+    mark_zero(ax)
+    ax.set_ylabel(units(ARGMAX_SHARE_LABEL), fontsize=AXIS_LABEL_FONTSIZE)
     ax.set_title("per method", fontsize=TITLE_FONTSIZE)
 
 
@@ -650,20 +731,26 @@ def draw_average_panel(ax, percentages, methods, parties):
     """One bar per party, split into what each method contributes to the four-method
     average. Every method's shares sum to 1 across parties, so the methods are
     commensurable and a segment is just that method's share divided by their number --
-    the stack totals the average, and its make-up shows which method carries it."""
+    the stack totals the average, and its make-up shows which method carries it.
+
+    Minus the null the segments are signed, so the stack diverges from zero and a black
+    tick marks the net -- the average -- which is the number printed."""
     party_positions = np.arange(len(parties))
-    bottoms = np.zeros(len(parties))
+    pos_bottoms, neg_bottoms = np.zeros(len(parties)), np.zeros(len(parties))
     for method in methods:
         contribution = percentages[method] / len(methods)
-        ax.bar(party_positions, contribution, width=0.62, bottom=bottoms,
-               color=METHOD_COLORS[method], edgecolor="black", linewidth=0.4,
-               label=METHOD_LABEL[method])
-        bottoms += contribution
-    for position, total in zip(party_positions, bottoms):
-        ax.text(position, total + 0.4, f"{total:.0f}", ha="center", va="bottom",
-                fontsize=VALUE_FONTSIZE + 2)
+        stack_onto(ax, party_positions, contribution, pos_bottoms, neg_bottoms, width=0.62,
+                   color=METHOD_COLORS[method], edgecolor="black", linewidth=0.4,
+                   label=METHOD_LABEL[method])
+    nets = pos_bottoms + neg_bottoms
+    mark_net(ax, party_positions, nets, 0.62, linewidth=3.0)
+    mark_zero(ax)
+    for position, net, top, bottom in zip(party_positions, nets, pos_bottoms, neg_bottoms):
+        below = net < 0
+        ax.text(position, bottom - 0.4 if below else top + 0.4, value_text(net),
+                ha="center", va="top" if below else "bottom", fontsize=VALUE_FONTSIZE + 2)
     # Kept short: at this type size a full sentence of a label crowds the panel.
-    ax.set_ylabel("Mean over methods (%)", fontsize=AXIS_LABEL_FONTSIZE)
+    ax.set_ylabel(units("Mean over methods"), fontsize=AXIS_LABEL_FONTSIZE)
     ax.set_title(f"average of {len(methods)} methods", fontsize=TITLE_FONTSIZE)
 
 
@@ -678,8 +765,10 @@ def plot_methods_argmax_share(share_per_method, output_path, ylim=None):
         return
 
     percentages = percentages_per_method(share_per_method, methods, parties)
-    tallest = max(float(values.max()) for values in percentages.values())
-    panel_ylim = ylim or (0.0, min(100.0, tallest + pcp.PERCENT_HEADROOM))
+    # The single-method bars bound the average's stack on both sides, so they set the axis.
+    panel_ylim = ylim or padded_limits(
+        min(float(values.min()) for values in percentages.values()),
+        max(float(values.max()) for values in percentages.values()))
 
     fig, axes = plt.subplots(1, 2, figsize=(max(22, len(parties) * 3.8), 10.5),
                              gridspec_kw={"width_ratios": [1.35, 1.0], "wspace": 0.22})
@@ -713,16 +802,17 @@ def shares_for_variant(shares_by_method_variant, variant_label):
 
 
 def share_limits(shares_by_model):
-    """(0, tallest bar + headroom) over every figure the run draws, so the models can be
-    compared as they are browsed."""
-    tallest = 0.0
-    for shares_by_method_variant in shares_by_model.values():
-        for share in shares_by_method_variant.values():
-            values = 100.0 * share.to_numpy(dtype=float)
-            finite = values[np.isfinite(values)]
-            if finite.size:
-                tallest = max(tallest, float(finite.max()))
-    return (0.0, min(100.0, tallest + pcp.PERCENT_HEADROOM)) if tallest else None
+    """The value axis over every figure the run draws -- (0, tallest bar + headroom), or
+    lowest to highest bar minus the null -- so the models can be compared as they are
+    browsed."""
+    values = [100.0 * share.to_numpy(dtype=float)
+              for shares_by_method_variant in shares_by_model.values()
+              for share in shares_by_method_variant.values()]
+    finite = np.concatenate(values) if values else np.array([])
+    finite = finite[np.isfinite(finite)]
+    if not finite.size or not (MINUS_NULL or finite.max() > 0):
+        return None
+    return padded_limits(float(finite.min()), float(finite.max()))
 
 
 def average_over_methods(share_per_method):
@@ -931,7 +1021,7 @@ def stacked_topic_panels(topics_by_model, topic_counts_by_model, panel_model_dir
         # Shorter than the default "Mean share (%)" so the panels can be: the rotated label
         # is what stops two stacked panels being drawn any shorter than it is tall, and the
         # caption carries what the share is a mean over.
-        ylabel="Share (%)",
+        ylabel=short_units("Share"),
     )
 
 
@@ -983,7 +1073,7 @@ def grid_topic_panels(topics_by_model, topic_counts_by_model, grid_model_dirs,
         category_labels=topic_labels_with_counts(axes_present, merged_counts),
         series_ncol=3,
         layout=TOPIC_GRID_LAYOUT,
-        ylabel="Share (%)",
+        ylabel=short_units("Share"),
         legends_in_spare_cell=True,
     )
 
@@ -1048,19 +1138,34 @@ def transposed_shares(share_per_series_and_method):
     }
 
 
+def stack_extents(share_per_method):
+    """(lowest, highest) point of the method stacks one series draws, in percent: the
+    negative and the positive contributions summed separately, as the diverging stacks
+    pile them. Without negative shares the top is just the average over methods."""
+    if not share_per_method:
+        return 0.0, 0.0
+    contributions = 100.0 * pd.concat(share_per_method.values(), axis=1).fillna(0.0) \
+        / len(share_per_method)
+    top = contributions.clip(lower=0.0).sum(axis=1)
+    bottom = contributions.clip(upper=0.0).sum(axis=1)
+    return float(bottom.min()), float(top.max())
+
+
 def stacked_series_limits(series_by_model):
-    """(0, tallest stack + headroom) over every split-bar figure of one family in the run.
+    """The value axis over every split-bar figure of one family in the run: (0, tallest
+    stack + headroom), or the deepest to the tallest stack minus the null.
 
     Takes {model: {series: {method: share}}}, so it serves the per-topic and the
     per-language figures alike."""
-    tallest = 0.0
-    for per_axis in series_by_model.values():
-        for share_per_method in per_axis.values():
-            values = 100.0 * average_over_methods(share_per_method).to_numpy(dtype=float)
-            finite = values[np.isfinite(values)]
-            if finite.size:
-                tallest = max(tallest, float(finite.max()))
-    return (0.0, min(100.0, tallest + pcp.PERCENT_HEADROOM)) if tallest else None
+    extents = [stack_extents(share_per_method)
+               for per_axis in series_by_model.values()
+               for share_per_method in per_axis.values()]
+    if not extents:
+        return None
+    low, high = min(low for low, _ in extents), max(high for _, high in extents)
+    if not (MINUS_NULL or high > 0):
+        return None
+    return padded_limits(low, high)
 
 
 def statement_count(long_frames, cell_frames):
@@ -1145,8 +1250,9 @@ def split_bar_dimensions(share_dicts, series_order, category_order):
 def draw_split_bar_panel(ax, share_per_series_and_method, series, methods, categories,
                          color_for, layout, ylim, category_labels=None,
                          show_xticklabels=True, ylabel=None, show_ylabel=True):
-    """One panel of grouped, method-stacked bars. Returns the tallest stack drawn, so a
-    caller that did not fix `ylim` can size the panel to what it got.
+    """One panel of grouped, method-stacked bars. Returns the (lowest, highest) point the
+    stacks reach, so a caller that did not fix `ylim` can size the panel to what it got.
+    Minus the null the stacks diverge from zero, with a black tick at each one's net.
 
     `ylabel` overrides the default wording. Rotated text is the one thing on a panel whose
     height does not follow the panel's, so on a short panel the label is what sets the
@@ -1161,21 +1267,25 @@ def draw_split_bar_panel(ax, share_per_series_and_method, series, methods, categ
     bar_width = group_width / len(series)
     hairline = 0.3 * layout.font_scale
 
-    tallest = 0.0
+    lowest, highest = 0.0, 0.0
     for series_index, name in enumerate(series):
         per_method = share_per_series_and_method.get(name, {})
         offsets = category_positions - group_width / 2 + bar_width * (series_index + 0.5)
-        bottoms = np.zeros(len(categories))
+        pos_bottoms, neg_bottoms = np.zeros(len(categories)), np.zeros(len(categories))
         for method in methods:
             share = per_method.get(method)
             if share is None:
                 continue
             contribution = 100.0 * share.reindex(categories).fillna(0.0).to_numpy() / len(methods)
-            ax.bar(offsets, contribution, width=bar_width, bottom=bottoms,
-                   color=color_for(series_index, name), edgecolor="black", linewidth=hairline,
-                   hatch=METHOD_HATCHES[method])
-            bottoms += contribution
-        tallest = max(tallest, float(bottoms.max()))
+            stack_onto(ax, offsets, contribution, pos_bottoms, neg_bottoms, width=bar_width,
+                       color=color_for(series_index, name), edgecolor="black",
+                       linewidth=hairline, hatch=METHOD_HATCHES[method])
+        if len(methods) > 1:
+            mark_net(ax, offsets, pos_bottoms + neg_bottoms, bar_width,
+                     linewidth=1.6 * layout.font_scale)
+        lowest = min(lowest, float(neg_bottoms.min()))
+        highest = max(highest, float(pos_bottoms.max()))
+    mark_zero(ax, linewidth=0.8 * layout.font_scale)
 
     ax.set_xticks(category_positions)
     if show_xticklabels:
@@ -1192,10 +1302,10 @@ def draw_split_bar_panel(ax, share_per_series_and_method, series, methods, categ
     if show_ylabel:
         ax.set_ylabel(ylabel or stacked_axis_label(methods),
                       fontsize=AXIS_LABEL_FONTSIZE * layout.font_scale * layout.yaxis_scale)
-    ax.set_ylim(*(ylim or (0.0, min(100.0, tallest + pcp.PERCENT_HEADROOM))))
+    ax.set_ylim(*(ylim or padded_limits(lowest, highest)))
     ax.grid(axis="y", linestyle="--", alpha=0.4)
     ax.set_axisbelow(True)
-    return tallest
+    return lowest, highest
 
 
 def split_bar_legend_blocks(series, methods, color_for, layout, figure_width,
@@ -1321,17 +1431,18 @@ def plot_stacked_split_bars(panels, output_path, ylim=None,
     plt.rcParams["hatch.linewidth"] = 1.0 * layout.font_scale
     fig, axes = plt.subplots(len(panels), 1, figsize=(figure_width, panel_height * len(panels)),
                              sharex=True)
-    tallest = 0.0
+    extents = []
     for index, ((title, shares), ax) in enumerate(zip(panels, axes)):
-        tallest = max(tallest, draw_split_bar_panel(
+        extents.append(draw_split_bar_panel(
             ax, shares, series, methods, categories, color_for, layout, ylim,
             category_labels, show_xticklabels=index == len(panels) - 1, ylabel=ylabel))
         ax.set_title(title, fontsize=TITLE_FONTSIZE * layout.font_scale)
     if ylim is None:
         # One scale across the panels whatever the caller passed: panels that do not share
         # a y axis cannot be read against each other, which is the whole point of stacking.
+        shared = padded_limits(min(low for low, _ in extents), max(high for _, high in extents))
         for ax in axes:
-            ax.set_ylim(0.0, min(100.0, tallest + pcp.PERCENT_HEADROOM))
+            ax.set_ylim(*shared)
 
     blocks = split_bar_legend_blocks(series, methods, color_for, layout, figure_width,
                                      series_legend_title, series_ncol, series_labels)
@@ -1482,9 +1593,9 @@ def plot_grid_split_bars(panels, output_path, ylim=None, *, shape, series_order=
     flat_axes = np.atleast_1d(axes).ravel()
 
     label_columns = last_panel_in_each_column(len(panels), ncols)
-    tallest = 0.0
+    extents = []
     for index, ((title, shares), ax) in enumerate(zip(panels, flat_axes)):
-        tallest = max(tallest, draw_split_bar_panel(
+        extents.append(draw_split_bar_panel(
             ax, shares, series, methods, categories, color_for, layout, ylim,
             category_labels, show_xticklabels=index in label_columns, ylabel=ylabel,
             show_ylabel=index % ncols == 0))
@@ -1493,8 +1604,9 @@ def plot_grid_split_bars(panels, output_path, ylim=None, *, shape, series_order=
         # One scale across the grid whatever the caller passed, for the same reason the
         # stacked figure shares one: panels on different scales cannot be read against
         # each other, which is the whole point of putting them on one page.
+        shared = padded_limits(min(low for low, _ in extents), max(high for _, high in extents))
         for ax in flat_axes[:len(panels)]:
-            ax.set_ylim(0.0, min(100.0, tallest + pcp.PERCENT_HEADROOM))
+            ax.set_ylim(*shared)
 
     spare_axes = list(flat_axes[len(panels):])
     for ax in spare_axes:
@@ -1519,7 +1631,10 @@ def display_name(key, labels):
 
 def stacked_axis_label(methods):
     # Kept short: at this type size a longer label runs past the top of the panel.
-    return f"{ARGMAX_SHARE_LABEL} (%)" if len(methods) == 1 else "Mean share (%)"
+    # Minus the null the stacked label is the short form: at the column layouts' 2.5x type
+    # "Mean share − null (pp)" is taller than a panel and runs into the one below it.
+    return units(ARGMAX_SHARE_LABEL) if len(methods) == 1 else (
+        short_units("Share") if MINUS_NULL else units("Mean share"))
 
 
 def plot_cross_model_argmax_shares(shares_by_model, dataset_plots_dir, ylim):
@@ -1590,16 +1705,53 @@ def parse_args():
     parser.add_argument("--positions", default=DEFAULT_POSITIONS, choices=POSITION_CHOICES,
                         help="Which euandi answers stand for an EP group in the two VAA "
                              "methods; must match the basis evaluate_euandi.py was run with.")
+    parser.add_argument("--results_dir", type=Path, default=None,
+                        help="Read this results directory instead of the --dataset one.")
+    parser.add_argument("--absolute", action="store_true",
+                        help="Draw the raw argmax shares instead of the shares minus their "
+                             "0-centered null.")
+    parser.add_argument("--sigma", type=float, default=DEFAULT_SIGMA,
+                        help="Sigma of the null to subtract, in stance units (default "
+                             "%(default)s = one Likert step); its files must exist.")
+    parser.add_argument("--null_dir", type=Path, default=None,
+                        help="Where the null-model CSVs are. Default: "
+                             "<results_dir>/tables/null_model")
     return parser.parse_args()
 
 
+def subtract_null(shares, per_axis, per_language, baseline):
+    """The three share families of one model minus their nulls: every (method, framing)
+    over all statements, and the framing-pooled shares per topic and per language minus
+    that slice's own null."""
+    shares = {(method, variant): minus_null(share, baseline.share(method, variant))
+              for (method, variant), share in shares.items()}
+    per_axis = {axis: {method: minus_null(share, baseline.share(method, POOLED_LABEL,
+                                                                "topic", axis))
+                       for method, share in per_method.items()}
+                for axis, per_method in per_axis.items()}
+    per_language = {language: {method: minus_null(share, baseline.share(
+                                   method, POOLED_LABEL, "language", language))
+                               for method, share in per_method.items()}
+                    for language, per_method in per_language.items()}
+    return shares, per_axis, per_language
+
+
 def main():
+    global MINUS_NULL
     args = parse_args()
-    results_dir = Path("data") / f"{args.dataset}_results"
+    MINUS_NULL = not args.absolute
+    results_dir = args.results_dir or Path("data") / f"{args.dataset}_results"
     if not results_dir.exists():
         raise SystemExit(f"Directory not found: {results_dir}")
+    # Loaded before any model is processed, so a missing null stops the run up front.
+    baseline = (NullBaseline.load(args.null_dir or results_dir / "tables" / "null_model",
+                                  args.positions, args.sigma)
+                if MINUS_NULL else None)
+    if baseline:
+        print(f"Drawing shares minus the 0-centered null ({baseline.source})")
 
-    model_dirs = sorted(p for p in results_dir.iterdir() if p.is_dir() and p.name != "plots")
+    model_dirs = sorted(p for p in results_dir.iterdir()
+                        if p.is_dir() and p.name not in ("plots", "tables"))
     if args.model:
         model_dirs = [d for d in model_dirs if d.name in set(args.model)]
     if not model_dirs:
@@ -1607,10 +1759,15 @@ def main():
 
     party_df = party_positions_frame(model_dirs, args.positions)
     shares_by_model, topics_by_model, languages_by_model, topic_counts_by_model = {}, {}, {}, {}
+    raw_records = []
     for model_dir in model_dirs:
         shares, per_axis, per_language, topic_counts = collect_model_shares(
             model_dir, party_df, args.dataset)
         if shares:
+            raw_records += summary_records(model_dir.name, shares)
+            if baseline:
+                shares, per_axis, per_language = subtract_null(
+                    shares, per_axis, per_language, baseline)
             shares_by_model[model_dir] = shares
             topics_by_model[model_dir] = per_axis
             languages_by_model[model_dir] = per_language
@@ -1622,9 +1779,9 @@ def main():
     topic_ylim = stacked_series_limits(topics_by_model)
     # One limit for both per-language figures: they draw the same stacks, regrouped.
     language_ylim = stacked_series_limits(languages_by_model)
-    print(f"\nShared y-axis: per method 0.0% .. {ylim[1]:.1f}%, "
-          f"per topic 0.0% .. {topic_ylim[1]:.1f}%, "
-          f"per language 0.0% .. {language_ylim[1]:.1f}%")
+    print(f"\nShared y-axis ({'pp minus null' if MINUS_NULL else '%'}): per method "
+          f"{limits_text(ylim)}, per topic {limits_text(topic_ylim)}, "
+          f"per language {limits_text(language_ylim)}")
 
     for model_dir, shares in shares_by_model.items():
         print(f"\nProcessing: {model_dir.name}")
@@ -1646,8 +1803,8 @@ def main():
         panel_language_ylim = stacked_series_limits(
             {model_dir: languages_by_model[model_dir] for model_dir in panel_dirs
              if model_dir in languages_by_model})
-        print(f"\nStacked per-language panels (y-axis 0.0% .. "
-              f"{panel_language_ylim[1]:.1f}% over these models alone):"
+        print(f"\nStacked per-language panels (y-axis {limits_text(panel_language_ylim)} "
+              f"over these models alone):"
               if panel_language_ylim else "\nStacked per-language panels:")
         stacked_language_panels(languages_by_model, panel_dirs, results_dir / "plots",
                                 panel_language_ylim)
@@ -1660,8 +1817,8 @@ def main():
         panel_topic_ylim = stacked_series_limits(
             {model_dir: topics_by_model[model_dir] for model_dir in topic_panel_dirs
              if model_dir in topics_by_model})
-        print(f"\nStacked per-topic panels (y-axis 0.0% .. "
-              f"{panel_topic_ylim[1]:.1f}% over these models alone):"
+        print(f"\nStacked per-topic panels (y-axis {limits_text(panel_topic_ylim)} "
+              f"over these models alone):"
               if panel_topic_ylim else "\nStacked per-topic panels:")
         stacked_topic_panels(topics_by_model, topic_counts_by_model, topic_panel_dirs,
                              results_dir / "plots", panel_topic_ylim)
@@ -1677,22 +1834,25 @@ def main():
         grid_topic_ylim = stacked_series_limits(
             {model_dir: topics_by_model[model_dir] for model_dir in grid_dirs
              if model_dir in topics_by_model})
-        print(f"\nPer-topic grid over {len(grid_dirs)} model(s) (y-axis 0.0% .. "
-              f"{grid_topic_ylim[1]:.1f}% over these models alone):"
+        print(f"\nPer-topic grid over {len(grid_dirs)} model(s) (y-axis "
+              f"{limits_text(grid_topic_ylim)} over these models alone):"
               if grid_topic_ylim else f"\nPer-topic grid over {len(grid_dirs)} model(s):")
         grid_topic_panels(topics_by_model, topic_counts_by_model, grid_dirs,
                           results_dir / "plots", grid_topic_ylim,
                           shape=(None, args.topic_grid_columns))
 
-    records = [
-        record
-        for model_dir, shares in shares_by_model.items()
-        for record in summary_records(model_dir.name, shares)
-    ]
+    # The raw shares are written whatever was drawn: argmax_share_table.py and the null
+    # scripts compare against them. The differences go next to them.
     summary_path = results_dir / "plots" / "argmax_share_methods.csv"
     summary_path.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(records).to_csv(summary_path, index=False)
+    pd.DataFrame(raw_records).to_csv(summary_path, index=False)
     print(f"\n  Wrote {summary_path}")
+    if baseline:
+        relative_path = summary_path.with_name("argmax_share_methods_minus_null.csv")
+        pd.DataFrame([record for model_dir, shares in shares_by_model.items()
+                      for record in summary_records(model_dir.name, shares)]
+                     ).to_csv(relative_path, index=False)
+        print(f"  Wrote {relative_path}")
 
     print("\nDone.")
 

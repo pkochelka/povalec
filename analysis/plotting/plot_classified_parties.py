@@ -536,10 +536,11 @@ def whisker_extent(values):
     return float(stats["whislo"]), float(stats["whishi"])
 
 
-def percent_box_limits(replicates_by_model_source_variant):
+def percent_box_limits(replicates_by_model_source_variant, clamp=True):
     """One padded y-range covering the whiskers of every scope plot_cross_model_vaa_boxes
     draws. Not zero-based: the models sit within a few points of each other, so a bar from
-    zero would spend the whole axis on agreement no model is anywhere near."""
+    zero would spend the whole axis on agreement no model is anywhere near. `clamp=False`
+    for differences from the null, which may go below zero."""
     lowest, highest = np.inf, -np.inf
     for source, variant_label, _, _ in cross_model_scopes(replicates_by_model_source_variant):
         scoped = scoped_replicates_per_model(
@@ -550,13 +551,31 @@ def percent_box_limits(replicates_by_model_source_variant):
                     lowest, highest = min(lowest, extent[0]), max(highest, extent[1])
     if not np.isfinite(lowest):
         return None
-    return padded_range(lowest, highest)
+    return padded_range(lowest, highest, clamp)
 
 
-def padded_range(lowest, highest):
-    """Room around the drawn values, clamped to the 0-100% a share can actually take."""
+def padded_range(lowest, highest, clamp=True):
+    """Room around the drawn values, clamped to the 0-100% a share can actually take --
+    unless `clamp` is off, for a difference from the null, which has no such bounds."""
     margin = max(0.06 * (highest - lowest), 0.5)
+    if not clamp:
+        return lowest - margin, highest + margin
     return max(0.0, lowest - margin), min(100.0, highest + margin)
+
+
+def signed_bar_limits(values_by_model_source_variant):
+    """percent_bar_limits for differences from the null: zero kept inside the axis and
+    headroom on whichever side has bars."""
+    lowest, highest = 0.0, 0.0
+    for source, variant_label, _, _ in cross_model_scopes(values_by_model_source_variant):
+        for series in scoped_mean_per_model(
+                values_by_model_source_variant, source, variant_label).values():
+            values = 100.0 * series.to_numpy(dtype=float)
+            finite = values[np.isfinite(values)]
+            if finite.size:
+                lowest = min(lowest, float(finite.min()))
+                highest = max(highest, float(finite.max()))
+    return lowest - PERCENT_HEADROOM, highest + PERCENT_HEADROOM
 
 
 def widest_limits(limits):
@@ -576,7 +595,7 @@ GROUP_WIDTH = 0.86
 # dozen capitalised names. Anything not listed falls through to the directory name, so
 # a new model dir still plots.
 def draw_models_party_bars(ax, value_per_model, parties, models, model_cmap,
-                           value_label, ylim, label_x=True, scale=1.0):
+                           value_label, ylim, label_x=True, scale=1.0, unit="%"):
     """One grouped-bar panel: a bar per (party, model), colour-indexed by the
     model's position in `models`.
 
@@ -603,10 +622,17 @@ def draw_models_party_bars(ax, value_per_model, parties, models, model_cmap,
                        rotation=20, ha="right", fontsize=TICK_FONTSIZE * scale)
     ax.tick_params(axis="y", labelsize=TICK_FONTSIZE * scale)
     ax.set_xlim(-0.5, len(parties) - 0.5)
-    ax.set_ylabel(f"{value_label} (%)", fontsize=AXIS_LABEL_FONTSIZE * scale)
+    ax.set_ylabel(f"{value_label} ({unit})", fontsize=AXIS_LABEL_FONTSIZE * scale)
     ax.set_ylim(*(ylim or (0.0, min(100.0, highest_percentage + PERCENT_HEADROOM))))
+    mark_zero_if_signed(ax, unit)
     ax.grid(axis="y", linestyle="--", alpha=0.4)
     ax.set_axisbelow(True)
+
+
+def mark_zero_if_signed(ax, unit):
+    """A difference from the null ("pp") is read against zero, so the line is drawn."""
+    if unit == "pp":
+        ax.axhline(0.0, color="black", linewidth=1.0, zorder=3)
 
 
 def plot_models_party_bars(value_per_model, value_label, output_path, ylim=None):
@@ -678,7 +704,7 @@ def plot_models_party_bars_stacked(value_per_model_per_panel, value_label, outpu
 
 
 def draw_models_party_boxes(ax, replicates_per_model, parties, models, model_cmap,
-                            value_label, ylim, label_x=True, scale=1.0):
+                            value_label, ylim, label_x=True, scale=1.0, unit="%"):
     """One box panel: a box per (party, model) over that model's bootstrap
     distribution -- box = IQR, whiskers = the usual 1.5 x IQR, line = the median.
 
@@ -715,7 +741,8 @@ def draw_models_party_boxes(ax, replicates_per_model, parties, models, model_cma
     ax.set_xlim(-0.5, len(parties) - 0.5)
     for boundary in party_positions[:-1] + 0.5:
         ax.axvline(boundary, color="black", linewidth=0.5, alpha=0.15)
-    ax.set_ylabel(f"{value_label} (%)", fontsize=AXIS_LABEL_FONTSIZE * scale)
+    ax.set_ylabel(f"{value_label} ({unit})", fontsize=AXIS_LABEL_FONTSIZE * scale)
+    mark_zero_if_signed(ax, unit)
     ax.grid(axis="y", linestyle="--", alpha=0.4)
     ax.set_axisbelow(True)
 
@@ -765,7 +792,7 @@ def legend_header_handle(title):
 
 def plot_models_agreement_and_source_panels(replicates_per_model, values_per_model_per_source,
                                             agreement_label, probability_label, output_path,
-                                            box_ylim=None, bar_ylim=None):
+                                            box_ylim=None, bar_ylim=None, unit="%"):
     """The VAA-agreement box figure and the two per-source probability panels drawn as
     one three-panel figure sharing a single model legend.
 
@@ -804,11 +831,12 @@ def plot_models_agreement_and_source_panels(replicates_per_model, values_per_mod
     fig, axes = plt.subplots(panel_count, 1,
                              figsize=(figure_width, 5.5 * panel_count), sharex=True)
     draw_models_party_boxes(axes[0], replicates_per_model, parties, models, model_cmap,
-                            agreement_label, box_ylim, label_x=False)
-    axes[0].set_title("VAA agreement", fontsize=TITLE_FONTSIZE)
+                            agreement_label, box_ylim, label_x=False, unit=unit)
+    axes[0].set_title("VAA agreement" + (" minus null" if unit == "pp" else ""),
+                      fontsize=TITLE_FONTSIZE)
     for index, (ax, (title, values)) in enumerate(zip(axes[1:], panels), start=1):
         draw_models_party_bars(ax, values, parties, models, model_cmap, probability_label,
-                               bar_ylim, label_x=index == panel_count - 1)
+                               bar_ylim, label_x=index == panel_count - 1, unit=unit)
         ax.set_title(title, fontsize=TITLE_FONTSIZE)
 
     # Hung off the bottom panel, so the offset is measured against one panel's height
@@ -938,15 +966,18 @@ def plot_cross_model_source_panels(values_by_model_source_variant, value_label,
 def plot_cross_model_agreement_and_source_panels(
         values_by_model_source_variant, replicates_by_model_source_variant,
         agreement_label, probability_label, dataset_plots_dir, filename_stem,
-        bar_ylim=None, box_ylim=None):
+        bar_ylim=None, box_ylim=None, unit="%"):
     """plot_cross_model_source_panels' figure with the VAA agreement boxes stacked on
     top of it: one figure per framing scope, since the lower panels ARE the sources.
 
     The agreement panel pools over sources -- it is drawn from the raw answers of both
     tracks, the way plot_cross_model_vaa_boxes' pooled figure is -- so it is the
     framing, not the source, that the scopes vary."""
-    bar_ylim = bar_ylim or percent_bar_limits(values_by_model_source_variant)
-    box_ylim = box_ylim or percent_box_limits(replicates_by_model_source_variant)
+    signed = unit == "pp"
+    bar_ylim = bar_ylim or (signed_bar_limits(values_by_model_source_variant) if signed
+                            else percent_bar_limits(values_by_model_source_variant))
+    box_ylim = box_ylim or percent_box_limits(replicates_by_model_source_variant,
+                                              clamp=not signed)
     keys = set(values_by_model_source_variant)
     sources = [source for source in SOURCE_PANEL_ORDER if any(key[1] == source for key in keys)]
     if len(sources) < 2:
@@ -968,7 +999,7 @@ def plot_cross_model_agreement_and_source_panels(
             continue
         plot_models_agreement_and_source_panels(
             replicates_per_model, panels, agreement_label, probability_label,
-            dataset_plots_dir / f"{filename_stem}{suffix}.png", box_ylim, bar_ylim)
+            dataset_plots_dir / f"{filename_stem}{suffix}.png", box_ylim, bar_ylim, unit)
 
 
 def discover_vaa_csvs(model_dir):
@@ -1503,16 +1534,61 @@ def parse_args():
     parser.add_argument("--bootstrap", default=10000, type=int,
                         help="Bootstrap draws behind the VAA agreement intervals.")
     parser.add_argument("--seed", default=42, type=int)
+    parser.add_argument("--results_dir", type=Path, default=None,
+                        help="Read this results directory instead of the --dataset one.")
+    parser.add_argument("--absolute", action="store_true",
+                        help="Draw vaa_agreement_and_classified_sources*.png as raw mean "
+                             "agreement and mean probability, not minus their 0-centered null.")
+    parser.add_argument("--sigma", type=float, default=None,
+                        help="Sigma of the null to subtract (default: the VAA null's).")
+    parser.add_argument("--null_dir", type=Path, default=None,
+                        help="Default: <results_dir>/tables/null_model")
     return parser.parse_args()
+
+
+# Which null the combined figure's panels subtract: the classifier method of a classified
+# source, and the VAA track a source's agreement replicates were scored from.
+CLASSIFIER_METHOD_FOR_SOURCE = {"reasons": "reasons_clf", "speeches": "speeches_clf"}
+
+
+def minus_null_inputs(mean_probability_per_model_source_variant,
+                      vaa_replicates_per_model_source_variant, baseline):
+    """The combined figure's two inputs minus their 0-centered nulls: every (model,
+    source, framing) cell's mean probability minus the classifier's mean-probability null
+    of that source and framing, and every agreement replicate minus the agreement null of
+    its VAA track. Per cell, before any scope pools them, so a pooled panel subtracts the
+    mean of the nulls it pools."""
+    from analysis.null_baseline import minus_null
+    probabilities = {
+        (model, source, variant): minus_null(series, baseline.mean_probability(
+            CLASSIFIER_METHOD_FOR_SOURCE[source], variant))
+        for (model, source, variant), series in mean_probability_per_model_source_variant.items()
+    }
+    replicates = {
+        (model, source, variant): cell.sub(
+            baseline.agreement(STANCE_SOURCE_FOR_CLASSIFIER_SOURCE[source])
+            .reindex(cell.index), axis=0)
+        for (model, source, variant), cell in vaa_replicates_per_model_source_variant.items()
+    }
+    return probabilities, replicates
 
 
 def main():
     args = parse_args()
-    results_dir = Path("data") / f"{args.dataset}_results"
+    results_dir = args.results_dir or Path("data") / f"{args.dataset}_results"
     if not results_dir.exists():
         raise SystemExit(f"Directory not found: {results_dir}")
+    baseline = None
+    if not args.absolute:
+        # Imported here: null_baseline reaches this module back through
+        # classifier_null_model, so a top-level import would be circular.
+        from analysis.null_baseline import NullBaseline
+        from analysis.vaa_null_model import DEFAULT_SIGMA
+        baseline = NullBaseline.load(args.null_dir or results_dir / "tables" / "null_model",
+                                     args.positions, args.sigma or DEFAULT_SIGMA)
 
-    model_dirs = sorted(p for p in results_dir.iterdir() if p.is_dir() and p.name != "plots")
+    model_dirs = sorted(p for p in results_dir.iterdir()
+                        if p.is_dir() and p.name not in ("plots", "tables"))
     if args.model:
         model_dirs = [d for d in model_dirs if d.name == args.model]
     if not model_dirs:
@@ -1557,12 +1633,26 @@ def main():
             # The agreement boxes and the two per-source probability panels in one
             # three-panel figure: they carry the same model legend, and the thesis
             # prints them together.
-            plot_cross_model_agreement_and_source_panels(
-                mean_probability_per_model_source_variant,
-                vaa_replicates_per_model_source_variant,
-                MEAN_AGREEMENT_LABEL, MEAN_PROBABILITY_LABEL,
-                dataset_plots_dir, "vaa_agreement_and_classified_sources",
-            )
+            # Minus their 0-centered nulls unless --absolute: agreement and probability
+            # a group gets beyond what random stances around neutral would give it.
+            if baseline:
+                probabilities, replicates = minus_null_inputs(
+                    mean_probability_per_model_source_variant,
+                    vaa_replicates_per_model_source_variant, baseline)
+                plot_cross_model_agreement_and_source_panels(
+                    probabilities, replicates,
+                    # Short: three stacked panels leave each rotated label one panel of
+                    # height, and "Mean VAA agreement − null" runs into its neighbour.
+                    "Δ agreement", "Δ probability",
+                    dataset_plots_dir, "vaa_agreement_and_classified_sources", unit="pp",
+                )
+            else:
+                plot_cross_model_agreement_and_source_panels(
+                    mean_probability_per_model_source_variant,
+                    vaa_replicates_per_model_source_variant,
+                    MEAN_AGREEMENT_LABEL, MEAN_PROBABILITY_LABEL,
+                    dataset_plots_dir, "vaa_agreement_and_classified_sources",
+                )
 
     vaa_comparison_rows_across_models = []
     for model_dir, long_by_source_variant in predictions_by_model.items():

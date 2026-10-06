@@ -6,6 +6,7 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.patheffects
+import matplotlib.ticker
 import matplotlib.pyplot as plt
 from analysis.core.labels import use_short_party_labels
 use_short_party_labels()   # cluster nicknames in every label (utils.PARTY_SHORT)
@@ -37,6 +38,26 @@ LEGEND_FONTSIZE_SMALL = 7  # the 21-entry language lookup: scanned, not read
 # enough to be told apart after the downscale.
 MAIN_LEGEND_LOC = "lower left"
 MODEL_LEGEND_TITLE = "model  (large = mean)"
+# The stacked source/framing panels are the compass that goes in the paper body. At 9in
+# per panel the column-width reduction left their 15pt text at ~4pt, so they are drawn
+# on a smaller canvas with larger type (~6.5pt printed), sparser ticks, and the pole
+# names alone as axis labels -- the full DIMENSION_POLES strings do not fit at that size.
+# The model legend is a step smaller and three across, so it does not outweigh the panels.
+PANELS_SIZE = 7.5
+# Height/width of each panel. Two square panels stacked are already twice as tall as
+# they are wide, which with the legend runs past a column's page height; the compass
+# is drawn a little flatter instead of smaller.
+PANELS_ASPECT = 0.8
+PANELS_FONTSIZE = 18
+PANELS_LEGEND_FONTSIZE = 16
+PANELS_TICKS = [-1.0, -0.5, 0.0, 0.5, 1.0]
+PANELS_RUN_SIZE = 8
+PANELS_MEAN_SIZE = 170
+PANELS_ANCHOR_SIZE = 200
+PANELS_LEGEND_NCOL = 3
+PANELS_POLES = {
+    "Europe": ("National autonomy", "EU integration"),
+}
 LEGEND_MARKERSIZE = 12
 # The 21-entry language box would grow out of the panel at the full size.
 LANG_LEGEND_MARKERSIZE = 9
@@ -375,6 +396,42 @@ def setup_compass(ax, x_dim, y_dim, one_sided):
     ax.grid(True, linestyle=":", alpha=0.3)
 
 
+def setup_compact_compass(ax, x_dim, y_dim, one_sided, fontsize, x_labels=True):
+    """setup_compass for the small stacked panels: the two pole names sit at either end
+    of each axis instead of one long centred label. x_labels=False leaves the x tick
+    labels and pole names to the panel below, which shares the axis."""
+    ax.axhline(0, color="gray", lw=0.8)
+    ax.axvline(0, color="gray", lw=0.8)
+    ax.set_xlim(-1, 1)
+    ax.set_ylim(-1, 1)
+    ax.set_box_aspect(PANELS_ASPECT)
+    ax.set_xticks(PANELS_TICKS)
+    ax.set_yticks(PANELS_TICKS)
+    # "-1" rather than "-1.0": the y tick labels are what the pole names have to clear
+    short = matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:g}".replace("-", "−"))
+    ax.xaxis.set_major_formatter(short)
+    ax.yaxis.set_major_formatter(short)
+    ax.tick_params(labelsize=fontsize)
+    if not x_labels:
+        ax.tick_params(labelbottom=False)
+    ax.grid(True, linestyle=":", alpha=0.3)
+    for dim, axis in ((x_dim, "x"), (y_dim, "y")):
+        if axis == "x" and not x_labels:
+            continue
+        negative, positive = PANELS_POLES.get(dim, DIMENSION_POLES.get(dim, ("disagree", "agree")))
+        flag = " (one-sided!)" if dim in one_sided else ""
+        # Each pole name is pinned to its own end of the axis, so the gap between the two
+        # is whatever the axis has left over -- centred on their halves they still met.
+        if axis == "x":
+            kwargs = dict(transform=ax.transAxes, fontsize=fontsize, va="top")
+            ax.text(0.0, -0.075, f"← {negative}{flag}", ha="left", **kwargs)
+            ax.text(1.0, -0.075, f"{positive} →", ha="right", **kwargs)
+        else:
+            kwargs = dict(transform=ax.transAxes, fontsize=fontsize, ha="right", rotation=90)
+            ax.text(-0.15, 0.0, f"← {negative}{flag}", va="bottom", **kwargs)
+            ax.text(-0.15, 1.0, f"{positive} →", va="top", **kwargs)
+
+
 def axis_label(dim, one_sided):
     negative, positive = DIMENSION_POLES.get(dim, ("disagree", "agree"))
     flag = "  (one-sided!)" if dim in one_sided else ""
@@ -566,7 +623,8 @@ def plot_violins(responses, dims, one_sided, out_path):
     print(f"  Saved {out_path}")
 
 
-def draw_models_scatter_panel(ax, runs_by_model, x_dim, y_dim, split_by, anchors, steps):
+def draw_models_scatter_panel(ax, runs_by_model, x_dim, y_dim, split_by, anchors, steps,
+                              fontsize=FONTSIZE, run_size=12, mean_size=240, anchor_size=260):
     """One cross-model scatter panel, legends left to the caller.
 
     Returns (model handles, style handles, style title): a single-panel figure puts both
@@ -583,11 +641,11 @@ def draw_models_scatter_panel(ax, runs_by_model, x_dim, y_dim, split_by, anchors
         if frame.empty:
             return
         drawn = jitter_likert(frame, x_dim, y_dim, steps, rng)
-        ax.scatter(drawn[:, 0], drawn[:, 1], s=12, marker=marker,
+        ax.scatter(drawn[:, 0], drawn[:, 1], s=run_size, marker=marker,
                    **mark_style(color, hollow), alpha=0.7, linewidths=0.5)
         # the mean is taken from the exact values, never from the jittered copy
         points = frame[[x_dim, y_dim]].to_numpy()
-        ax.scatter(*points.mean(axis=0), s=240, marker=marker, facecolor=color,
+        ax.scatter(*points.mean(axis=0), s=mean_size, marker=marker, facecolor=color,
                    edgecolor="black", linewidths=1.8, zorder=5)
 
     model_handles = []
@@ -614,7 +672,8 @@ def draw_models_scatter_panel(ax, runs_by_model, x_dim, y_dim, split_by, anchors
         else:
             draw(runs, color, "o")
 
-    party_handle = draw_party_anchors(ax, anchors, x_dim, y_dim)
+    party_handle = draw_party_anchors(ax, anchors, x_dim, y_dim, size=anchor_size,
+                                      fontsize=fontsize)
     style_handles, style_title = [], None
     if split_by == "framing":
         style_handles = [legend_mark("gray", FRAMING_MARKER[f], f, hollow=is_hollow(framing=f))
@@ -635,10 +694,10 @@ def draw_models_scatter_panel(ax, runs_by_model, x_dim, y_dim, split_by, anchors
     return model_handles, style_handles, style_title
 
 
-def place_style_legend(ax, style_handles, style_title, loc="lower right"):
+def place_style_legend(ax, style_handles, style_title, loc="lower right", fontsize=FONTSIZE):
     if style_handles:
-        ax.legend(handles=style_handles, loc=loc, fontsize=FONTSIZE,
-                  title_fontsize=FONTSIZE, framealpha=0.9, title=style_title)
+        ax.legend(handles=style_handles, loc=loc, fontsize=fontsize,
+                  title_fontsize=fontsize, framealpha=0.9, title=style_title)
 
 
 def plot_models_scatter_compass(runs_by_model, x_dim, y_dim, one_sided, out_path,
@@ -666,26 +725,39 @@ def plot_models_scatter_panels(runs_by_model, x_dim, y_dim, one_sided, out_path,
     on both -- and inside the axes it covers a quarter of the compass and prints through
     the EP-group labels. Here it is drawn once, under the bottom panel, and only the
     2-3 entry style legend stays in the panel it belongs to."""
-    fig, axes = plt.subplots(len(splits), 1, figsize=(9, 9 * len(splits)))
+    # The figure has to fit one column with its caption, so every row of text that is not
+    # needed goes: the panels share the x axis (tick labels and pole names only under the
+    # bottom one), and each panel's split name rides in its style legend's row.
+    axes = np.atleast_1d(plt.subplots(len(splits), 1, sharex=True,
+                                      figsize=(PANELS_SIZE, PANELS_SIZE * PANELS_ASPECT * len(splits)))[1])
+    fig = axes[0].figure
     shared_handles = None
-    for ax, split_by in zip(np.atleast_1d(axes), splits):
-        setup_compass(ax, x_dim, y_dim, one_sided)
+    for i, (ax, split_by) in enumerate(zip(axes, splits)):
+        setup_compact_compass(ax, x_dim, y_dim, one_sided, PANELS_FONTSIZE,
+                              x_labels=i == len(axes) - 1)
         model_handles, style_handles, style_title = draw_models_scatter_panel(
-            ax, runs_by_model, x_dim, y_dim, split_by, anchors, steps)
-        ax.set_title(f"split by {split_by}", fontsize=FONTSIZE)
-        # Lower left, the corner the model legend just vacated: on the right it sits on
-        # top of the ID anchor's label, which is the one group out in that corner.
-        place_style_legend(ax, style_handles, style_title, loc=MAIN_LEGEND_LOC)
+            ax, runs_by_model, x_dim, y_dim, split_by, anchors, steps,
+            fontsize=PANELS_FONTSIZE, run_size=PANELS_RUN_SIZE, mean_size=PANELS_MEAN_SIZE,
+            anchor_size=PANELS_ANCHOR_SIZE)
+        # One row above the panel, standing in for its title: at this type size any
+        # corner of the compass the legend took would cover an EP-group anchor. The
+        # split name leads the row as a handle-less entry rather than a title line.
+        name = Line2D([], [], ls="", marker="", label=f"{split_by}:")
+        ax.legend(handles=[name, *style_handles], loc="lower center",
+                  bbox_to_anchor=(0.5, 1.0), ncol=len(style_handles) + 1,
+                  fontsize=PANELS_FONTSIZE, frameon=False, handlelength=1.0,
+                  handletextpad=0.2, columnspacing=0.8, borderaxespad=0.1)
         # Same models, same order, same colours on every panel, so the first panel's
         # handles stand for all of them.
         shared_handles = shared_handles or model_handles
 
-    fig.tight_layout()
+    fig.tight_layout(h_pad=0.2)
     # A figure legend is not laid out by tight_layout, so the panels keep the whole canvas
     # and bbox_inches="tight" grows the saved image to take the legend in below them.
     fig.legend(handles=shared_handles, loc="upper center", bbox_to_anchor=(0.5, 0.0),
-               ncol=4, fontsize=FONTSIZE, title=MODEL_LEGEND_TITLE,
-               title_fontsize=FONTSIZE, frameon=False)
+               ncol=PANELS_LEGEND_NCOL, fontsize=PANELS_LEGEND_FONTSIZE,
+               title=MODEL_LEGEND_TITLE, title_fontsize=PANELS_LEGEND_FONTSIZE, frameon=False, handletextpad=0.3,
+               columnspacing=1.0, labelspacing=0.3)
     fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     print(f"  Saved {out_path}")

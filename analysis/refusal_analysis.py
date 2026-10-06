@@ -51,8 +51,12 @@ PER_QUESTION_PLOT_EXCLUDE = ()
 # which left its 24pt labels printing at under 3pt.
 PER_QUESTION_TICK_FONTSIZE = 30
 PER_QUESTION_AXIS_LABEL_FONTSIZE = 34
-PER_QUESTION_LEGEND_FONTSIZE = 24
-PER_QUESTION_LEGEND_TITLE_FONTSIZE = 26
+# The legend is set to print at ~8-9pt, near the 10-11pt body text around the figure. Two
+# columns is the most that allows: with more, the legend becomes the figure's widest element
+# and the column-width reduction shrinks it right back (11pt would need a single column,
+# making the figure ~6in tall). Swatches are kept short so the text gets the width.
+PER_QUESTION_LEGEND_FONTSIZE = 48
+PER_QUESTION_LEGEND_TITLE_FONTSIZE = 48
 PER_QUESTION_VALUE_FONTSIZE = 20
 # Inches per proposition, and the floor for a short questionnaire. At 30 propositions
 # this is a ~15.5in figure: a P-label no longer fits horizontally in one bar's width at
@@ -60,7 +64,7 @@ PER_QUESTION_VALUE_FONTSIZE = 20
 PER_QUESTION_WIDTH_PER_ITEM = 0.45
 PER_QUESTION_MIN_WIDTH = 15.0
 PER_QUESTION_HEIGHT = 9.5
-PER_QUESTION_LEGEND_NCOL = 4
+PER_QUESTION_LEGEND_NCOL = 2
 PER_QUESTION_VALUE_HEADROOM = 1.22
 
 # The hard-vs-semantic breakdown: fewer bars, so it can be both narrower and typed a
@@ -411,13 +415,12 @@ def plot_refusal_per_question(per_question_model, question_totals, output_path):
     ax.set_ylim(0, float(np.nanmax(aggregate)) * PER_QUESTION_VALUE_HEADROOM or 1.0)
     ax.grid(axis="y", linestyle="--", alpha=0.4)
     ax.set_axisbelow(True)
-    # Fewer columns than before: the entries are unchanged but each is now set at 24pt,
-    # and six of them across no longer fit the narrower figure. The offset has to clear
-    # the upright P-labels AND the x-axis label beneath them, both of which grew.
-    ax.legend(title="Model", loc="upper center", bbox_to_anchor=(0.5, -0.27),
+    # The offset has to clear the upright P-labels AND the x-axis label beneath them.
+    ax.legend(title="Model", loc="upper center", bbox_to_anchor=(0.5, -0.22),
               fontsize=PER_QUESTION_LEGEND_FONTSIZE,
               title_fontsize=PER_QUESTION_LEGEND_TITLE_FONTSIZE,
-              ncol=min(PER_QUESTION_LEGEND_NCOL, len(models)), framealpha=0.9)
+              ncol=min(PER_QUESTION_LEGEND_NCOL, len(models)), framealpha=0.9,
+              handlelength=1.0, handletextpad=0.4, columnspacing=1.2, labelspacing=0.3)
     fig.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  Saved {output_path}")

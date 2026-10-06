@@ -57,7 +57,7 @@ K = 4
 # filter (split_preprocessed_data.MIN_LANG_SAMPLES) counts rows before the national track
 # drops unmapped parties, so hr passes it yet ends up with ~22k train rows here and a
 # Radical-left floor of ~100, starving the language quota. 30k sits between hr (~23-25k
-# pool rows) and the next-thinnest language (~42k+).
+# pool rows) and the next-thinnest language (~42k+). --min-lang-rows overrides it.
 MIN_LANG_ROWS = 30_000
 # The training corpus's labels (preprocess_data.py's mappings) -> the tenth-term groups
 # that succeeded them, spelled as in the raw EU&I file. ID split in 2024 into Patriots
@@ -177,6 +177,8 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=42, help="split/balancing seed")
     parser.add_argument("--cluster-seed", type=int, default=0,
                         help="k-means seed; CLUSTER_NAMES were read off the seed-0 fit")
+    parser.add_argument("--min-lang-rows", type=int, default=MIN_LANG_ROWS,
+                        help="drop languages with fewer pool rows than this")
     add_language_ratio_arg(parser)
     return parser.parse_args()
 
@@ -230,7 +232,7 @@ def load_pinned(path=PINNED_TEST_FILE):
 
 
 def split_and_write(pool, output_dir, seed, per_party, eval_set_size, metadata, metadata_name,
-                    language_ratio=1.0, pinned_file=PINNED_TEST_FILE):
+                    language_ratio=1.0, pinned_file=PINNED_TEST_FILE, min_lang_rows=MIN_LANG_ROWS):
     """Re-split a relabelled pool, balance its train split, and write the track.
 
     Shared by this group-level track and the national-party one
@@ -242,8 +244,8 @@ def split_and_write(pool, output_dir, seed, per_party, eval_set_size, metadata, 
     rng = np.random.default_rng(seed)
     output_dir.mkdir(parents=True, exist_ok=True)
     lang_counts = pool["language"].value_counts()
-    thin = lang_counts[lang_counts < MIN_LANG_ROWS]
-    print(f"Languages below {MIN_LANG_ROWS:,} pool rows, dropped: {thin.to_dict()}")
+    thin = lang_counts[lang_counts < min_lang_rows]
+    print(f"Languages below {min_lang_rows:,} pool rows, dropped: {thin.to_dict()}")
     pool = pool[~pool["language"].isin(thin.index)].reset_index(drop=True)
     pinned = load_pinned(pinned_file)
     train, dev, test = split_dataframe(pool, eval_set_size=eval_set_size, seed=seed, pinned=pinned)
@@ -290,7 +292,7 @@ def split_and_write(pool, output_dir, seed, per_party, eval_set_size, metadata, 
         ignore_index=True,
     ).sample(frac=1, random_state=seed).reset_index(drop=True)
     metadata = {**metadata, "language_ratio": language_ratio, "balanced_per_cluster": target,
-                "min_lang_rows": MIN_LANG_ROWS,
+                "min_lang_rows": min_lang_rows, "eval_set_size": eval_set_size,
                 "dropped_languages": {k: int(v) for k, v in thin.items()}}
     print(f"Balanced train: {len(balanced):,} rows")
     print(balanced.groupby([PARTY_COLUMN, "language"], observed=True)
@@ -322,7 +324,7 @@ def main():
         "split_seed": args.seed,
         "clusters": pk.CLUSTER_NAMES[K],
         "labels": report,
-    }, "label_mapping.json", args.language_ratio)
+    }, "label_mapping.json", args.language_ratio, min_lang_rows=args.min_lang_rows)
 
 
 if __name__ == "__main__":

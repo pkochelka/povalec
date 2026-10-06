@@ -31,6 +31,7 @@ tracks, and the existing ECR+ID results, never overwrite each other.
 import argparse
 import importlib
 import os
+import re
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -64,7 +65,21 @@ def main():
                         help="default: runs/<track>-k<k>-<trainer><suffix>")
     parser.add_argument("--dry-run", action="store_true",
                         help="resolve and check paths, then stop before loading the trainer")
+    speed = parser.add_argument_group("speed settings (defaults reproduce the original runs)")
+    speed.add_argument("--max-len", type=int, default=None, help="token limit (default 512)")
+    speed.add_argument("--no-grad-ckpt", action="store_true", help="turn gradient checkpointing off")
+    speed.add_argument("--group-by-length", action="store_true",
+                       help="batch texts of similar length (logit-adjusted trainers only)")
+    speed.add_argument("--workers", type=int, default=None,
+                       help="dataloader workers and tokenizer processes (default 2 / 1)")
+    speed.add_argument("--snapshot-epochs", default="",
+                       help="e.g. '3,6' or '3:6' (sbatch --export splits on commas): also keep the "
+                            "model after these epochs as model_epoch<N>, with its own biases, "
+                            "manifest and results (logit-adjusted trainers only)")
     args = parser.parse_args()
+    snapshot_epochs = tuple(int(e) for e in re.split(r"[,:\s]+", args.snapshot_epochs) if e)
+    if args.trainer == "balanced" and (args.group_by_length or snapshot_epochs):
+        raise SystemExit("--group-by-length and --snapshot-epochs are only wired into the logit-adjusted trainer")
 
     module_name, train_split = TRAINERS[args.trainer]
     data_dir = track_dir(args.track, args.k, args.suffix)
@@ -77,10 +92,27 @@ def main():
     print(f"trainer:   {module_name} (train split: {train_split}.parquet)")
     print(f"data:      {data_dir}")
     print(f"run dir:   {run_dir}")
+    print(f"speed:     max_len={args.max_len or 512} grad_ckpt={not args.no_grad_ckpt} "
+          f"group_by_length={args.group_by_length} workers={args.workers or 2} snapshots={snapshot_epochs}")
     if args.dry_run:
         return
 
+    # Shared settings live in classifier_training and are read at call time by both
+    # trainers; MAX_LEN is also copied into the balanced module's namespace, so set both.
+    shared = importlib.import_module("analysis.classifier_training")
+    overrides = {"GRADIENT_CHECKPOINTING": not args.no_grad_ckpt,
+                 "GROUP_BY_LENGTH": args.group_by_length,
+                 "SNAPSHOT_EPOCHS": snapshot_epochs}
+    if args.max_len:
+        overrides["MAX_LEN"] = args.max_len
+    if args.workers:
+        overrides.update(DATALOADER_WORKERS=args.workers, TOKENIZE_PROC=args.workers)
+
     trainer = importlib.import_module(module_name)
+    for module in {shared, trainer}:
+        for name, value in overrides.items():
+            if hasattr(module, name):
+                setattr(module, name, value)
     trainer.DATA_DIR = str(data_dir)
     trainer.OUTPUT_DIR = str(run_dir / "model")
     if hasattr(trainer, "TRAIN_SPLIT"):

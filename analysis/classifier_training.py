@@ -18,6 +18,8 @@ import json
 from dataclasses import dataclass
 
 import numpy as np
+import pyarrow as pa
+import pyarrow.compute  # noqa: F401  (registers pa.compute)
 import torch
 import torch.nn.functional as F
 from datasets import ClassLabel, Dataset, DatasetDict
@@ -26,8 +28,9 @@ from sklearn.metrics import f1_score
 from transformers import (
     AutoModelForSequenceClassification, AutoTokenizer,
     DataCollatorWithPadding, EarlyStoppingCallback,
-    Trainer, TrainingArguments, set_seed,
+    Trainer, TrainerCallback, TrainingArguments, set_seed,
 )
+from transformers.trainer_pt_utils import LengthGroupedSampler
 
 # accelerate probes for the optional lomo_optim package on EVERY optimizer
 # step; with the package absent, importlib re-lists site-packages whenever its
@@ -67,6 +70,18 @@ LOGIT_ADJUSTMENT_TAU = 1.0
 EPSILON = 1e-12
 BEST_METRIC = "f1_macro_mean_lang"
 
+# Speed settings. The defaults reproduce the original runs; train_cluster_track.py
+# overrides them per run. Gradient checkpointing trades ~30% step time for memory a
+# 48 GB card does not need at batch 32 x 512. Length grouping batches texts of similar
+# length so less of each batch is padding (logit-adjusted trainer only).
+GRADIENT_CHECKPOINTING = True
+GROUP_BY_LENGTH = False
+DATALOADER_WORKERS = 2
+TOKENIZE_PROC = None
+# Epochs after which an extra copy of the model is kept, as <OUTPUT_DIR>_epoch<N>, with
+# its own dev-fitted biases, manifest and test results (logit-adjusted trainer only).
+SNAPSHOT_EPOCHS = ()
+
 
 @dataclass
 class TrainingData:
@@ -80,6 +95,7 @@ class TrainingData:
     target_names: list
     dev_langs: np.ndarray
     test_langs: np.ndarray
+    train_lengths: list
 
 
 class LanguageAwareMetrics:
@@ -120,9 +136,21 @@ class LanguageAwareMetrics:
 
 
 class LogitAdjustedTrainer(Trainer):
-    def __init__(self, logit_adjustment, **kwargs):
+    def __init__(self, logit_adjustment, train_lengths=None, **kwargs):
         super().__init__(**kwargs)
         self.logit_adjustment = logit_adjustment
+        self.train_lengths = train_lengths
+
+    def _get_train_sampler(self, *args, **kwargs):
+        # Built here rather than through TrainingArguments: the flag was renamed between
+        # transformers 4 and 5, and the Trainer drops a "length" column before sampling,
+        # which would make LengthGroupedSampler re-read every row to measure it.
+        if self.train_lengths is None:
+            return super()._get_train_sampler(*args, **kwargs)
+        return LengthGroupedSampler(
+            self.args.train_batch_size * self.args.gradient_accumulation_steps,
+            lengths=self.train_lengths,
+        )
 
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         labels = inputs.pop("labels")
@@ -181,7 +209,9 @@ def prepare_training_data(data_dir, tokenizer, train_split="train"):
         lambda batch: tokenizer(batch["text"], truncation=True, max_length=MAX_LEN),
         batched=True,
         remove_columns=["text", "language"],
+        num_proc=TOKENIZE_PROC,
     )
+    train_lengths = pa.compute.list_value_length(tokenized["train"].data.column("input_ids")).to_pylist()
 
     return TrainingData(
         train=tokenized["train"],
@@ -194,6 +224,7 @@ def prepare_training_data(data_dir, tokenizer, train_split="train"):
         target_names=[id2label[i] for i in range(num_labels)],
         dev_langs=splits["dev"]["language"].to_numpy(),
         test_langs=splits["test"]["language"].to_numpy(),
+        train_lengths=train_lengths,
     )
 
 
@@ -222,8 +253,8 @@ def training_arguments(output_dir, num_epochs, evaluate_each_epoch):
         per_device_train_batch_size=32,
         per_device_eval_batch_size=32,
         gradient_accumulation_steps=1,
-        gradient_checkpointing=True,
-        dataloader_num_workers=2,
+        gradient_checkpointing=GRADIENT_CHECKPOINTING,
+        dataloader_num_workers=DATALOADER_WORKERS,
         num_train_epochs=num_epochs,
         learning_rate=2e-5,
         weight_decay=0.01,
@@ -246,14 +277,76 @@ def release(model, trainer, device):
         torch.cuda.empty_cache()
 
 
+def snapshot_dir(epoch):
+    return f"{OUTPUT_DIR}_epoch{epoch}"
+
+
+class EpochSnapshot(TrainerCallback):
+    """Keep a copy of the model as it is at the end of the listed epochs.
+
+    save_total_limit=1 deletes earlier epoch checkpoints, and load_best_model_at_end
+    replaces the final weights with the best-dev ones, so neither leaves the
+    epoch-N model behind on its own.
+    """
+
+    def __init__(self, epochs, tokenizer):
+        self.epochs = set(epochs)
+        self.tokenizer = tokenizer
+
+    def on_epoch_end(self, args, state, control, model=None, **kwargs):
+        epoch = round(state.epoch)
+        if epoch in self.epochs:
+            model.save_pretrained(snapshot_dir(epoch))
+            self.tokenizer.save_pretrained(snapshot_dir(epoch))
+            print(f"Saved epoch-{epoch} snapshot to {snapshot_dir(epoch)}")
+
+
+def fit_biases_and_test(trainer, data, metrics_fn):
+    """Dev-fitted per-class bias, then test predictions with that bias applied."""
+    metrics_fn.current_languages = data.dev_langs
+    dev_predictions = trainer.predict(data.dev)
+    dev_shares = np.bincount(dev_predictions.label_ids, minlength=data.num_labels)
+    biases = fit_uniform_bias(dev_predictions.predictions, data.num_labels, target=dev_shares)
+    print("Dev-marginal bias (fit on dev): "
+          + ", ".join(f"{name}={b:+.3f}" for name, b in zip(data.target_names, biases)))
+    metrics_fn.current_languages = data.test_langs
+    predictions = trainer.predict(data.test)
+    return biases, predictions.label_ids, np.argmax(predictions.predictions + biases, axis=-1)
+
+
+def evaluate_snapshot(epoch, data, tokenizer, device):
+    """Biases, manifest and results file for one epoch snapshot, like the main model."""
+    path = snapshot_dir(epoch)
+    if not os.path.isdir(path):
+        print(f"No epoch-{epoch} snapshot (training stopped earlier); skipping.")
+        return
+    print(f"\n{'=' * 60}\n  Evaluating epoch-{epoch} snapshot\n{'=' * 60}")
+    model = AutoModelForSequenceClassification.from_pretrained(path).to(device)
+    metrics_fn = LanguageAwareMetrics()
+    trainer = Trainer(
+        model=model,
+        args=training_arguments(os.path.join(path, "_eval"), 1, evaluate_each_epoch=False),
+        data_collator=data.collator,
+        processing_class=tokenizer,
+        compute_metrics=metrics_fn,
+    )
+    biases, y_test, y_pred = fit_biases_and_test(trainer, data, metrics_fn)
+    release(model, trainer, device)
+    report_and_save(path, data, epoch, biases, y_test, y_pred, tag_extra=f"_snapshot-ep{epoch}")
+
+
 def train_and_evaluate(data, tokenizer, hf_token, device):
     print(f"\n{'=' * 60}\n  Training on imbalanced train, selecting on uniform dev\n{'=' * 60}")
     model = build_model(data, hf_token, device)
     metrics_fn = LanguageAwareMetrics()
     metrics_fn.current_languages = data.dev_langs
 
+    callbacks = [EarlyStoppingCallback(early_stopping_patience=EARLY_STOPPING_PATIENCE)]
+    if SNAPSHOT_EPOCHS:
+        callbacks.append(EpochSnapshot(SNAPSHOT_EPOCHS, tokenizer))
     trainer = LogitAdjustedTrainer(
         logit_adjustment=logit_adjustment_for(data.train, data.num_labels, device),
+        train_lengths=data.train_lengths if GROUP_BY_LENGTH else None,
         model=model,
         args=training_arguments(OUTPUT_DIR, MAX_EPOCHS, evaluate_each_epoch=True),
         train_dataset=data.train,
@@ -261,7 +354,7 @@ def train_and_evaluate(data, tokenizer, hf_token, device):
         data_collator=data.collator,
         processing_class=tokenizer,
         compute_metrics=metrics_fn,
-        callbacks=[EarlyStoppingCallback(early_stopping_patience=EARLY_STOPPING_PATIENCE)],
+        callbacks=callbacks,
     )
     trainer.train()  # load_best_model_at_end restores the best-dev checkpoint
 
@@ -271,19 +364,8 @@ def train_and_evaluate(data, tokenizer, hf_token, device):
     print(f"Best dev {BEST_METRIC}={best[f'eval_{BEST_METRIC}']:.4f} at epoch {best_epoch}")
 
     # Per-class bias that matches the argmax marginal to the dev label shares, fit on dev only.
-    metrics_fn.current_languages = data.dev_langs
-    dev_predictions = trainer.predict(data.dev)
-    dev_shares = np.bincount(dev_predictions.label_ids, minlength=data.num_labels)
-    biases = fit_uniform_bias(dev_predictions.predictions, data.num_labels, target=dev_shares)
-    print("Dev-marginal bias (fit on dev): "
-          + ", ".join(f"{name}={b:+.3f}" for name, b in zip(data.target_names, biases)))
-
-    metrics_fn.current_languages = data.test_langs
-    predictions = trainer.predict(data.test)
+    biases, y_test, y_pred = fit_biases_and_test(trainer, data, metrics_fn)
     trainer.save_model(OUTPUT_DIR)
-
-    y_test = predictions.label_ids
-    y_pred = np.argmax(predictions.predictions + biases, axis=-1)
     release(model, trainer, device)
     return best_epoch, biases, y_test, y_pred
 
@@ -327,9 +409,15 @@ def main():
     data = prepare_training_data(DATA_DIR, tokenizer, train_split=TRAIN_SPLIT)
 
     best_epoch, biases, y_test, y_pred = train_and_evaluate(data, tokenizer, hf_token, device)
+    report_and_save(OUTPUT_DIR, data, best_epoch, biases, y_test, y_pred)
 
+    for epoch in sorted(SNAPSHOT_EPOCHS):
+        evaluate_snapshot(epoch, data, tokenizer, device)
+
+
+def report_and_save(output_dir, data, num_epochs, biases, y_test, y_pred, tag_extra=""):
     test_f1 = f1_score(y_test, y_pred, average="macro", zero_division=0)
-    save_manifest(OUTPUT_DIR, data, best_epoch, biases)
+    save_manifest(output_dir, data, num_epochs, biases)
 
     overall_report = classification_report_text(y_test, y_pred, data.target_names)
     print(f"\n=== OVERALL (test f1_macro={test_f1:.4f}) ===\n" + overall_report)
@@ -339,9 +427,9 @@ def main():
     print(language_summary)
     print("\n".join(per_language_reports))
 
-    output_tag = f"{MODEL_SLUG}_logitadj_ep{best_epoch}_len{MAX_LEN}"
+    output_tag = f"{MODEL_SLUG}_logitadj_ep{num_epochs}_len{MAX_LEN}{tag_extra}"
     write_results_file(
-        output_tag, best_epoch, test_f1, overall_report, language_summary, per_language_reports,
+        output_tag, num_epochs, test_f1, overall_report, language_summary, per_language_reports,
     )
 
 

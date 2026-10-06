@@ -22,6 +22,7 @@ Usage, from the repository root:
 """
 import argparse
 import json
+import os
 from pathlib import Path
 
 import numpy as np
@@ -55,7 +56,10 @@ def main():
 
     table = pq.read_table(source).take(keep)
     out = args.track_dir / args.out_name
-    pq.write_table(table, out)
+    # Written aside and renamed, so a concurrent job never reads a half-written file.
+    partial = out.with_suffix(".parquet.partial")
+    pq.write_table(table, partial)
+    os.replace(partial, out)
 
     kept = keys.iloc[keep]
     mix = pd.crosstab(kept["language"], kept[PARTY_COLUMN], normalize="index")

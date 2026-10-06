@@ -122,7 +122,12 @@ def match_split(track_dir, split, args, pinned=None):
         keep += [must, rng.choice(free, size=min(room - paid, len(free)), replace=False)]
     keep = np.sort(np.concatenate(keep)).astype(int)
 
-    table = pq.read_table(source).take(keep)
+    # filter, not take: take concatenates each column's chunks first, which overflows the
+    # 32-bit string offsets once the text column passes 2 GB. keep is sorted and unique, so
+    # the mask selects the same rows in the same order.
+    mask = np.zeros(len(keys), dtype=bool)
+    mask[keep] = True
+    table = pq.read_table(source).filter(mask)
     out = track_dir / f"{split}_langmatched.parquet"
     # Written aside and renamed, so a concurrent job never reads a half-written file.
     partial = out.with_suffix(".parquet.partial")

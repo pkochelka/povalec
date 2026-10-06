@@ -42,6 +42,9 @@ TRAINERS = {
     "logitadj": ("analysis.classifier_training", "train"),
     "langmatched": ("analysis.classifier_training", "train_langmatched"),
 }
+# Dev/test files per trainer; the langmatched ones get the same (language, original/
+# translated) matching as its train file (build_language_matched_split.py).
+EVAL_SPLITS = {"langmatched": ("dev_langmatched", "test_langmatched")}
 
 
 def track_dir(track, k, suffix=""):
@@ -82,14 +85,15 @@ def main():
         raise SystemExit("--group-by-length and --snapshot-epochs are only wired into the logit-adjusted trainer")
 
     module_name, train_split = TRAINERS[args.trainer]
+    dev_split, test_split = EVAL_SPLITS.get(args.trainer, ("dev", "test"))
     data_dir = track_dir(args.track, args.k, args.suffix)
-    needed = [data_dir / f"{name}.parquet" for name in (train_split, "dev", "test")]
+    needed = [data_dir / f"{name}.parquet" for name in (train_split, dev_split, test_split)]
     missing = [str(p) for p in needed if not p.exists()]
     if missing:
         raise SystemExit(f"missing split files (build the track first): {missing}")
 
     run_dir = (args.run_dir or PROJECT_ROOT / "runs" / f"{args.track}-k{args.k}-{args.trainer}{args.suffix}").resolve()
-    print(f"trainer:   {module_name} (train split: {train_split}.parquet)")
+    print(f"trainer:   {module_name} (splits: {train_split}, {dev_split}, {test_split})")
     print(f"data:      {data_dir}")
     print(f"run dir:   {run_dir}")
     print(f"speed:     max_len={args.max_len or 512} grad_ckpt={not args.no_grad_ckpt} "
@@ -117,6 +121,8 @@ def main():
     trainer.OUTPUT_DIR = str(run_dir / "model")
     if hasattr(trainer, "TRAIN_SPLIT"):
         trainer.TRAIN_SPLIT = train_split
+    if args.trainer in EVAL_SPLITS:
+        trainer.DEV_SPLIT, trainer.TEST_SPLIT = dev_split, test_split
     run_dir.mkdir(parents=True, exist_ok=True)
     os.chdir(run_dir)          # results_<tag>.txt is written to the working directory
     trainer.main()

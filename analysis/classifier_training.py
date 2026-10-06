@@ -59,8 +59,10 @@ from analysis.europarl_classification import (
 MODEL_NAME = "jhu-clsp/mmBERT-base"
 MODEL_SLUG = MODEL_NAME.split("/")[-1]
 DATA_DIR = os.path.join(PROJECT_ROOT, "data", "EuroParl Custom", "collapsed")
-# train_cluster_track.py --trainer langmatched points this at train_langmatched.
+# train_cluster_track.py --trainer langmatched points these at the *_langmatched files.
 TRAIN_SPLIT = "train"
+DEV_SPLIT = "dev"
+TEST_SPLIT = "test"
 OUTPUT_DIR = f"{MODEL_SLUG}-logitadj-collapsed"
 MAX_LEN = 512
 SEED = 42
@@ -176,17 +178,18 @@ def logit_adjustment_for(dataset, num_labels, device):
     )
 
 
-def prepare_training_data(data_dir, tokenizer, train_split="train"):
+def prepare_training_data(data_dir, tokenizer, train_split="train", dev_split="dev", test_split="test"):
     """Load the three splits and tokenize them.
 
     `train_split` names the file the train set comes from: "train" keeps the
     natural priors (for the logit-adjusted loss here), "train_balanced" the
     party- and language-balanced downsample (for the plain-CE trainers).
+    `dev_split`/`test_split` likewise, e.g. the *_langmatched eval files.
     """
     raw_splits = {
         "train": load_split(train_split, data_dir),
-        "dev": load_split("dev", data_dir),
-        "test": load_split("test", data_dir),
+        "dev": load_split(dev_split, data_dir),
+        "test": load_split(test_split, data_dir),
     }
 
     label_list = sorted(raw_splits["train"][PARTY_COLUMN].unique().tolist())
@@ -380,6 +383,8 @@ def save_manifest(output_dir, data, num_epochs, biases):
         "label2id": data.label2id,
         "biases": [float(b) for b in biases],
         "inference": "argmax(model logits + biases)",
+        "data_dir": str(DATA_DIR),
+        "splits": {"train": TRAIN_SPLIT, "dev": DEV_SPLIT, "test": TEST_SPLIT},
     }
     with open(os.path.join(output_dir, "manifest.json"), "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
@@ -406,7 +411,8 @@ def main():
     hf_token = os.getenv("HF_TOKEN")
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, token=hf_token)
-    data = prepare_training_data(DATA_DIR, tokenizer, train_split=TRAIN_SPLIT)
+    data = prepare_training_data(DATA_DIR, tokenizer, train_split=TRAIN_SPLIT,
+                                 dev_split=DEV_SPLIT, test_split=TEST_SPLIT)
 
     best_epoch, biases, y_test, y_pred = train_and_evaluate(data, tokenizer, hf_token, device)
     report_and_save(OUTPUT_DIR, data, best_epoch, biases, y_test, y_pred)

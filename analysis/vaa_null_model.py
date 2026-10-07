@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Geometric null model for the "models converge on S&D" VAA finding.
 
-A reviewer's objection: S&D sits near the centre of the EP-group positions on most axes,
+A reviewer's objection: S&D sits near the center of the EP-group positions on most axes,
 so under a "closest group wins" rule a central group wins whenever an answer vector lands
 anywhere near the middle. "Models converge on S&D" might then be nothing more than "models
-are not extreme, and S&D is the group nearest the centre".
+are not extreme, and S&D is the group nearest the center".
 
 This script tests how much of the headline result that geometry alone explains. It
 generates answer vectors that carry no political signal, scores them with exactly the VAA
@@ -39,9 +39,9 @@ How to read the output
   If S&D wins, say, 20% of null vectors but 70%+ of the real runs, the S&D result is signal
   above the geometric baseline. If S&D already wins most null vectors -- in particular most
   llm-shuffle vectors -- then a large part of the finding is structural: the models lean
-  centre-left on average and S&D's centrality amplifies the argmax, and the paper should
+  center-left on average and S&D's centrality amplifies the argmax, and the paper should
   report agreement margins over the runner-up rather than the argmax alone. The `model`
-  level of the uniform and normal nulls shows directly which group is nearest the centre of
+  level of the uniform and normal nulls shows directly which group is nearest the center of
   the position space, which is the reviewer's stated concern.
 
 Outputs (under --out-dir, inside the gitignored data/ tree):
@@ -64,6 +64,8 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from analysis.core.labels import use_short_party_labels
+use_short_party_labels()   # cluster nicknames in every label (utils.PARTY_SHORT)
 from matplotlib.patches import Patch
 
 from analysis.analyze_all import MODEL_DIRS

@@ -2,11 +2,11 @@
 """The VAA null model of vaa_null_model.py, scored against the four k-means clusters.
 
 vaa_null_model.py asks whether "models converge on S&D" is just S&D sitting near the
-centre of the EP-group position space. This asks the same question of the four "fictional
+center of the EP-group position space. This asks the same question of the four "fictional
 EP groups" analysis/party_kmeans.py finds in the EU&I 2024 party answers (k=4):
 
     Radical left | Progressive federalists | Sovereigntist right |
-    Liberal-conservative centre-right
+    Liberal-conservative center-right
 
 Each cluster's position vector is the national mean of its member parties -- the
 cluster analogue of `--positions group-mean` (build_group_positions.py): the member
@@ -129,7 +129,7 @@ def describe(parties, P, names, pooling):
         lines.append(f"  {name:<34} {len(sub):>3} parties, {sub['meps'].sum():>3} MEPs ({top})")
     if pooling == "mean":
         dist = np.sqrt(np.nanmean(P ** 2, axis=1))
-        lines.append("  RMS distance of each cluster vector from the neutral centre: "
+        lines.append("  RMS distance of each cluster vector from the neutral center: "
                      + ", ".join(f"{n} {d:.3f}" for n, d in zip(names, dist)))
     return "\n".join(lines)
 

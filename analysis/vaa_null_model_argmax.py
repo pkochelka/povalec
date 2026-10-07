@@ -20,11 +20,16 @@ vaa_null_model.py on exactly that footing:
 The real shares here equal plot_argmax_shares' `argmax_share_methods.csv` (direct Likert /
 indirect Likert, variant "pooled") to floating-point precision.
 
-Outputs (under --out-dir, inside the gitignored data/ tree):
+Outputs (under --out-dir, inside the gitignored data/ tree), each named with a
+`_<positions>` suffix for any basis but ep-group (null_model_argmax_cluster_shares.csv):
   null_model_argmax_shares.csv   tidy: method, side, model, topic, ep_group, argmax_share
   null_model_argmax_summary.md   per-model tables per method, plus a per-topic table
   null_model_argmax_shares.png   the figure: groups on the x axis, one bar per model,
                                  the nulls as hatched bars, VAA-average method
+  null_model_agreement.csv       method, ep_group, null_agreement: the normal null's
+                                 plain mean agreement per group (not an argmax share),
+                                 which the VAA agreement panel of
+                                 plot_classified_parties subtracts
 
 Usage, from the repository root with the package installed:
   python analysis/vaa_null_model_argmax.py
@@ -38,10 +43,13 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from analysis.core.labels import use_short_party_labels
+use_short_party_labels()   # cluster nicknames in every label (utils.PARTY_SHORT)
 from matplotlib.patches import Patch
 
 from analysis.analyze_all import MODEL_DIRS
 from analysis.core import DEFAULT_POSITIONS, model_display_name
+from analysis.core.positions import POSITION_CHOICES
 from analysis.plotting.plot_topical_parties import statement_rows_per_axis
 from analysis.vaa_null_model import (
     ALL_MODELS,
@@ -51,6 +59,7 @@ from analysis.vaa_null_model import (
     SIDE_LABELS,
     averaged_draws,
     cell_scores,
+    group_scores,
     load_runs,
     make_generators,
     markdown_table,
@@ -102,7 +111,14 @@ def score_source(source, runs, P, party_group, groups, topic_rows, args, rng):
             for group, share in cell_shares(S, P, party_group, groups, rows).items():
                 records.append(dict(method=source, side=name, model=ALL_MODELS, topic=topic,
                                     ep_group=group, argmax_share=share))
-    return pd.DataFrame.from_records(records)
+    # The same normal vectors scored as plain mean agreement per group, pooled over the
+    # group's (party, statement) cells -- what plot_classified_parties' VAA agreement
+    # boxes show, so their null is in the same units. No further draws: the argmax
+    # outputs above stay exactly as they were.
+    agreement = group_scores(nulls["normal"], P, party_group, groups).mean(axis=0)
+    agreement_records = [dict(method=source, ep_group=group, null_agreement=value)
+                         for group, value in zip(groups, agreement)]
+    return pd.DataFrame.from_records(records), agreement_records
 
 
 def with_average(table):
@@ -203,26 +219,40 @@ def plot_shares(table, groups, models, out_path, method="average"):
 
 # --------------------------------------------------------------------------- #
 
+def sigma_suffix(sigma):
+    """"" for the default normal-null sigma, "_sigma<value>" otherwise (_sigma0.25,
+    _sigma1), so a sensitivity run cannot overwrite the default outputs."""
+    return "" if np.isclose(sigma, DEFAULT_SIGMA) else f"_sigma{sigma:g}"
+
+
+def output_suffix(positions, sigma=DEFAULT_SIGMA):
+    """"" for the EP-group basis, "_<basis>" otherwise (see main), plus the sigma tag. The
+    argmax table finds the null it subtracts through this too."""
+    return ("" if positions == "ep-group" else f"_{positions}") + sigma_suffix(sigma)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--dataset", default="euandi_2024", choices=["euandi_2024"])
     parser.add_argument("--models", nargs="+", default=MODEL_DIRS)
-    parser.add_argument("--positions", default=DEFAULT_POSITIONS, choices=["ep-group", "national"])
+    parser.add_argument("--positions", default=DEFAULT_POSITIONS, choices=POSITION_CHOICES)
     parser.add_argument("--no-collapse-ecr-id", action="store_true")
     parser.add_argument("--draws", type=int, default=10_000)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--sigma", type=float, default=DEFAULT_SIGMA)
     parser.add_argument("--out-dir", default=None,
                         help="default: data/<dataset>_results/tables/null_model")
+    parser.add_argument("--results_dir", default=None,
+                        help="Read this results directory instead of the --dataset one.")
     args = parser.parse_args()
 
-    results_root = Path("data") / f"{args.dataset}_results"
+    results_root = Path(args.results_dir or Path("data") / f"{args.dataset}_results")
     model_dirs = [results_root / m for m in args.models]
     out_dir = Path(args.out_dir) if args.out_dir else results_root / "tables" / "null_model"
     out_dir.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(args.seed)
 
-    tables, models, P = [], None, None
+    tables, agreement_records, models, P = [], [], None, None
     for source in SOURCES:
         print(f"Loading real {source} runs")
         runs = load_runs(model_dirs, source)
@@ -233,17 +263,25 @@ def main():
                           statement_rows_per_axis(args.dataset, runs.shape[1]).items()
                           if len(rows)}
             models = [m for m in args.models if m in runs.index.get_level_values("model")]
-        tables.append(score_source(source, runs, P, party_group, groups, topic_rows, args, rng))
+        table, agreement = score_source(source, runs, P, party_group, groups, topic_rows,
+                                        args, rng)
+        tables.append(table)
+        agreement_records += agreement
     table = with_average(pd.concat(tables, ignore_index=True))
 
-    table.to_csv(out_dir / "null_model_argmax_shares.csv", index=False)
+    # The EP-group run keeps its original names; any other basis carries it in the name,
+    # so a cluster run cannot overwrite the EP-group outputs in the same directory.
+    stem = "null_model_argmax" + output_suffix(args.positions, args.sigma)
+    table.to_csv(out_dir / f"{stem}_shares.csv", index=False)
     summary = render_summary(table, groups, models, topic_rows, args)
-    (out_dir / "null_model_argmax_summary.md").write_text(summary, encoding="utf-8")
-    plot_shares(table, groups, models, out_dir / "null_model_argmax_shares.png")
+    (out_dir / f"{stem}_summary.md").write_text(summary, encoding="utf-8")
+    plot_shares(table, groups, models, out_dir / f"{stem}_shares.png")
+    agreement_path = out_dir / f"null_model_agreement{output_suffix(args.positions, args.sigma)}.csv"
+    pd.DataFrame(agreement_records).to_csv(agreement_path, index=False)
     print()
     print(summary.split("\n## VAA average per topic")[0])
-    print(f"\nWrote {out_dir / 'null_model_argmax_shares.csv'}, null_model_argmax_summary.md, "
-          "null_model_argmax_shares.png")
+    print(f"\nWrote {out_dir / f'{stem}_shares.csv'}, {stem}_summary.md, {stem}_shares.png, "
+          f"{agreement_path.name}")
 
 
 if __name__ == "__main__":

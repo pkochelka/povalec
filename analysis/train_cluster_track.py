@@ -108,10 +108,11 @@ def main():
                         help="no training: turn this Trainer checkpoint into model_epoch<N> with "
                              "biases, manifest and results (logit-adjusted trainers only)")
     args = parser.parse_args()
-    if os.environ.get("EVAL_CHECKPOINT") and not args.evaluate_checkpoint:
-        # A stale slurm_train_cluster_track.sh drops EVAL_CHECKPOINT and would retrain.
-        raise SystemExit("EVAL_CHECKPOINT is set but --evaluate-checkpoint was not passed: "
-                         "sync analysis/slurm_train_cluster_track.sh, refusing to train")
+    if "EVAL_CHECKPOINT" in os.environ and not args.evaluate_checkpoint:
+        # Set but empty (an unset shell variable at submit time), or a stale
+        # slurm_train_cluster_track.sh that drops it: either way it would retrain.
+        raise SystemExit(f"EVAL_CHECKPOINT={os.environ['EVAL_CHECKPOINT']!r} but --evaluate-checkpoint "
+                         "was not passed (empty path, or a stale slurm_train_cluster_track.sh): refusing to train")
     snapshot_epochs = tuple(int(e) for e in re.split(r"[,:\s]+", args.snapshot_epochs) if e)
     if args.trainer == "balanced" and (args.group_by_length or snapshot_epochs):
         raise SystemExit("--group-by-length and --snapshot-epochs are only wired into the logit-adjusted trainer")

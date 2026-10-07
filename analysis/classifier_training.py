@@ -409,6 +409,12 @@ def write_results_file(output_tag, num_epochs, test_f1, overall_report,
 
 
 def main():
+    if "EVAL_CHECKPOINT" in os.environ and not EVALUATE_ONLY:
+        # Set (even empty) by slurm_train_cluster_track.sh; never fall through to training.
+        raise SystemExit(f"EVAL_CHECKPOINT={os.environ['EVAL_CHECKPOINT']!r} but EVALUATE_ONLY is not set "
+                         "(empty path, or a stale analysis/train_cluster_track.py): refusing to train")
+    if EVALUATE_ONLY:
+        print(f"--- EVALUATE_ONLY: no training, evaluating epoch snapshots {sorted(SNAPSHOT_EPOCHS)} ---")
     device = select_device()
     load_dotenv(os.path.expanduser("~/.env.local"))
     hf_token = os.getenv("HF_TOKEN")

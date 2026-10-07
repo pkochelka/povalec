@@ -29,6 +29,12 @@ at least one row keeps nothing, which drops the original text of most smaller la
 their translated text stays.
 --ignore-origin gives the old per-language matching.
 
+**--mt adds machine-translated train rows** (preprocessing/build_mt_train.py) as a third
+origin, (language, "mt"), matched like the other cells but to train's own pooled mix
+(without the MT rows), and writes train_langmatched<--out-suffix>.parquet. Those cells
+hold non-translationese text of every cluster in every language -- what original text
+lacks. Dev and test are not touched; the MT run reuses dev/test_langmatched.
+
 **Dev and test get the same treatment**, but at a uniform mix: every (language, origin)
 cell keeps equal rows per cluster, as many as its thinnest cluster has, so each split is
 exactly class-uniform in every language. Otherwise test would still reward the shortcut
@@ -48,6 +54,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
 import pyarrow.parquet as pq
 
 from preprocessing.split_preprocessed_data import pinned_rows
@@ -66,13 +73,13 @@ def origin_of(keys, max_languages):
     return np.where(n_lang <= max_languages, "original", "translated")
 
 
-def cell_targets(counts, uniform=False):
+def cell_targets(counts, uniform=False, pooled=None):
     """Rows to keep per (cell, cluster): each cell at the target mix, as large as it can fill.
 
-    The target mix is the split's pooled mix, or equal shares with `uniform`."""
+    The target mix is the split's pooled mix, or equal shares with `uniform`, or `pooled`."""
     if uniform:
         pooled = pd.Series(1 / counts.shape[1], index=counts.columns)
-    else:
+    elif pooled is None:
         pooled = counts.sum(axis=0) / counts.to_numpy().sum()
     scale = (counts / pooled).min(axis=1)
     target = pd.DataFrame(np.floor(np.outer(scale, pooled)), index=counts.index,
@@ -93,9 +100,19 @@ def match_split(track_dir, split, args, pinned=None):
     columns = ["language", PARTY_COLUMN, "speaker", "date"] + (["text"] if pinned is not None else [])
     keys = pq.read_table(source, columns=columns).to_pandas()
     keys["origin"] = "any" if args.ignore_origin else origin_of(keys, args.original_max_languages)
+    n_split = len(keys)
+    # The split's own pooled mix, before any MT rows: the MT variant targets the same mix
+    # as the plain langmatched train, so the two runs differ only by the MT rows.
+    own_mix = None
+    if args.mt is not None:
+        own_mix = keys[PARTY_COLUMN].value_counts() / n_split
+        mt_keys = pq.read_table(args.mt, columns=["language", PARTY_COLUMN, "speaker", "date"]).to_pandas()
+        mt_keys["origin"] = "mt"
+        keys = pd.concat([keys, mt_keys], ignore_index=True)
     cell = ["language", "origin"]
     counts = pd.crosstab([keys["language"], keys["origin"]], keys[PARTY_COLUMN])
-    pooled, target = cell_targets(counts, uniform=split != "train")
+    pooled, target = cell_targets(counts, uniform=split != "train",
+                                  pooled=None if own_mix is None else own_mix.reindex(counts.columns).fillna(0))
 
     forced = pd.Index([])
     if pinned is not None:
@@ -127,8 +144,11 @@ def match_split(track_dir, split, args, pinned=None):
     # the mask selects the same rows in the same order.
     mask = np.zeros(len(keys), dtype=bool)
     mask[keep] = True
-    table = pq.read_table(source).filter(mask)
-    out = track_dir / f"{split}_langmatched.parquet"
+    table = pq.read_table(source).filter(mask[:n_split])
+    if args.mt is not None:
+        mt_table = pq.read_table(args.mt, columns=table.schema.names).filter(mask[n_split:])
+        table = pa.concat_tables([table, mt_table.cast(table.schema)])
+    out = track_dir / f"{split}_langmatched{args.out_suffix}.parquet"
     # Written aside and renamed, so a concurrent job never reads a half-written file.
     partial = out.with_suffix(".parquet.partial")
     pq.write_table(table, partial)
@@ -153,6 +173,8 @@ def match_split(track_dir, split, args, pinned=None):
         "by_origin": not args.ignore_origin, "original_max_languages": args.original_max_languages,
         "target_mix": pooled.round(6).to_dict(), "max_deviation": deviation,
         "pinned_kept": int(is_forced.sum()), "pinned_beyond_quota": int(over_quota),
+        "mt": None if args.mt is None else str(args.mt),
+        "mt_rows": int((kept["origin"] == "mt").sum()),
         "rows_per_cell_cluster": {f"{language}|{origin}": row
                                   for (language, origin), row in target.to_dict(orient="index").items()},
     }
@@ -172,7 +194,14 @@ def main():
     parser.add_argument("--original-max-languages", type=int, default=2)
     parser.add_argument("--pinned", type=Path, default=PINNED_TEST_FILE,
                         help="speeches always kept in test (the annotated sample)")
+    parser.add_argument("--mt", type=Path, default=None,
+                        help="machine-translated train rows (preprocessing/build_mt_train.py), added to "
+                             "train as (language, 'mt') cells at train's own pooled mix; train only")
+    parser.add_argument("--out-suffix", default="",
+                        help="write <split>_langmatched<suffix>.parquet, e.g. _mt next to the plain files")
     args = parser.parse_args()
+    if args.mt is not None and args.splits != ["train"]:
+        raise SystemExit("--mt adds rows to train only: pass --splits train")
 
     pinned = pd.read_csv(args.pinned, encoding="utf-8-sig", keep_default_na=False)
     # train goes last: the training job treats train_langmatched.json as "all three built".

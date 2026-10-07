@@ -87,6 +87,9 @@ SNAPSHOT_EPOCHS = ()
 # processes, so a 4-GPU run optimizes like the 1-GPU one. Eval batches change no result.
 GLOBAL_TRAIN_BATCH_SIZE = 32
 EVAL_BATCH_SIZE = 32
+LEARNING_RATE = 2e-5
+# bf16 instead of fp16 autocast: same speed on Ampere+, no loss scaling, no overflow skips.
+BF16 = False
 WORLD_SIZE = int(os.environ.get("WORLD_SIZE", "1"))
 LOCAL_RANK = int(os.environ.get("LOCAL_RANK", "0"))
 IS_MAIN_PROCESS = int(os.environ.get("RANK", "0")) == 0
@@ -268,7 +271,8 @@ def warmup_kwargs(ratio):
 def training_arguments(output_dir, num_epochs, evaluate_each_epoch):
     return TrainingArguments(
         output_dir=output_dir,
-        fp16=True,
+        fp16=not BF16,
+        bf16=BF16,
         eval_strategy="epoch" if evaluate_each_epoch else "no",
         save_strategy="epoch" if evaluate_each_epoch else "no",
         logging_steps=500,
@@ -279,7 +283,7 @@ def training_arguments(output_dir, num_epochs, evaluate_each_epoch):
         gradient_checkpointing=GRADIENT_CHECKPOINTING,
         dataloader_num_workers=DATALOADER_WORKERS,
         num_train_epochs=num_epochs,
-        learning_rate=2e-5,
+        learning_rate=LEARNING_RATE,
         weight_decay=0.01,
         **warmup_kwargs(0.06),
         lr_scheduler_type="cosine",
@@ -400,6 +404,9 @@ def save_manifest(output_dir, data, num_epochs, biases):
         "max_len": MAX_LEN,
         "num_epochs": num_epochs,
         "logit_adjustment_tau": LOGIT_ADJUSTMENT_TAU,
+        "global_train_batch": GLOBAL_TRAIN_BATCH_SIZE,
+        "learning_rate": LEARNING_RATE,
+        "precision": "bf16" if BF16 else "fp16",
         "label2id": data.label2id,
         "biases": [float(b) for b in biases],
         "inference": "argmax(model logits + biases)",

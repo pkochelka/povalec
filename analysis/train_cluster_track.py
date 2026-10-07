@@ -49,10 +49,15 @@ TRAINERS = {
     "balanced": ("analysis.classifier_training_for_balanced_collapsed", "train_balanced"),
     "logitadj": ("analysis.classifier_training", "train"),
     "langmatched": ("analysis.classifier_training", "train_langmatched"),
+    # langmatched train plus machine-translated rows as (language, "mt") cells
+    # (build_mt_train.py, then build_language_matched_split.py --mt --out-suffix _mt)
+    "langmatched_mt": ("analysis.classifier_training", "train_langmatched_mt"),
 }
 # Dev/test files per trainer; the langmatched ones get the same (language, original/
-# translated) matching as its train file (build_language_matched_split.py).
-EVAL_SPLITS = {"langmatched": ("dev_langmatched", "test_langmatched")}
+# translated) matching as its train file (build_language_matched_split.py). The MT
+# variant is evaluated on exactly the same files.
+EVAL_SPLITS = {"langmatched": ("dev_langmatched", "test_langmatched"),
+               "langmatched_mt": ("dev_langmatched", "test_langmatched")}
 
 
 def safetensors_problem(path):
@@ -106,6 +111,11 @@ def main():
                             "manifest and results (logit-adjusted trainers only)")
     speed.add_argument("--eval-batch", type=int, default=None,
                        help="per-GPU eval batch (default 32); larger only speeds up dev/test passes")
+    speed.add_argument("--global-batch", type=int, default=None,
+                       help="global train batch over all GPUs (default 32); changes the optimization, "
+                            "so compare only runs with the same value")
+    speed.add_argument("--lr", type=float, default=None, help="peak learning rate (default 2e-5)")
+    speed.add_argument("--bf16", action="store_true", help="bf16 autocast instead of fp16")
     parser.add_argument("--evaluate-checkpoint", type=Path, default=None,
                         help="no training: turn this Trainer checkpoint into model_epoch<N> with "
                              "biases, manifest and results (logit-adjusted trainers only)")
@@ -147,7 +157,10 @@ def main():
     print(f"run dir:   {run_dir}")
     print(f"speed:     max_len={args.max_len or 512} grad_ckpt={not args.no_grad_ckpt} "
           f"group_by_length={args.group_by_length} workers={args.workers or 2} snapshots={snapshot_epochs} "
-          f"gpus={os.environ.get('WORLD_SIZE', '1')} eval_batch={args.eval_batch or 32}")
+          f"gpus={os.environ.get('WORLD_SIZE', '1')} eval_batch={args.eval_batch or 32} "
+          f"global_batch={args.global_batch or 32} lr={args.lr or 2e-5} bf16={args.bf16}")
+    if args.global_batch and args.global_batch % int(os.environ.get("WORLD_SIZE", "1")):
+        raise SystemExit(f"--global-batch {args.global_batch} does not split over {os.environ['WORLD_SIZE']} GPUs")
     if args.evaluate_checkpoint:
         print(f"evaluate:  {args.evaluate_checkpoint} -> {run_dir / f'model_epoch{checkpoint_epoch}'} (no training)")
     if args.dry_run:
@@ -166,6 +179,12 @@ def main():
         overrides.update(DATALOADER_WORKERS=args.workers, TOKENIZE_PROC=args.workers)
     if args.eval_batch:
         overrides["EVAL_BATCH_SIZE"] = args.eval_batch
+    if args.global_batch:
+        overrides["GLOBAL_TRAIN_BATCH_SIZE"] = args.global_batch
+    if args.lr:
+        overrides["LEARNING_RATE"] = args.lr
+    if args.bf16:
+        overrides["BF16"] = True
 
     trainer = importlib.import_module(module_name)
     for module in {shared, trainer}:

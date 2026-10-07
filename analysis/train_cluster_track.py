@@ -27,12 +27,19 @@ tracks, and the existing ECR+ID results, never overwrite each other.
 
     python analysis/train_cluster_track.py --track group --trainer balanced
     python analysis/train_cluster_track.py --track national --trainer logitadj --dry-run
+
+--evaluate-checkpoint runs/<run>/model/checkpoint-<step> skips training: it copies that
+checkpoint's weights and tokenizer to runs/<run>/model_epoch<N> (N from its
+trainer_state.json) and gives it dev-fitted biases, a manifest and test results, like a
+--snapshot-epochs snapshot. Pass the same --track/--trainer/--suffix as the training run.
 """
 import argparse
 import importlib
+import json
 import multiprocessing
 import os
 import re
+import shutil
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -80,10 +87,22 @@ def main():
                        help="e.g. '3,6' or '3:6' (sbatch --export splits on commas): also keep the "
                             "model after these epochs as model_epoch<N>, with its own biases, "
                             "manifest and results (logit-adjusted trainers only)")
+    parser.add_argument("--evaluate-checkpoint", type=Path, default=None,
+                        help="no training: turn this Trainer checkpoint into model_epoch<N> with "
+                             "biases, manifest and results (logit-adjusted trainers only)")
     args = parser.parse_args()
     snapshot_epochs = tuple(int(e) for e in re.split(r"[,:\s]+", args.snapshot_epochs) if e)
     if args.trainer == "balanced" and (args.group_by_length or snapshot_epochs):
         raise SystemExit("--group-by-length and --snapshot-epochs are only wired into the logit-adjusted trainer")
+    if args.evaluate_checkpoint:
+        if args.trainer == "balanced":
+            raise SystemExit("--evaluate-checkpoint is only wired into the logit-adjusted trainer")
+        state_file = args.evaluate_checkpoint / "trainer_state.json"
+        if not state_file.exists():
+            raise SystemExit(f"not a Trainer checkpoint (no trainer_state.json): {args.evaluate_checkpoint}")
+        with open(state_file, encoding="utf-8") as f:
+            checkpoint_epoch = round(json.load(f)["epoch"])
+        snapshot_epochs = (checkpoint_epoch,)
 
     module_name, train_split = TRAINERS[args.trainer]
     dev_split, test_split = EVAL_SPLITS.get(args.trainer, ("dev", "test"))
@@ -99,6 +118,8 @@ def main():
     print(f"run dir:   {run_dir}")
     print(f"speed:     max_len={args.max_len or 512} grad_ckpt={not args.no_grad_ckpt} "
           f"group_by_length={args.group_by_length} workers={args.workers or 2} snapshots={snapshot_epochs}")
+    if args.evaluate_checkpoint:
+        print(f"evaluate:  {args.evaluate_checkpoint} -> {run_dir / f'model_epoch{checkpoint_epoch}'} (no training)")
     if args.dry_run:
         return
 
@@ -107,7 +128,8 @@ def main():
     shared = importlib.import_module("analysis.classifier_training")
     overrides = {"GRADIENT_CHECKPOINTING": not args.no_grad_ckpt,
                  "GROUP_BY_LENGTH": args.group_by_length,
-                 "SNAPSHOT_EPOCHS": snapshot_epochs}
+                 "SNAPSHOT_EPOCHS": snapshot_epochs,
+                 "EVALUATE_ONLY": bool(args.evaluate_checkpoint)}
     if args.max_len:
         overrides["MAX_LEN"] = args.max_len
     if args.workers:
@@ -125,6 +147,15 @@ def main():
     if args.trainer in EVAL_SPLITS:
         trainer.DEV_SPLIT, trainer.TEST_SPLIT = dev_split, test_split
     run_dir.mkdir(parents=True, exist_ok=True)
+    if args.evaluate_checkpoint:
+        # Weights, config and tokenizer only; the optimizer state is not needed to predict.
+        snapshot = run_dir / f"model_epoch{checkpoint_epoch}"
+        snapshot.mkdir(exist_ok=True)
+        for name in ("config.json", "model.safetensors", "tokenizer.json", "tokenizer_config.json",
+                     "special_tokens_map.json", "trainer_state.json"):
+            source = args.evaluate_checkpoint / name
+            if source.exists() and not (snapshot / name).exists():
+                shutil.copy2(source, snapshot / name)
     os.chdir(run_dir)          # results_<tag>.txt is written to the working directory
     # Python 3.14 starts DataLoader workers with forkserver, which pickles the in-memory
     # tokenized train set into every worker: 8 workers = 9 copies, OOM at 48G. fork

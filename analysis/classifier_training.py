@@ -83,6 +83,9 @@ TOKENIZE_PROC = None
 # Epochs after which an extra copy of the model is kept, as <OUTPUT_DIR>_epoch<N>, with
 # its own dev-fitted biases, manifest and test results (logit-adjusted trainer only).
 SNAPSHOT_EPOCHS = ()
+# Skip training and only evaluate the existing SNAPSHOT_EPOCHS snapshots (biases, manifest,
+# results), e.g. a mid-run checkpoint copied to <OUTPUT_DIR>_epoch<N>.
+EVALUATE_ONLY = False
 
 
 @dataclass
@@ -414,8 +417,9 @@ def main():
     data = prepare_training_data(DATA_DIR, tokenizer, train_split=TRAIN_SPLIT,
                                  dev_split=DEV_SPLIT, test_split=TEST_SPLIT)
 
-    best_epoch, biases, y_test, y_pred = train_and_evaluate(data, tokenizer, hf_token, device)
-    report_and_save(OUTPUT_DIR, data, best_epoch, biases, y_test, y_pred)
+    if not EVALUATE_ONLY:
+        best_epoch, biases, y_test, y_pred = train_and_evaluate(data, tokenizer, hf_token, device)
+        report_and_save(OUTPUT_DIR, data, best_epoch, biases, y_test, y_pred)
 
     for epoch in sorted(SNAPSHOT_EPOCHS):
         evaluate_snapshot(epoch, data, tokenizer, device)

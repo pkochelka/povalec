@@ -442,7 +442,9 @@ def parse_args():
                         help="rows per (language, origin) needed to fit an origin eraser or probe")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--out_dir", default="", help="default: data/leace_probe/<run name>")
-    parser.add_argument("--report", default="results_leace_probe.txt")
+    parser.add_argument("--report", default="",
+                        help="default: results_leace_probe.txt for the default classifier, "
+                             "else results_leace_probe_<run>.txt")
     args = parser.parse_args()
     if "en" not in args.ai_languages:
         args.ai_languages.append("en")
@@ -454,7 +456,11 @@ def main():
     args = parse_args()
     MIN_ORIGIN_ROWS = args.min_origin_rows
     clf = Path(args.classifier)  # runs/<run>/model or runs/<run>/model_epoch<N>
-    run_dir = Path(args.out_dir or OUT_ROOT / (clf.parent.name if clf.name == "model" else f"{clf.parent.name}_{clf.name}"))
+    run_name = clf.parent.name if clf.name == "model" else f"{clf.parent.name}_{clf.name}"
+    run_dir = Path(args.out_dir or OUT_ROOT / run_name)
+    if not args.report:   # the baseline report keeps its name; other checkpoints never overwrite it
+        args.report = ("results_leace_probe.txt" if run_name == Path(DEFAULT_CLASSIFIER).parent.name
+                       else f"results_leace_probe_{run_name}.txt")
     run_dir.mkdir(parents=True, exist_ok=True)
     if args.stage in ("embed", "all"):
         embed(args, run_dir)

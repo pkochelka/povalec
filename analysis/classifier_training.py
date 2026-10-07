@@ -118,6 +118,9 @@ ORIGINS = ("translated", "original", "mt")
 # and its no-adversary control see the same rows.
 INIT_FROM = ""
 TRAIN_PER_CELL = 0
+# Epoch checkpoints without optimizer/scheduler state (~1.8 GB less each). They can no
+# longer be resumed from, which a one-epoch run never needs.
+SAVE_ONLY_MODEL = False
 
 
 @dataclass
@@ -464,6 +467,7 @@ def training_arguments(output_dir, num_epochs, evaluate_each_epoch):
         metric_for_best_model=BEST_METRIC if evaluate_each_epoch else None,
         greater_is_better=True,
         save_total_limit=1,
+        save_only_model=SAVE_ONLY_MODEL,
         report_to="none",
         optim="adamw_torch_fused",
         seed=SEED,

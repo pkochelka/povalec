@@ -140,6 +140,8 @@ def main():
     short.add_argument("--train-per-cell", type=int, default=0,
                        help="at most this many train rows per (language, origin) cell (0 = all)")
     short.add_argument("--max-epochs", type=int, default=None, help="default 6, with early stopping")
+    short.add_argument("--save-only-model", action="store_true",
+                       help="epoch checkpoints without optimizer state (~1.8 GB less each; cannot be resumed)")
     parser.add_argument("--evaluate-checkpoint", type=Path, default=None,
                         help="no training: turn this Trainer checkpoint into model_epoch<N> with "
                              "biases, manifest and results (logit-adjusted trainers only)")
@@ -233,6 +235,8 @@ def main():
         overrides["TRAIN_PER_CELL"] = args.train_per_cell
     if args.max_epochs:
         overrides["MAX_EPOCHS"] = args.max_epochs
+    if args.save_only_model:
+        overrides["SAVE_ONLY_MODEL"] = True
 
     trainer = importlib.import_module(module_name)
     for module in {shared, trainer}:

@@ -104,6 +104,8 @@ def main():
                        help="e.g. '3,6' or '3:6' (sbatch --export splits on commas): also keep the "
                             "model after these epochs as model_epoch<N>, with its own biases, "
                             "manifest and results (logit-adjusted trainers only)")
+    speed.add_argument("--eval-batch", type=int, default=None,
+                       help="per-GPU eval batch (default 32); larger only speeds up dev/test passes")
     parser.add_argument("--evaluate-checkpoint", type=Path, default=None,
                         help="no training: turn this Trainer checkpoint into model_epoch<N> with "
                              "biases, manifest and results (logit-adjusted trainers only)")
@@ -117,6 +119,8 @@ def main():
     if args.trainer == "balanced" and (args.group_by_length or snapshot_epochs):
         raise SystemExit("--group-by-length and --snapshot-epochs are only wired into the logit-adjusted trainer")
     if args.evaluate_checkpoint:
+        if int(os.environ.get("WORLD_SIZE", "1")) > 1:
+            raise SystemExit("--evaluate-checkpoint runs on one GPU; drop GPUS for it")
         if args.trainer == "balanced":
             raise SystemExit("--evaluate-checkpoint is only wired into the logit-adjusted trainer")
         state_file = args.evaluate_checkpoint / "trainer_state.json"
@@ -142,7 +146,8 @@ def main():
     print(f"data:      {data_dir}")
     print(f"run dir:   {run_dir}")
     print(f"speed:     max_len={args.max_len or 512} grad_ckpt={not args.no_grad_ckpt} "
-          f"group_by_length={args.group_by_length} workers={args.workers or 2} snapshots={snapshot_epochs}")
+          f"group_by_length={args.group_by_length} workers={args.workers or 2} snapshots={snapshot_epochs} "
+          f"gpus={os.environ.get('WORLD_SIZE', '1')} eval_batch={args.eval_batch or 32}")
     if args.evaluate_checkpoint:
         print(f"evaluate:  {args.evaluate_checkpoint} -> {run_dir / f'model_epoch{checkpoint_epoch}'} (no training)")
     if args.dry_run:
@@ -159,6 +164,8 @@ def main():
         overrides["MAX_LEN"] = args.max_len
     if args.workers:
         overrides.update(DATALOADER_WORKERS=args.workers, TOKENIZE_PROC=args.workers)
+    if args.eval_batch:
+        overrides["EVAL_BATCH_SIZE"] = args.eval_batch
 
     trainer = importlib.import_module(module_name)
     for module in {shared, trainer}:

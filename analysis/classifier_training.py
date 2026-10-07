@@ -83,6 +83,13 @@ TOKENIZE_PROC = None
 # Epochs after which an extra copy of the model is kept, as <OUTPUT_DIR>_epoch<N>, with
 # its own dev-fitted biases, manifest and test results (logit-adjusted trainer only).
 SNAPSHOT_EPOCHS = ()
+# Multi-GPU (torchrun, one process per GPU): the global batch stays 32, split over the
+# processes, so a 4-GPU run optimizes like the 1-GPU one. Eval batches change no result.
+GLOBAL_TRAIN_BATCH_SIZE = 32
+EVAL_BATCH_SIZE = 32
+WORLD_SIZE = int(os.environ.get("WORLD_SIZE", "1"))
+LOCAL_RANK = int(os.environ.get("LOCAL_RANK", "0"))
+IS_MAIN_PROCESS = int(os.environ.get("RANK", "0")) == 0
 # Skip training and only evaluate the existing SNAPSHOT_EPOCHS snapshots (biases, manifest,
 # results), e.g. a mid-run checkpoint copied to <OUTPUT_DIR>_epoch<N>.
 EVALUATE_ONLY = False
@@ -152,9 +159,14 @@ class LogitAdjustedTrainer(Trainer):
         # which would make LengthGroupedSampler re-read every row to measure it.
         if self.train_lengths is None:
             return super()._get_train_sampler(*args, **kwargs)
+        # Every process must draw the same shuffle: accelerate then hands each one its
+        # own share of the batches. A seeded generator guarantees that; one process
+        # keeps the global RNG, as in the earlier runs.
+        generator = torch.Generator().manual_seed(SEED) if WORLD_SIZE > 1 else None
         return LengthGroupedSampler(
             self.args.train_batch_size * self.args.gradient_accumulation_steps,
             lengths=self.train_lengths,
+            generator=generator,
         )
 
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
@@ -166,10 +178,14 @@ class LogitAdjustedTrainer(Trainer):
 
 
 def select_device():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"--- Device: {device} ---")
+    # Under torchrun every process owns GPU LOCAL_RANK; tensors built outside the Trainer
+    # (the logit adjustment) must live there too, not on cuda:0.
+    device = torch.device(f"cuda:{LOCAL_RANK}" if torch.cuda.is_available() else "cpu")
     if device.type == "cuda":
-        print(f"GPU: {torch.cuda.get_device_name(0)}")
+        torch.cuda.set_device(device)
+    print(f"--- Device: {device} (process {LOCAL_RANK + 1}/{WORLD_SIZE}) ---")
+    if device.type == "cuda":
+        print(f"GPU: {torch.cuda.get_device_name(device)}")
     return device
 
 
@@ -256,8 +272,9 @@ def training_arguments(output_dir, num_epochs, evaluate_each_epoch):
         eval_strategy="epoch" if evaluate_each_epoch else "no",
         save_strategy="epoch" if evaluate_each_epoch else "no",
         logging_steps=500,
-        per_device_train_batch_size=32,
-        per_device_eval_batch_size=32,
+        per_device_train_batch_size=GLOBAL_TRAIN_BATCH_SIZE // WORLD_SIZE,
+        per_device_eval_batch_size=EVAL_BATCH_SIZE,
+        ddp_find_unused_parameters=False if WORLD_SIZE > 1 else None,
         gradient_accumulation_steps=1,
         gradient_checkpointing=GRADIENT_CHECKPOINTING,
         dataloader_num_workers=DATALOADER_WORKERS,
@@ -301,7 +318,7 @@ class EpochSnapshot(TrainerCallback):
 
     def on_epoch_end(self, args, state, control, model=None, **kwargs):
         epoch = round(state.epoch)
-        if epoch in self.epochs:
+        if epoch in self.epochs and state.is_world_process_zero:
             model.save_pretrained(snapshot_dir(epoch))
             self.tokenizer.save_pretrained(snapshot_dir(epoch))
             print(f"Saved epoch-{epoch} snapshot to {snapshot_dir(epoch)}")
@@ -409,6 +426,8 @@ def write_results_file(output_tag, num_epochs, test_f1, overall_report,
 
 
 def main():
+    if GLOBAL_TRAIN_BATCH_SIZE % WORLD_SIZE:
+        raise SystemExit(f"batch {GLOBAL_TRAIN_BATCH_SIZE} does not split over {WORLD_SIZE} GPUs")
     if "EVAL_CHECKPOINT" in os.environ and not EVALUATE_ONLY:
         # Set (even empty) by slurm_train_cluster_track.sh; never fall through to training.
         raise SystemExit(f"EVAL_CHECKPOINT={os.environ['EVAL_CHECKPOINT']!r} but EVALUATE_ONLY is not set "
@@ -432,6 +451,8 @@ def main():
 
 
 def report_and_save(output_dir, data, num_epochs, biases, y_test, y_pred, tag_extra=""):
+    if not IS_MAIN_PROCESS:   # every process has the same predictions; one writes
+        return
     test_f1 = f1_score(y_test, y_pred, average="macro", zero_division=0)
     save_manifest(output_dir, data, num_epochs, biases)
 

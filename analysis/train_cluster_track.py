@@ -55,6 +55,23 @@ TRAINERS = {
 EVAL_SPLITS = {"langmatched": ("dev_langmatched", "test_langmatched")}
 
 
+def safetensors_problem(path):
+    """Why a .safetensors file is unreadable (missing, or shorter than its header says), else None."""
+    if not path.exists():
+        return f"{path} is missing"
+    size = path.stat().st_size
+    with open(path, "rb") as f:
+        header_len = int.from_bytes(f.read(8), "little")
+        if size < 8 + header_len:
+            return f"{path} is truncated inside its header ({size:,} bytes)"
+        header = json.loads(f.read(header_len))
+    expected = 8 + header_len + max((t["data_offsets"][1] for k, t in header.items() if k != "__metadata__"),
+                                    default=0)
+    if size != expected:
+        return f"{path} is {size:,} bytes, its header says {expected:,} (incomplete copy or write)"
+    return None
+
+
 def track_dir(track, k, suffix=""):
     if track == "group":
         if k != 4:
@@ -107,6 +124,9 @@ def main():
         with open(state_file, encoding="utf-8") as f:
             checkpoint_epoch = round(json.load(f)["epoch"])
         snapshot_epochs = (checkpoint_epoch,)
+        problem = safetensors_problem(args.evaluate_checkpoint / "model.safetensors")
+        if problem:
+            raise SystemExit(f"the checkpoint itself is broken: {problem}")
 
     module_name, train_split = TRAINERS[args.trainer]
     dev_split, test_split = EVAL_SPLITS.get(args.trainer, ("dev", "test"))
@@ -157,9 +177,16 @@ def main():
         snapshot.mkdir(exist_ok=True)
         for name in ("config.json", "model.safetensors", "tokenizer.json", "tokenizer_config.json",
                      "special_tokens_map.json", "trainer_state.json"):
-            source = args.evaluate_checkpoint / name
-            if source.exists() and not (snapshot / name).exists():
-                shutil.copy2(source, snapshot / name)
+            source, target = args.evaluate_checkpoint / name, snapshot / name
+            # A copy cut short by an earlier job leaves a file of the wrong size: redo it,
+            # via a temporary name so an interrupted copy never looks finished.
+            if source.exists() and (not target.exists() or target.stat().st_size != source.stat().st_size):
+                partial = target.with_name(target.name + ".partial")
+                shutil.copyfile(source, partial)
+                os.replace(partial, target)
+        problem = safetensors_problem(snapshot / "model.safetensors")
+        if problem:
+            raise SystemExit(f"copying the checkpoint failed (disk quota?): {problem}")
     os.chdir(run_dir)          # results_<tag>.txt is written to the working directory
     # Python 3.14 starts DataLoader workers with forkserver, which pickles the in-memory
     # tokenized train set into every worker: 8 workers = 9 copies, OOM at 48G. fork

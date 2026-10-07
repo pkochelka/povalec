@@ -112,6 +112,12 @@ ADVERSARY_HIDDEN = 256
 # A language takes part only with >= 2 origins of at least this many train rows each.
 ADVERSARY_MIN_ROWS = 200
 ORIGINS = ("translated", "original", "mt")
+# Short warm-start experiments (train_cluster_track.py --init-from/--train-per-cell): start
+# from a fine-tuned checkpoint instead of MODEL_NAME, and train on at most TRAIN_PER_CELL
+# rows per (language, original/translated/mt) cell, drawn with SEED, so an adversary run
+# and its no-adversary control see the same rows.
+INIT_FROM = ""
+TRAIN_PER_CELL = 0
 
 
 @dataclass
@@ -354,6 +360,18 @@ def prepare_training_data(data_dir, tokenizer, train_split="train", dev_split="d
         "test": load_split(test_split, data_dir),
     }
 
+    origins = None
+    if ADVERSARY or TRAIN_PER_CELL:
+        origins = origin_column(raw_splits["train"], data_dir)
+    if TRAIN_PER_CELL:
+        cells = pd.DataFrame({"language": raw_splits["train"]["language"].to_numpy(), "origin": origins})
+        keep = np.sort(cells.sample(frac=1, random_state=SEED).groupby(["language", "origin"])
+                       .head(TRAIN_PER_CELL).index.to_numpy())
+        print(f"Train subsample: <= {TRAIN_PER_CELL} rows per (language, origin) -> {len(keep)} of "
+              f"{len(cells)} rows\n{cells.iloc[keep].value_counts().unstack(fill_value=0).to_string()}")
+        raw_splits["train"] = raw_splits["train"].iloc[keep].reset_index(drop=True)
+        origins = origins[keep]
+
     label_list = sorted(raw_splits["train"][PARTY_COLUMN].unique().tolist())
     label2id, id2label = build_label_maps(label_list)
     num_labels = len(label_list)
@@ -363,9 +381,9 @@ def prepare_training_data(data_dir, tokenizer, train_split="train", dev_split="d
     adv_languages = adv_weights = None
     if ADVERSARY:
         # attach_labels keeps only text/labels/language, in the order of the rows it keeps.
-        kept = raw_splits["train"][raw_splits["train"][PARTY_COLUMN].isin(label2id)]
+        kept = raw_splits["train"][PARTY_COLUMN].isin(label2id).to_numpy()
         splits["train"]["adv_cell"], adv_languages, adv_weights = adversary_cells(
-            origin_column(kept, data_dir), kept["language"].to_numpy())
+            origins[kept], raw_splits["train"]["language"].to_numpy()[kept])
     print("Train class counts:\n", splits["train"]["labels"].value_counts().sort_index().to_dict())
     print("Train languages:\n",    splits["train"]["language"].value_counts().to_dict())
 
@@ -403,8 +421,14 @@ def prepare_training_data(data_dir, tokenizer, train_split="train", dev_split="d
 
 def build_model(data, hf_token, device):
     set_seed(SEED)
+    if INIT_FROM:
+        with open(os.path.join(INIT_FROM, "config.json"), encoding="utf-8") as f:
+            init_labels = json.load(f).get("label2id")
+        if init_labels != data.label2id:
+            raise SystemExit(f"--init-from {INIT_FROM} has labels {init_labels}, this track {data.label2id}")
+        print(f"Warm start from {INIT_FROM}")
     return AutoModelForSequenceClassification.from_pretrained(
-        MODEL_NAME, token=hf_token,
+        INIT_FROM or MODEL_NAME, token=hf_token,
         num_labels=data.num_labels, id2label=data.id2label, label2id=data.label2id,
     ).to(device)
 
@@ -557,6 +581,8 @@ def train_and_evaluate(data, tokenizer, hf_token, device):
 def save_manifest(output_dir, data, num_epochs, biases):
     manifest = {
         "model_name": MODEL_NAME,
+        "init_from": INIT_FROM or None,
+        "train_per_cell": TRAIN_PER_CELL or None,
         "seed": SEED,
         "max_len": MAX_LEN,
         "num_epochs": num_epochs,

@@ -33,6 +33,12 @@ tracks, and the existing ECR+ID results, never overwrite each other.
 translated, original and machine-translated text cannot be told apart. --adv-weight sets
 the maximum reversal strength; the default run dir gets _adv<weight> appended.
 
+--init-from runs/<run>/model starts from that fine-tuned checkpoint instead of mmBERT-base,
+--train-per-cell N trains on at most N rows per (language, original/translated/mt) cell
+(fixed by the seed, so two runs see the same rows), --max-epochs caps the epochs: together
+a short warm-start experiment, e.g. an adversary run and its control. The default run dir
+gets _warm / _pc<N> appended.
+
 --evaluate-checkpoint runs/<run>/model/checkpoint-<step> skips training: it copies that
 checkpoint's weights and tokenizer to runs/<run>/model_epoch<N> (N from its
 trainer_state.json) and gives it dev-fitted biases, a manifest and test results, like a
@@ -128,6 +134,12 @@ def main():
                      help="maximum gradient-reversal strength, reached ~30%% into training (default 0.3)")
     adv.add_argument("--adv-min-rows", type=int, default=200,
                      help="train rows an origin needs in a language to take part (default 200)")
+    short = parser.add_argument_group("short warm-start experiments (logit-adjusted trainers only)")
+    short.add_argument("--init-from", type=Path, default=None,
+                       help="fine-tuned model dir to start from (same labels), instead of mmBERT-base")
+    short.add_argument("--train-per-cell", type=int, default=0,
+                       help="at most this many train rows per (language, origin) cell (0 = all)")
+    short.add_argument("--max-epochs", type=int, default=None, help="default 6, with early stopping")
     parser.add_argument("--evaluate-checkpoint", type=Path, default=None,
                         help="no training: turn this Trainer checkpoint into model_epoch<N> with "
                              "biases, manifest and results (logit-adjusted trainers only)")
@@ -138,8 +150,13 @@ def main():
         raise SystemExit(f"EVAL_CHECKPOINT={os.environ['EVAL_CHECKPOINT']!r} but --evaluate-checkpoint "
                          "was not passed (empty path, or a stale slurm_train_cluster_track.sh): refusing to train")
     snapshot_epochs = tuple(int(e) for e in re.split(r"[,:\s]+", args.snapshot_epochs) if e)
-    if args.trainer == "balanced" and args.adversary:
-        raise SystemExit("--adversary is only wired into the logit-adjusted trainers")
+    if args.trainer == "balanced" and (args.adversary or args.init_from or args.train_per_cell or args.max_epochs):
+        raise SystemExit("--adversary/--init-from/--train-per-cell/--max-epochs are only wired into the "
+                         "logit-adjusted trainers")
+    if args.init_from:
+        args.init_from = args.init_from.resolve()   # the trainer runs from the run dir
+        if not (args.init_from / "config.json").exists():
+            raise SystemExit(f"--init-from {args.init_from} has no config.json")
     if args.trainer == "balanced" and (args.group_by_length or snapshot_epochs):
         raise SystemExit("--group-by-length and --snapshot-epochs are only wired into the logit-adjusted trainer")
     if args.evaluate_checkpoint:
@@ -165,9 +182,10 @@ def main():
     if missing:
         raise SystemExit(f"missing split files (build the track first): {missing}")
 
-    adv_tag = f"_adv{args.adv_weight:g}" if args.adversary else ""
+    tags = (("_warm" if args.init_from else "") + (f"_pc{args.train_per_cell}" if args.train_per_cell else "")
+            + (f"_adv{args.adv_weight:g}" if args.adversary else ""))
     run_dir = (args.run_dir or PROJECT_ROOT / "runs"
-               / f"{args.track}-k{args.k}-{args.trainer}{args.suffix}{adv_tag}").resolve()
+               / f"{args.track}-k{args.k}-{args.trainer}{args.suffix}{tags}").resolve()
     print(f"trainer:   {module_name} (splits: {train_split}, {dev_split}, {test_split})")
     print(f"data:      {data_dir}")
     print(f"run dir:   {run_dir}")
@@ -177,6 +195,9 @@ def main():
           f"global_batch={args.global_batch or 32} lr={args.lr or 2e-5} bf16={args.bf16}")
     if args.adversary:
         print(f"adversary: {args.adversary}, max reversal {args.adv_weight}, min rows {args.adv_min_rows}")
+    if args.init_from or args.train_per_cell or args.max_epochs:
+        print(f"short:     init_from={args.init_from} train_per_cell={args.train_per_cell or 'all'} "
+              f"max_epochs={args.max_epochs or 6}")
     if args.global_batch and args.global_batch % int(os.environ.get("WORLD_SIZE", "1")):
         raise SystemExit(f"--global-batch {args.global_batch} does not split over {os.environ['WORLD_SIZE']} GPUs")
     if args.evaluate_checkpoint:
@@ -206,6 +227,12 @@ def main():
     if args.adversary:
         overrides.update(ADVERSARY=args.adversary, ADVERSARY_WEIGHT=args.adv_weight,
                          ADVERSARY_MIN_ROWS=args.adv_min_rows)
+    if args.init_from:
+        overrides["INIT_FROM"] = str(args.init_from)
+    if args.train_per_cell:
+        overrides["TRAIN_PER_CELL"] = args.train_per_cell
+    if args.max_epochs:
+        overrides["MAX_EPOCHS"] = args.max_epochs
 
     trainer = importlib.import_module(module_name)
     for module in {shared, trainer}:

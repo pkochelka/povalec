@@ -30,6 +30,7 @@ tracks, and the existing ECR+ID results, never overwrite each other.
 """
 import argparse
 import importlib
+import multiprocessing
 import os
 import re
 from pathlib import Path
@@ -125,6 +126,11 @@ def main():
         trainer.DEV_SPLIT, trainer.TEST_SPLIT = dev_split, test_split
     run_dir.mkdir(parents=True, exist_ok=True)
     os.chdir(run_dir)          # results_<tag>.txt is written to the working directory
+    # Python 3.14 starts DataLoader workers with forkserver, which pickles the in-memory
+    # tokenized train set into every worker: 8 workers = 9 copies, OOM at 48G. fork
+    # shares it copy-on-write, as every Python up to 3.13 did.
+    if "fork" in multiprocessing.get_all_start_methods():
+        multiprocessing.set_start_method("fork", force=True)
     trainer.main()
 
 

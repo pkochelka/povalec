@@ -18,6 +18,7 @@ import json
 from dataclasses import dataclass
 
 import numpy as np
+import pandas as pd
 import pyarrow as pa
 import pyarrow.compute  # noqa: F401  (registers pa.compute)
 import torch
@@ -96,6 +97,21 @@ IS_MAIN_PROCESS = int(os.environ.get("RANK", "0")) == 0
 # Skip training and only evaluate the existing SNAPSHOT_EPOCHS snapshots (biases, manifest,
 # results), e.g. a mid-run checkpoint copied to <OUTPUT_DIR>_epoch<N>.
 EVALUATE_ONLY = False
+# Origin adversary (train_cluster_track.py --adversary origin). Original-language EP text
+# comes only from that country's MEPs (original Slovak is 99% Sov-right), and AI-written or
+# machine-translated text reads as original, so "native-sounding Slovak" became a cluster
+# cue. A small MLP on the classifier input predicts, within each text's language, whether
+# it is EP-translated, original or machine-translated; a gradient-reversal layer between
+# it and the encoder trains the encoder to make that impossible. The reversal strength
+# ramps from 0 to ADVERSARY_WEIGHT (Ganin et al. 2016). Not conditioned on the label:
+# original Slovak has no non-Sov-right rows, so a label-conditioned adversary would only
+# act inside Sov-right. analysis/leace_probe.py tests the linear, no-retrain version.
+ADVERSARY = ""
+ADVERSARY_WEIGHT = 0.3
+ADVERSARY_HIDDEN = 256
+# A language takes part only with >= 2 origins of at least this many train rows each.
+ADVERSARY_MIN_ROWS = 200
+ORIGINS = ("translated", "original", "mt")
 
 
 @dataclass
@@ -111,6 +127,89 @@ class TrainingData:
     dev_langs: np.ndarray
     test_langs: np.ndarray
     train_lengths: list
+    adv_languages: list = None        # language index -> code, for the adversary's cells
+    adv_weights: np.ndarray = None    # per cell: balances origins within each language
+
+
+class GradientReversal(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, scale):
+        ctx.scale = scale
+        return x.view_as(x)
+
+    @staticmethod
+    def backward(ctx, grad):
+        return -ctx.scale * grad, None
+
+
+class OriginAdversary(torch.nn.Module):
+    """Origin logits for every language from the classifier input; the text's language row is read.
+
+    Attached as model.origin_adversary, so the optimizer, DDP and checkpoints include it,
+    and run from a forward hook on model.classifier, so it runs inside the (DDP) forward.
+    """
+
+    def __init__(self, dim, n_languages, n_origins, hidden):
+        super().__init__()
+        self.net = torch.nn.Sequential(torch.nn.Linear(dim, hidden), torch.nn.GELU(),
+                                       torch.nn.Linear(hidden, n_languages * n_origins))
+        self.shape = (n_languages, n_origins)
+        self.scale = 0.0
+        self.logits = None
+
+    def capture(self, module, inputs, output):
+        if self.training:
+            self.logits = self.net(GradientReversal.apply(inputs[0], self.scale)).view(-1, *self.shape)
+
+
+def attach_adversary(model, data, device):
+    adversary = OriginAdversary(model.classifier.in_features, len(data.adv_languages), len(ORIGINS),
+                                ADVERSARY_HIDDEN).to(device)
+    model.origin_adversary = adversary
+    model._adversary_hook = model.classifier.register_forward_hook(adversary.capture)
+    return adversary
+
+
+def detach_adversary(model):
+    """Drop the adversary before the final save: the classifier alone is the deliverable."""
+    model._adversary_hook.remove()
+    del model.origin_adversary, model._adversary_hook
+
+
+def origin_column(df, data_dir):
+    """'original' / 'translated' per row as in build_language_matched_split.origin_of, and
+    'mt' for rows train.parquet lacks (the machine-translated rows of train_langmatched_mt).
+
+    Counted on the full train.parquet: a downsampled train file keeps only some language
+    versions of a speech, which would make its translations look original."""
+    from preprocessing.build_language_matched_split import origin_of
+    key = ["speaker", "date", "language"]
+    full = pd.read_parquet(os.path.join(data_dir, "train.parquet"), columns=key)
+    full["origin"] = origin_of(full, 2)
+    full = full.drop_duplicates(key)
+    return df[key].merge(full, on=key, how="left")["origin"].fillna("mt").to_numpy()
+
+
+def adversary_cells(origins, languages):
+    """Per row: language index * len(ORIGINS) + origin index, or -100 where that origin has
+    fewer than ADVERSARY_MIN_ROWS rows or the language has fewer than two such origins.
+    Weights per cell make every usable origin weigh the same within its language."""
+    lang_codes = pd.Categorical(languages)
+    lang_ids = lang_codes.codes.astype(np.int64)
+    origin_ids = np.array([ORIGINS.index(o) for o in origins], dtype=np.int64)
+    counts = np.zeros((len(lang_codes.categories), len(ORIGINS)))
+    np.add.at(counts, (lang_ids, origin_ids), 1)
+    usable = counts >= ADVERSARY_MIN_ROWS
+    usable &= (usable.sum(1) >= 2)[:, None]
+    weights = np.where(usable, counts.sum(1, keepdims=True) / np.maximum(counts, 1)
+                       / np.maximum(usable.sum(1, keepdims=True), 1), 0.0)
+    cells = lang_ids * len(ORIGINS) + origin_ids
+    cells[~usable[lang_ids, origin_ids]] = -100
+    table = pd.DataFrame(counts.astype(int), index=lang_codes.categories, columns=ORIGINS)
+    table["adversary"] = ["/".join(o for o, u in zip(ORIGINS, row) if u) or "-" for row in usable]
+    print(f"Origin adversary: train rows per (language, origin); cells with < {ADVERSARY_MIN_ROWS} rows "
+          f"are ignored, {int((cells >= 0).sum())}/{len(cells)} rows take part\n{table.to_string()}")
+    return cells, list(lang_codes.categories), weights.reshape(-1)
 
 
 class LanguageAwareMetrics:
@@ -151,10 +250,46 @@ class LanguageAwareMetrics:
 
 
 class LogitAdjustedTrainer(Trainer):
-    def __init__(self, logit_adjustment, train_lengths=None, **kwargs):
+    def __init__(self, logit_adjustment, train_lengths=None, adversary=None, adversary_weights=None, **kwargs):
         super().__init__(**kwargs)
         self.logit_adjustment = logit_adjustment
         self.train_lengths = train_lengths
+        self.adversary = adversary
+        self.adversary_weights = adversary_weights
+        self.adversary_stats = np.zeros(3)   # weighted loss, weighted hits, weight since the last print
+
+    def _set_signature_columns_if_needed(self):
+        # The Trainer drops dataset columns that model.forward does not take; keep the
+        # adversary's cell id, which compute_loss pops before the forward.
+        super()._set_signature_columns_if_needed()
+        if self.adversary is not None and "adv_cell" not in self._signature_columns:
+            self._signature_columns.append("adv_cell")
+
+    def adversary_scale(self):
+        progress = self.state.global_step / max(self.state.max_steps, 1)
+        return float(ADVERSARY_WEIGHT * (2.0 / (1.0 + np.exp(-10.0 * progress)) - 1.0))
+
+    def adversary_loss(self, cells):
+        logits, self.adversary.logits = self.adversary.logits, None
+        valid = cells >= 0
+        safe = cells.clamp_min(0)
+        n_origins = logits.shape[-1]
+        rows = logits[torch.arange(len(cells), device=cells.device), safe // n_origins].float()
+        origin = safe % n_origins
+        weight = self.adversary_weights[safe] * valid
+        ce = F.cross_entropy(rows, origin, reduction="none")
+        loss = (ce * weight).sum() / weight.sum().clamp_min(EPSILON)
+        with torch.no_grad():
+            hits = ((rows.argmax(-1) == origin).float() * weight).sum()
+            self.adversary_stats += [float((ce * weight).sum()), float(hits), float(weight.sum())]
+        step = self.state.global_step
+        if step % self.args.logging_steps == 0 and self.adversary_stats[2] > 0:
+            if IS_MAIN_PROCESS:
+                total, hit, w = self.adversary_stats
+                print(f"[adversary] step {step}: reversal {self.adversary.scale:.3f}, origin loss {total / w:.3f}, "
+                      f"origin-balanced accuracy {hit / w:.3f}")
+            self.adversary_stats[:] = 0
+        return loss
 
     def _get_train_sampler(self, *args, **kwargs):
         # Built here rather than through TrainingArguments: the flag was renamed between
@@ -174,9 +309,14 @@ class LogitAdjustedTrainer(Trainer):
 
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         labels = inputs.pop("labels")
+        cells = inputs.pop("adv_cell", None)   # train batches only
+        if self.adversary is not None:
+            self.adversary.scale = self.adversary_scale()
         outputs = model(**inputs)
         adjusted_logits = outputs.logits + self.logit_adjustment
         loss = F.cross_entropy(adjusted_logits, labels)
+        if cells is not None and self.adversary is not None and self.adversary.logits is not None:
+            loss = loss + self.adversary_loss(cells)
         return (loss, outputs) if return_outputs else loss
 
 
@@ -220,6 +360,12 @@ def prepare_training_data(data_dir, tokenizer, train_split="train", dev_split="d
     print(f"{num_labels} classes: {label2id}")
 
     splits = {name: attach_labels(df, label2id) for name, df in raw_splits.items()}
+    adv_languages = adv_weights = None
+    if ADVERSARY:
+        # attach_labels keeps only text/labels/language, in the order of the rows it keeps.
+        kept = raw_splits["train"][raw_splits["train"][PARTY_COLUMN].isin(label2id)]
+        splits["train"]["adv_cell"], adv_languages, adv_weights = adversary_cells(
+            origin_column(kept, data_dir), kept["language"].to_numpy())
     print("Train class counts:\n", splits["train"]["labels"].value_counts().sort_index().to_dict())
     print("Train languages:\n",    splits["train"]["language"].value_counts().to_dict())
 
@@ -250,6 +396,8 @@ def prepare_training_data(data_dir, tokenizer, train_split="train", dev_split="d
         dev_langs=splits["dev"]["language"].to_numpy(),
         test_langs=splits["test"]["language"].to_numpy(),
         train_lengths=train_lengths,
+        adv_languages=adv_languages,
+        adv_weights=adv_weights,
     )
 
 
@@ -371,9 +519,16 @@ def train_and_evaluate(data, tokenizer, hf_token, device):
     callbacks = [EarlyStoppingCallback(early_stopping_patience=EARLY_STOPPING_PATIENCE)]
     if SNAPSHOT_EPOCHS:
         callbacks.append(EpochSnapshot(SNAPSHOT_EPOCHS, tokenizer))
+    adversary = attach_adversary(model, data, device) if ADVERSARY else None
+    if adversary is not None:
+        print(f"Origin adversary on: max reversal {ADVERSARY_WEIGHT}, hidden {ADVERSARY_HIDDEN}, "
+              f"{len(data.adv_languages)} languages x {ORIGINS}")
     trainer = LogitAdjustedTrainer(
         logit_adjustment=logit_adjustment_for(data.train, data.num_labels, device),
         train_lengths=data.train_lengths if GROUP_BY_LENGTH else None,
+        adversary=adversary,
+        adversary_weights=(torch.tensor(data.adv_weights, dtype=torch.float, device=device)
+                           if adversary is not None else None),
         model=model,
         args=training_arguments(OUTPUT_DIR, MAX_EPOCHS, evaluate_each_epoch=True),
         train_dataset=data.train,
@@ -384,6 +539,8 @@ def train_and_evaluate(data, tokenizer, hf_token, device):
         callbacks=callbacks,
     )
     trainer.train()  # load_best_model_at_end restores the best-dev checkpoint
+    if adversary is not None:
+        detach_adversary(model)
 
     scored = [entry for entry in trainer.state.log_history if f"eval_{BEST_METRIC}" in entry]
     best = max(scored, key=lambda entry: entry[f"eval_{BEST_METRIC}"])
@@ -412,6 +569,9 @@ def save_manifest(output_dir, data, num_epochs, biases):
         "inference": "argmax(model logits + biases)",
         "data_dir": str(DATA_DIR),
         "splits": {"train": TRAIN_SPLIT, "dev": DEV_SPLIT, "test": TEST_SPLIT},
+        "adversary": ({"target": ADVERSARY, "weight": ADVERSARY_WEIGHT, "hidden": ADVERSARY_HIDDEN,
+                       "min_rows": ADVERSARY_MIN_ROWS, "origins": list(ORIGINS), "languages": data.adv_languages}
+                      if ADVERSARY else None),
     }
     with open(os.path.join(output_dir, "manifest.json"), "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)

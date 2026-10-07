@@ -36,8 +36,9 @@ Stages:
   fit    (CPU, seconds to minutes) fits the erasers and heads, writes
          results_leace_probe.txt / .csv
 
-Metrics: leak = balanced accuracy of a per-language linear origin probe (fit on train,
-scored on test; 0.5 = erased); ai->orig = share of AI text that probe calls original;
+Metrics: leak = balanced accuracy of a per-language origin probe, 5-fold cross-validated on
+the erased test set (0.5 = erased), linear and one-hidden-layer MLP (LEACE only promises the
+linear one); ai->orig = share of AI text that probe calls original;
 F1 on test (all / translated / original cells); native sk and ro accuracy; counterfactual
 cs/pl -> sk and it/es/fr/pt -> ro accuracy after MT; MT-augmentation accuracy; AI-text
 shares and agreement with the English partner text.
@@ -263,30 +264,31 @@ def lr(C, class_weight="balanced"):
     return make_pipeline(StandardScaler(), LogisticRegression(C=C, class_weight=class_weight, max_iter=3000))
 
 
-def origin_probes(fit_meta, Xf, C):
-    """Per-language linear probe: original vs translated, on (erased) train features."""
-    probes = {}
-    for lang, idx in fit_meta.groupby("language").indices.items():
-        y = fit_meta.origin.to_numpy()[idx] == "original"
-        if min(y.sum(), (~y).sum()) >= MIN_ORIGIN_ROWS:
-            probes[lang] = lr(C).fit(Xf[idx], y)
-    return probes
+def mlp(seed):
+    from sklearn.neural_network import MLPClassifier
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import StandardScaler
+    return make_pipeline(StandardScaler(), MLPClassifier(hidden_layer_sizes=(256,), alpha=1e-3, max_iter=300,
+                                                         early_stopping=True, random_state=seed))
 
 
-def leakage(probes, test_meta, Xt, ai_meta, Xa):
+def leakage(test_meta, Xt, ai_meta, Xa, make_probe, seed):
+    """Per-language origin probe (original vs translated), 5-fold cross-validated on the
+    erased TEST set. Not trained on the fit rows: there the eraser leaves exactly zero
+    covariance, so a linear probe learns a constant and scores 0.5 whatever is left on
+    other rows. ai->orig: the probe refit on all test rows of the language, applied to AI text."""
     from sklearn.metrics import balanced_accuracy_score
-    scores = {}
-    for lang, probe in probes.items():
-        rows = (test_meta.language == lang).to_numpy()
-        y = test_meta.origin.to_numpy()[rows] == "original"
-        if min(y.sum(), (~y).sum()) >= MIN_ORIGIN_ROWS:
-            scores[lang] = balanced_accuracy_score(y, probe.predict(Xt[rows]))
-    ai_orig = {}
-    if ai_meta is not None:
-        for lang, probe in probes.items():
-            rows = (ai_meta.language == lang).to_numpy()
-            if rows.any() and lang != "en":
-                ai_orig[lang] = probe.predict(Xa[rows]).mean()
+    from sklearn.model_selection import StratifiedKFold, cross_val_predict
+    scores, ai_orig = {}, {}
+    for lang, idx in test_meta.groupby("language").indices.items():
+        y = test_meta.origin.to_numpy()[idx] == "original"
+        if min(y.sum(), (~y).sum()) < MIN_ORIGIN_ROWS:
+            continue
+        cv = StratifiedKFold(5, shuffle=True, random_state=seed)
+        scores[lang] = balanced_accuracy_score(y, cross_val_predict(make_probe(), Xt[idx], y, cv=cv))
+        rows = (ai_meta.language == lang).to_numpy() if ai_meta is not None else np.zeros(0, bool)
+        if rows.any() and lang != "en":
+            ai_orig[lang] = make_probe().fit(Xt[idx], y).predict(Xa[rows]).mean()
     return scores, ai_orig
 
 
@@ -380,11 +382,14 @@ def fit_stage(args, run_dir):
         print(f"--- {concept}")
         eraser = Eraser(fit_meta, Xfit, concept)
         erased = {k: eraser(v[1], v[0].language.to_numpy()) for k, v in sets.items()}
-        probes = origin_probes(fit_meta, erased["fit"], args.C)
-        leak, ai_orig = leakage(probes, sets["test"][0], erased["test"], ai_meta, erased.get("ai"))
-        extra = {"leak sk": leak.get("sk", np.nan), "leak mean": float(np.mean(list(leak.values()))),
-                 "ai->orig sk": ai_orig.get("sk", np.nan),
-                 "ai->orig mean": float(np.mean(list(ai_orig.values()))) if ai_orig else np.nan}
+        extra = {}
+        probes = [("", lambda: lr(args.C))] + ([("mlp ", lambda: mlp(args.seed))] if args.mlp_probe else [])
+        for tag, make_probe in probes:
+            leak, ai_orig = leakage(sets["test"][0], erased["test"], ai_meta, erased.get("ai"), make_probe, args.seed)
+            extra |= {f"leak {tag}sk": leak.get("sk", np.nan),
+                      f"leak {tag}mean": float(np.mean(list(leak.values()))) if leak else np.nan,
+                      f"ai->orig {tag}sk": ai_orig.get("sk", np.nan),
+                      f"ai->orig {tag}mean": float(np.mean(list(ai_orig.values()))) if ai_orig else np.nan}
         if concept == "origin within lang":
             say(f"origin within lang: erased in {len(eraser.per_lang)} languages: {sorted(eraser.per_lang)}")
         refit = lr(args.C).fit(erased["fit"], fit_meta.gold.to_numpy())
@@ -400,7 +405,7 @@ def fit_stage(args, run_dir):
     table = pd.DataFrame(rows).set_index(["concept", "head"])
     pd.set_option("display.width", 250)
     say(f"\n{'=' * 100}\nLEACE at the classifier input; raw argmax except 'current + biases'\n{'=' * 100}")
-    blocks = [["leak sk", "leak mean", "ai->orig sk", "ai->orig mean"],
+    blocks = [[c for c in table.columns if c.startswith(("leak", "ai->orig"))],
               ["test F1", "F1 trans", "F1 origi", "sk origi acc", "sk trans acc", "ro origi acc", "ro trans acc"],
               [c for c in table.columns if c.startswith(("cf", "mt"))],
               [c for c in table.columns if c.startswith("ai ")]]
@@ -431,6 +436,8 @@ def parse_args():
     parser.add_argument("--n_ai", type=int, default=15, help="AI keys per (model, track), all languages each")
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--C", type=float, default=1.0, help="inverse L2 strength of the refit head and probes")
+    parser.add_argument("--no_mlp_probe", dest="mlp_probe", action="store_false",
+                        help="skip the nonlinear (one hidden layer) origin probe next to the linear one")
     parser.add_argument("--min_origin_rows", type=int, default=MIN_ORIGIN_ROWS,
                         help="rows per (language, origin) needed to fit an origin eraser or probe")
     parser.add_argument("--seed", type=int, default=0)

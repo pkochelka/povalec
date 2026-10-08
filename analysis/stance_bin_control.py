@@ -443,7 +443,7 @@ def analyse(cells, groups, positions, statements, args, rng, strata=None):
 def pooled_direction(table, vectors, positions, groups, draws, rng):
     """Correlation of shift against position over every (statement, group) cell.
 
-    Both sides are centred within a statement first. Without that, the correlation is
+    Both sides are centered within a statement first. Without that, the correlation is
     carried by the group main effects -- PPE is a common prediction and a frequent
     agreer, which would score as stance sensitivity no matter how the bins were drawn.
     """
@@ -519,7 +519,7 @@ def headline_section(table, pooled, pooled_p, n_blocks, groups, args):
         f"DIRECTION ({len(usable)} statements) -- does the shift go where the official "
         "positions say it should?",
         f"  pooled r over {n_blocks * len(groups)} (statement, group) cells, "
-        f"both sides centred within statement: {fmt(pooled)}",
+        f"both sides centered within statement: {fmt(pooled)}",
         f"  permutation p (group labels shuffled within statement): {fmt(pooled_p, 4)}",
     ]
     per_statement = usable["r_pearson"].dropna()
@@ -741,7 +741,7 @@ def plot(table, vectors, positions, groups, path):
         slope, intercept = np.polyfit(x[ok], y[ok], 1)
         grid = np.linspace(x[ok].min(), x[ok].max(), 2)
         left.plot(grid, slope * grid + intercept, color="#b4451f", lw=1.6)
-    left.set_xlabel("official position on the statement (centred within statement)")
+    left.set_xlabel("official position on the statement (centered within statement)")
     left.set_ylabel("probability shift, agree bin - disagree bin")
     left.set_title(f"Direction: r = {fmt(pearson(x, y))}")
 

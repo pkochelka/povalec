@@ -121,7 +121,7 @@ def load_test(args):
     # the full split, before any --limit subsample.
     n_lang = df.groupby(["speaker", "date"])["language"].transform("nunique")
     df["origin"] = np.where(n_lang <= 2, "original", "translated")
-    if args.pilot:
+    if getattr(args, "pilot", 0):  # style_by_class.py shares this loader and has no --pilot
         # N random speeches present in >= --invariance_min_langs languages, every translation
         # kept: the same rows for every rater, to compare their translation invariance.
         n_lang = df.groupby(["speaker", "date"])["language"].transform("nunique")

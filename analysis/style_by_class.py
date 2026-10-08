@@ -730,7 +730,8 @@ def analyse_test(d, z, classes, args, tag):
         common = joined.index.intersection(full.index)
         say(f"  {label:<22} n={len(s):>6}  r={np.corrcoef(joined[common], full[common])[0, 1]:.2f}")
         sub_tables.append(t.assign(subset=label))
-    pd.concat(sub_tables).to_csv(Path(args.out_dir) / f"style_robustness_{tag}.csv", index=False)
+    if sub_tables:
+        pd.concat(sub_tables).to_csv(Path(args.out_dir) / f"style_robustness_{tag}.csv", index=False)
     return pd.concat(tables), pred_table.assign(source="test"), profiles
 
 

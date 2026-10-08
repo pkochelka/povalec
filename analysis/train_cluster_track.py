@@ -32,6 +32,10 @@ tracks, and the existing ECR+ID results, never overwrite each other.
 (classifier_training.ADVERSARY): within each language the encoder is trained so that EP-
 translated, original and machine-translated text cannot be told apart. --adv-weight sets
 the maximum reversal strength; the default run dir gets _adv<weight> appended.
+--adversary language removes language identity altogether (a head predicting the text's
+language), --adversary both runs the language and origin heads together; their run dirs
+get _advlanguage<weight> / _advboth<weight>. --adv-lr-mult trains the heads at a multiple
+of the learning rate (run dir: _lr<mult>), so they keep up with the encoder.
 
 --init-from runs/<run>/model starts from that fine-tuned checkpoint instead of mmBERT-base,
 --train-per-cell N trains on at most N rows per (language, original/translated/mt) cell
@@ -127,9 +131,12 @@ def main():
                             "so compare only runs with the same value")
     speed.add_argument("--lr", type=float, default=None, help="peak learning rate (default 2e-5)")
     speed.add_argument("--bf16", action="store_true", help="bf16 autocast instead of fp16")
-    adv = parser.add_argument_group("origin adversary (logit-adjusted trainers only)")
-    adv.add_argument("--adversary", choices=("origin",), default=None,
-                     help="gradient-reversal adversary on (language, original/translated/mt)")
+    adv = parser.add_argument_group("gradient-reversal adversary (logit-adjusted trainers only)")
+    adv.add_argument("--adversary", choices=("origin", "language", "both"), default=None,
+                     help="origin: original/translated/mt within each language; language: the language "
+                          "itself; both: the two heads together")
+    adv.add_argument("--adv-lr-mult", type=float, default=1.0,
+                     help="learning rate of the adversary heads as a multiple of --lr (default 1)")
     adv.add_argument("--adv-weight", type=float, default=0.3,
                      help="maximum gradient-reversal strength, reached ~30%% into training (default 0.3)")
     adv.add_argument("--adv-min-rows", type=int, default=200,
@@ -185,7 +192,9 @@ def main():
         raise SystemExit(f"missing split files (build the track first): {missing}")
 
     tags = (("_warm" if args.init_from else "") + (f"_pc{args.train_per_cell}" if args.train_per_cell else "")
-            + (f"_adv{args.adv_weight:g}" if args.adversary else ""))
+            + (f"_adv{'' if args.adversary == 'origin' else args.adversary}{args.adv_weight:g}"
+               if args.adversary else "")
+            + (f"_lr{args.adv_lr_mult:g}" if args.adversary and args.adv_lr_mult != 1.0 else ""))
     run_dir = (args.run_dir or PROJECT_ROOT / "runs"
                / f"{args.track}-k{args.k}-{args.trainer}{args.suffix}{tags}").resolve()
     print(f"trainer:   {module_name} (splits: {train_split}, {dev_split}, {test_split})")
@@ -196,7 +205,8 @@ def main():
           f"gpus={os.environ.get('WORLD_SIZE', '1')} eval_batch={args.eval_batch or 32} "
           f"global_batch={args.global_batch or 32} lr={args.lr or 2e-5} bf16={args.bf16}")
     if args.adversary:
-        print(f"adversary: {args.adversary}, max reversal {args.adv_weight}, min rows {args.adv_min_rows}")
+        print(f"adversary: {args.adversary}, max reversal {args.adv_weight}, lr x{args.adv_lr_mult:g}, "
+              f"min rows {args.adv_min_rows}")
     if args.init_from or args.train_per_cell or args.max_epochs:
         print(f"short:     init_from={args.init_from} train_per_cell={args.train_per_cell or 'all'} "
               f"max_epochs={args.max_epochs or 6}")
@@ -228,7 +238,7 @@ def main():
         overrides["BF16"] = True
     if args.adversary:
         overrides.update(ADVERSARY=args.adversary, ADVERSARY_WEIGHT=args.adv_weight,
-                         ADVERSARY_MIN_ROWS=args.adv_min_rows)
+                         ADVERSARY_MIN_ROWS=args.adv_min_rows, ADVERSARY_LR_MULT=args.adv_lr_mult)
     if args.init_from:
         overrides["INIT_FROM"] = str(args.init_from)
     if args.train_per_cell:

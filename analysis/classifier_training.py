@@ -106,9 +106,17 @@ EVALUATE_ONLY = False
 # ramps from 0 to ADVERSARY_WEIGHT (Ganin et al. 2016). Not conditioned on the label:
 # original Slovak has no non-Sov-right rows, so a label-conditioned adversary would only
 # act inside Sov-right. analysis/leace_probe.py tests the linear, no-retrain version.
+# ADVERSARY="language" instead removes language identity altogether (a head predicting the
+# text's language, balanced over languages); "both" runs the two heads on the same reversed
+# features. The origin-only run (2026-10-08) left origin 98% decodable: its adversary fell
+# below chance, i.e. the encoder outran it. ADVERSARY_LR_MULT gives the heads a higher
+# learning rate so they keep up (Adam ignores loss scaling, so only the rate helps).
 ADVERSARY = ""
+ADVERSARY_TARGETS = {"origin": ("origin",), "language": ("language",), "both": ("origin", "language")}
 ADVERSARY_WEIGHT = 0.3
 ADVERSARY_HIDDEN = 256
+ADVERSARY_LR_MULT = 1.0
+ADVERSARY_COLUMNS = {"origin": "adv_cell", "language": "adv_lang"}   # head -> train dataset column
 # A language takes part only with >= 2 origins of at least this many train rows each.
 ADVERSARY_MIN_ROWS = 200
 ORIGINS = ("translated", "original", "mt")
@@ -137,7 +145,7 @@ class TrainingData:
     test_langs: np.ndarray
     train_lengths: list
     adv_languages: list = None        # language index -> code, for the adversary's cells
-    adv_weights: np.ndarray = None    # per cell: balances origins within each language
+    adv_weights: dict = None          # head -> per-cell weights (origins within a language / languages)
 
 
 class GradientReversal(torch.autograd.Function):
@@ -151,30 +159,36 @@ class GradientReversal(torch.autograd.Function):
         return -ctx.scale * grad, None
 
 
-class OriginAdversary(torch.nn.Module):
-    """Origin logits for every language from the classifier input; the text's language row is read.
+class Adversary(torch.nn.Module):
+    """Gradient-reversed MLP heads on the classifier input.
 
-    Attached as model.origin_adversary, so the optimizer, DDP and checkpoints include it,
-    and run from a forward hook on model.classifier, so it runs inside the (DDP) forward.
+    "origin": origin logits for every language (the row of the text's language is read);
+    "language": language logits. Attached as model.adversary, so the optimizer, DDP and
+    checkpoints include it, and run from a forward hook on model.classifier, so it runs
+    inside the (DDP) forward.
     """
 
-    def __init__(self, dim, n_languages, n_origins, hidden):
+    def __init__(self, dim, n_languages, hidden, targets):
         super().__init__()
-        self.net = torch.nn.Sequential(torch.nn.Linear(dim, hidden), torch.nn.GELU(),
-                                       torch.nn.Linear(hidden, n_languages * n_origins))
-        self.shape = (n_languages, n_origins)
+        outputs = {"origin": n_languages * len(ORIGINS), "language": n_languages}
+        self.heads = torch.nn.ModuleDict({
+            target: torch.nn.Sequential(torch.nn.Linear(dim, hidden), torch.nn.GELU(),
+                                        torch.nn.Linear(hidden, outputs[target]))
+            for target in targets})
+        self.n_languages = n_languages
         self.scale = 0.0
         self.logits = None
 
     def capture(self, module, inputs, output):
         if self.training:
-            self.logits = self.net(GradientReversal.apply(inputs[0], self.scale)).view(-1, *self.shape)
+            features = GradientReversal.apply(inputs[0], self.scale)
+            self.logits = {target: head(features) for target, head in self.heads.items()}
 
 
 def attach_adversary(model, data, device):
-    adversary = OriginAdversary(model.classifier.in_features, len(data.adv_languages), len(ORIGINS),
-                                ADVERSARY_HIDDEN).to(device)
-    model.origin_adversary = adversary
+    adversary = Adversary(model.classifier.in_features, len(data.adv_languages), ADVERSARY_HIDDEN,
+                          ADVERSARY_TARGETS[ADVERSARY]).to(device)
+    model.adversary = adversary
     model._adversary_hook = model.classifier.register_forward_hook(adversary.capture)
     return adversary
 
@@ -182,7 +196,7 @@ def attach_adversary(model, data, device):
 def detach_adversary(model):
     """Drop the adversary before the final save: the classifier alone is the deliverable."""
     model._adversary_hook.remove()
-    del model.origin_adversary, model._adversary_hook
+    del model.adversary, model._adversary_hook
 
 
 def origin_column(df, data_dir):
@@ -219,6 +233,18 @@ def adversary_cells(origins, languages):
     print(f"Origin adversary: train rows per (language, origin); cells with < {ADVERSARY_MIN_ROWS} rows "
           f"are ignored, {int((cells >= 0).sum())}/{len(cells)} rows take part\n{table.to_string()}")
     return cells, list(lang_codes.categories), weights.reshape(-1)
+
+
+def language_cells(languages):
+    """Per row: language index (same order as adversary_cells), with weights that make every
+    language weigh the same, so the head cannot do well by learning the big languages only."""
+    lang_codes = pd.Categorical(languages)
+    ids = lang_codes.codes.astype(np.int64)
+    counts = np.bincount(ids, minlength=len(lang_codes.categories)).astype(float)
+    weights = counts.sum() / (len(counts) * np.maximum(counts, 1))
+    print(f"Language adversary: {len(counts)} languages, {int(counts.min())}-{int(counts.max())} train rows "
+          f"each; balanced chance accuracy {1 / len(counts):.3f}")
+    return ids, list(lang_codes.categories), weights
 
 
 class LanguageAwareMetrics:
@@ -264,40 +290,65 @@ class LogitAdjustedTrainer(Trainer):
         self.logit_adjustment = logit_adjustment
         self.train_lengths = train_lengths
         self.adversary = adversary
-        self.adversary_weights = adversary_weights
-        self.adversary_stats = np.zeros(3)   # weighted loss, weighted hits, weight since the last print
+        self.adversary_weights = adversary_weights   # head -> per-cell weight tensor
+        # head -> weighted loss, weighted hits, weight since the last print
+        self.adversary_stats = {head: np.zeros(3) for head in (adversary_weights or {})}
 
     def _set_signature_columns_if_needed(self):
         # The Trainer drops dataset columns that model.forward does not take; keep the
-        # adversary's cell id, which compute_loss pops before the forward.
+        # adversary's cell ids, which compute_loss pops before the forward.
         super()._set_signature_columns_if_needed()
-        if self.adversary is not None and "adv_cell" not in self._signature_columns:
-            self._signature_columns.append("adv_cell")
+        if self.adversary is not None:
+            for column in ADVERSARY_COLUMNS.values():
+                if column not in self._signature_columns:
+                    self._signature_columns.append(column)
+
+    def create_optimizer(self, model=None):
+        # The adversary's heads get their own groups at ADVERSARY_LR_MULT x the rate (same
+        # weight decay and schedule), so they can keep up with the encoder they fight.
+        optimizer = super().create_optimizer(model)
+        if self.adversary is None or ADVERSARY_LR_MULT == 1.0:
+            return optimizer
+        heads = {id(p) for p in self.adversary.parameters()}
+        for group in list(optimizer.param_groups):
+            moved = [p for p in group["params"] if id(p) in heads]
+            if moved:
+                group["params"] = [p for p in group["params"] if id(p) not in heads]
+                optimizer.add_param_group({"params": moved, "weight_decay": group["weight_decay"],
+                                           "lr": group["lr"] * ADVERSARY_LR_MULT})
+        return optimizer
 
     def adversary_scale(self):
         progress = self.state.global_step / max(self.state.max_steps, 1)
         return float(ADVERSARY_WEIGHT * (2.0 / (1.0 + np.exp(-10.0 * progress)) - 1.0))
 
-    def adversary_loss(self, cells):
+    def adversary_loss(self, cells_by_head):
         logits, self.adversary.logits = self.adversary.logits, None
-        valid = cells >= 0
-        safe = cells.clamp_min(0)
-        n_origins = logits.shape[-1]
-        rows = logits[torch.arange(len(cells), device=cells.device), safe // n_origins].float()
-        origin = safe % n_origins
-        weight = self.adversary_weights[safe] * valid
-        ce = F.cross_entropy(rows, origin, reduction="none")
-        loss = (ce * weight).sum() / weight.sum().clamp_min(EPSILON)
-        with torch.no_grad():
-            hits = ((rows.argmax(-1) == origin).float() * weight).sum()
-            self.adversary_stats += [float((ce * weight).sum()), float(hits), float(weight.sum())]
+        loss = 0.0
+        for head, cells in cells_by_head.items():
+            valid = cells >= 0
+            safe = cells.clamp_min(0)
+            if head == "origin":   # the row of the text's language, then its origin
+                n_origins = len(ORIGINS)
+                rows = logits[head].view(-1, self.adversary.n_languages, n_origins)
+                rows = rows[torch.arange(len(cells), device=cells.device), safe // n_origins].float()
+                target = safe % n_origins
+            else:
+                rows, target = logits[head].float(), safe
+            weight = self.adversary_weights[head][safe] * valid
+            ce = F.cross_entropy(rows, target, reduction="none")
+            loss = loss + (ce * weight).sum() / weight.sum().clamp_min(EPSILON)
+            with torch.no_grad():
+                hits = ((rows.argmax(-1) == target).float() * weight).sum()
+                self.adversary_stats[head] += [float((ce * weight).sum()), float(hits), float(weight.sum())]
         step = self.state.global_step
-        if step % self.args.logging_steps == 0 and self.adversary_stats[2] > 0:
+        if step % self.args.logging_steps == 0:
             if IS_MAIN_PROCESS:
-                total, hit, w = self.adversary_stats
-                print(f"[adversary] step {step}: reversal {self.adversary.scale:.3f}, origin loss {total / w:.3f}, "
-                      f"origin-balanced accuracy {hit / w:.3f}")
-            self.adversary_stats[:] = 0
+                parts = [f"{head} loss {s[0] / s[2]:.3f}, balanced accuracy {s[1] / s[2]:.3f}"
+                         for head, s in self.adversary_stats.items() if s[2] > 0]
+                print(f"[adversary] step {step}: reversal {self.adversary.scale:.3f}; " + "; ".join(parts))
+            for s in self.adversary_stats.values():
+                s[:] = 0
         return loss
 
     def _get_train_sampler(self, *args, **kwargs):
@@ -318,13 +369,14 @@ class LogitAdjustedTrainer(Trainer):
 
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         labels = inputs.pop("labels")
-        cells = inputs.pop("adv_cell", None)   # train batches only
+        # adversary cell ids, train batches only
+        cells = {head: inputs.pop(column) for head, column in ADVERSARY_COLUMNS.items() if column in inputs}
         if self.adversary is not None:
             self.adversary.scale = self.adversary_scale()
         outputs = model(**inputs)
         adjusted_logits = outputs.logits + self.logit_adjustment
         loss = F.cross_entropy(adjusted_logits, labels)
-        if cells is not None and self.adversary is not None and self.adversary.logits is not None:
+        if cells and self.adversary is not None and self.adversary.logits is not None:
             loss = loss + self.adversary_loss(cells)
         return (loss, outputs) if return_outputs else loss
 
@@ -364,7 +416,7 @@ def prepare_training_data(data_dir, tokenizer, train_split="train", dev_split="d
     }
 
     origins = None
-    if ADVERSARY or TRAIN_PER_CELL:
+    if "origin" in ADVERSARY_TARGETS.get(ADVERSARY, ()) or TRAIN_PER_CELL:
         origins = origin_column(raw_splits["train"], data_dir)
     if TRAIN_PER_CELL:
         cells = pd.DataFrame({"language": raw_splits["train"]["language"].to_numpy(), "origin": origins})
@@ -385,8 +437,14 @@ def prepare_training_data(data_dir, tokenizer, train_split="train", dev_split="d
     if ADVERSARY:
         # attach_labels keeps only text/labels/language, in the order of the rows it keeps.
         kept = raw_splits["train"][PARTY_COLUMN].isin(label2id).to_numpy()
-        splits["train"]["adv_cell"], adv_languages, adv_weights = adversary_cells(
-            origins[kept], raw_splits["train"]["language"].to_numpy()[kept])
+        languages = raw_splits["train"]["language"].to_numpy()[kept]
+        adv_weights = {}
+        if "origin" in ADVERSARY_TARGETS[ADVERSARY]:
+            splits["train"][ADVERSARY_COLUMNS["origin"]], adv_languages, adv_weights["origin"] = \
+                adversary_cells(origins[kept], languages)
+        if "language" in ADVERSARY_TARGETS[ADVERSARY]:
+            splits["train"][ADVERSARY_COLUMNS["language"]], adv_languages, adv_weights["language"] = \
+                language_cells(languages)
     print("Train class counts:\n", splits["train"]["labels"].value_counts().sort_index().to_dict())
     print("Train languages:\n",    splits["train"]["language"].value_counts().to_dict())
 
@@ -549,14 +607,14 @@ def train_and_evaluate(data, tokenizer, hf_token, device):
         callbacks.append(EpochSnapshot(SNAPSHOT_EPOCHS, tokenizer))
     adversary = attach_adversary(model, data, device) if ADVERSARY else None
     if adversary is not None:
-        print(f"Origin adversary on: max reversal {ADVERSARY_WEIGHT}, hidden {ADVERSARY_HIDDEN}, "
-              f"{len(data.adv_languages)} languages x {ORIGINS}")
+        print(f"Adversary on: heads {ADVERSARY_TARGETS[ADVERSARY]}, max reversal {ADVERSARY_WEIGHT}, "
+              f"hidden {ADVERSARY_HIDDEN}, lr x{ADVERSARY_LR_MULT:g}, {len(data.adv_languages)} languages")
     trainer = LogitAdjustedTrainer(
         logit_adjustment=logit_adjustment_for(data.train, data.num_labels, device),
         train_lengths=data.train_lengths if GROUP_BY_LENGTH else None,
         adversary=adversary,
-        adversary_weights=(torch.tensor(data.adv_weights, dtype=torch.float, device=device)
-                           if adversary is not None else None),
+        adversary_weights=({head: torch.tensor(w, dtype=torch.float, device=device)
+                            for head, w in data.adv_weights.items()} if adversary is not None else None),
         model=model,
         args=training_arguments(OUTPUT_DIR, MAX_EPOCHS, evaluate_each_epoch=True),
         train_dataset=data.train,
@@ -599,7 +657,8 @@ def save_manifest(output_dir, data, num_epochs, biases):
         "inference": "argmax(model logits + biases)",
         "data_dir": str(DATA_DIR),
         "splits": {"train": TRAIN_SPLIT, "dev": DEV_SPLIT, "test": TEST_SPLIT},
-        "adversary": ({"target": ADVERSARY, "weight": ADVERSARY_WEIGHT, "hidden": ADVERSARY_HIDDEN,
+        "adversary": ({"target": ADVERSARY, "heads": list(ADVERSARY_TARGETS[ADVERSARY]),
+                       "weight": ADVERSARY_WEIGHT, "hidden": ADVERSARY_HIDDEN, "lr_mult": ADVERSARY_LR_MULT,
                        "min_rows": ADVERSARY_MIN_ROWS, "origins": list(ORIGINS), "languages": data.adv_languages}
                       if ADVERSARY else None),
     }

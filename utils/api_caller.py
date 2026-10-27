@@ -51,6 +51,7 @@ def call_api(
     max_tokens: int = 8096,
     temperature: float = 0.0,
     enable_thinking: bool | None = None,
+    reasoning_effort: str | None = None,
 ) -> dict:
     """Send a single user message to the chat completions endpoint.
 
@@ -59,6 +60,7 @@ def call_api(
     read enable_thinking to switch the <think> phase on or off. Leave it None to use
     the server/model default; set False to suppress reasoning (so the token budget is
     spent on the answer, not an internal deliberation that can exhaust max_tokens).
+    Kimi K3 ignores enable_thinking but honours reasoning_effort="none".
     """
     payload = {
         "model": model_id,
@@ -68,6 +70,8 @@ def call_api(
     }
     if enable_thinking is not None:
         payload["chat_template_kwargs"] = {"enable_thinking": enable_thinking}
+    if reasoning_effort is not None:
+        payload["reasoning_effort"] = reasoning_effort
 
     try:
         resp = _SESSION.post(

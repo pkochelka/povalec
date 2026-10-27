@@ -109,12 +109,29 @@ PER_VARIANT_SCRIPTS = [
 # --positions and must be given the same basis the vaa*.csv files were written with.
 _POSITIONS_ARGS = ["--positions", POSITIONS_PLACEHOLDER]
 
-# The 0-centered null of every argmax method, VAA and classifier. plot_argmax_shares.py
-# and argmax_share_table.py draw and tabulate every share minus it, so these run before
-# the plots; both are cheap (CPU, minutes) and named by the positions basis.
+# The nulls every figure and table is drawn minus: the 0-centered normal ("gaussian")
+# and the uniform one. Each null-dependent script below takes _NULL_ARGS and writes one
+# set of outputs per null into plots_<null>/ and tables_<null>/ (the dataset's and, for
+# the per-model argmax figures, every model's), next to the raw plots/ and tables/.
+NULL_KINDS = ["gaussian", "uniform"]
+# The third null is not drawn but taken from those: per group the largest of the normal
+# null at each of ENVELOPE_SIGMAS and the uniform null (vaa_null_model.ENVELOPE), into
+# plots_max/ and tables_max/. It needs the normal null at every one of those sigmas.
+ENVELOPE_SIGMAS = ["0.25", "0.5", "0.75", "1"]
+_NULL_ARGS = ["--null", *NULL_KINDS, "max"]
+
+# The nulls of every argmax method, VAA and classifier. These run before the plots and
+# tables that subtract them; all are cheap (CPU, minutes) and named by the positions
+# basis. vaa_null_model_argmax.py draws both VAA nulls in one run; the classifier null
+# runs once per null. Both run once per sigma the "max" null takes its maximum over
+# (0.5 is the default sigma, whose files carry no sigma tag).
 PER_DATASET_NULL_SCRIPTS = [
-    ("vaa_null_model_argmax.py", _DIR, _POSITIONS_ARGS),
-    ("classifier_null_model.py", _DIR, _POSITIONS_ARGS),
+    *(("vaa_null_model_argmax.py", _DIR, [*_POSITIONS_ARGS, "--sigma", sigma])
+      for sigma in ENVELOPE_SIGMAS),
+    *(("classifier_null_model.py", _DIR, [*_POSITIONS_ARGS, "--null", "gaussian",
+                                           "--sigma", sigma])
+      for sigma in ENVELOPE_SIGMAS),
+    ("classifier_null_model.py", _DIR, [*_POSITIONS_ARGS, "--null", "uniform"]),
 ]
 
 PER_DATASET_PLOTTING_SCRIPTS = [
@@ -124,9 +141,13 @@ PER_DATASET_PLOTTING_SCRIPTS = [
     ("plot_speeches.py",              _PLOTTING_DIR, []),
     # plot_political_bias.py spells the same choice --parties (it also accepts 'none').
     ("plot_political_bias.py",        _PLOTTING_DIR, ["--parties", POSITIONS_PLACEHOLDER]),
-    ("plot_classified_parties.py",    _PLOTTING_DIR, _POSITIONS_ARGS),
+    ("plot_classified_parties.py",    _PLOTTING_DIR, [*_POSITIONS_ARGS, *_NULL_ARGS]),
     ("plot_topical_parties.py",       _PLOTTING_DIR, _POSITIONS_ARGS),
-    ("plot_argmax_shares.py",         _PLOTTING_DIR, _POSITIONS_ARGS),
+    ("plot_argmax_shares.py",         _PLOTTING_DIR, [*_POSITIONS_ARGS, *_NULL_ARGS]),
+    # The companion: mean probability per group instead of the argmax share (meanprob_*).
+    # Needs the posterior VAA scoring, so it skips itself on the non-cluster bases.
+    ("plot_argmax_shares.py",         _PLOTTING_DIR,
+     [*_POSITIONS_ARGS, *_NULL_ARGS, "--measure", "probability"]),
     ("plot_party_axis_compass.py",    _PLOTTING_DIR, _POSITIONS_ARGS),
     ("plot_likert_distributions.py",  _PLOTTING_DIR, []),
 ]
@@ -137,7 +158,11 @@ PER_DATASET_PLOTTING_SCRIPTS = [
 _MODELS_ARG = ["--models", ",".join(MODEL_DIRS)]
 
 PER_DATASET_TABLE_SCRIPTS = [
-    ("rank_consistency_tables.py", _DIR, _POSITIONS_ARGS),
+    ("rank_consistency_tables.py", _DIR, [*_POSITIONS_ARGS, *_NULL_ARGS]),
+    # The paper's two-row cross-method table (W, ICC, argmax consistency with CIs), read
+    # back from the rank_consistency.csv written just above; one per null.
+    ("cross_method_consistency_table.py", os.path.join(_DIR, "tables"),
+     [*_POSITIONS_ARGS, *_NULL_ARGS]),
     ("axis_position_tables.py", _DIR, _POSITIONS_ARGS),
     ("vaa_agreement_ci.py", _DIR,
      [*_POSITIONS_ARGS, *_MODELS_ARG, "--collapse-ecr-id",
@@ -147,10 +172,16 @@ PER_DATASET_TABLE_SCRIPTS = [
      [*_MODELS_ARG, "--collapse-ecr-id", "--languages", LANGUAGES,
       "--output", os.path.join(TABLES_PLACEHOLDER, "position_bases_comparison.md")]),
     # Reads plots/argmax_share_methods.csv, which plot_argmax_shares.py writes above, and
-    # the two nulls; writes argmax_share_table.tex (shares minus the null) and
-    # argmax_share_table_absolute.tex (raw shares).
+    # the nulls; writes tables_<null>/argmax_share_table.tex (shares minus each null) and
+    # tables/argmax_share_table_absolute.tex (raw shares).
     ("argmax_share_table.py", os.path.join(_DIR, "tables"),
-     [*_POSITIONS_ARGS, "--output", os.path.join(TABLES_PLACEHOLDER, "argmax_share_table.tex")]),
+     [*_POSITIONS_ARGS, *_NULL_ARGS,
+      "--output", os.path.join(TABLES_PLACEHOLDER, "argmax_share_table.tex")]),
+    # Its mean-probability companion, meanprob_share_table*.tex next to it; reads
+    # plots/meanprob_share_methods.csv from plot_argmax_shares.py --measure probability.
+    ("argmax_share_table.py", os.path.join(_DIR, "tables"),
+     [*_POSITIONS_ARGS, *_NULL_ARGS, "--measure", "probability",
+      "--output", os.path.join(TABLES_PLACEHOLDER, "argmax_share_table.tex")]),
 ]
 
 
@@ -239,6 +270,11 @@ def run_per_variant_scripts(override, only, positions, classifier):
                 for script, script_dir, model_arg_name, raw_args, output_path, inputs in PER_VARIANT_SCRIPTS:
                     if not selected(script, only):
                         continue
+                    # classifying the reasons is off unless --with-reasons-classifier
+                    # (analysis.core.CLASSIFIED_TRACKS says why)
+                    if (script == "classify_speeches.py" and raw_args[:2] == ["--source", "reasons"]
+                            and os.environ.get("INCLUDE_REASONS_CLASSIFIER") != "1"):
+                        continue
                     extra_args = resolve_args(raw_args, positions, dataset, classifier)
                     label = f"{script} {' '.join(extra_args)}: model={model_dir}, variant='{variant}', dataset='{dataset}'"
                     reason = skip_reason(output_path, inputs, dataset, model_dir, variant,
@@ -320,7 +356,28 @@ def main():
              f"The *_classified.csv filenames do not carry the checkpoint either, so a "
              f"new one needs --override (or a checkpoint newer than those files).",
     )
+    parser.add_argument(
+        "--with-reasons-classifier",
+        action="store_true",
+        help="Also classify the reasons texts and bring them back as a fourth method in every "
+             "table and figure (off by default: see analysis.core.CLASSIFIED_TRACKS). "
+             "Sets INCLUDE_REASONS_CLASSIFIER=1 for every child script.",
+    )
+    parser.add_argument(
+        "--vaa-scoring",
+        default=None,
+        choices=["posterior", "distance"],
+        help="How the direct and indirect tracks score a stance against the groups "
+             "(analysis/vaa_scoring.py): posterior = probability of each cluster under "
+             "per-cluster Gaussians (the default on --positions cluster, and only defined "
+             "there); distance = agreement 1 - |position - stance| / 2 (the default "
+             "elsewhere). Sets VAA_SCORING for every child script.",
+    )
     args = parser.parse_args()
+    if args.vaa_scoring:
+        os.environ["VAA_SCORING"] = args.vaa_scoring
+    if args.with_reasons_classifier:
+        os.environ["INCLUDE_REASONS_CLASSIFIER"] = "1"
     only = [fragment for fragment in (args.only or "").split(",") if fragment]
     if not os.path.exists(positions_path(args.positions)):
         builder = "build_cluster_positions.py" if args.positions == "cluster" else "build_group_positions.py"

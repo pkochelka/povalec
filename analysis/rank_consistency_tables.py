@@ -71,8 +71,12 @@ statement, framing and language (classifier_null_model's _statements.csv). Rank 
 the group furthest ABOVE its null, not the group with the highest raw score. The one
 exception is crosslang's Jensen-Shannon divergence, which needs non-negative profiles and
 stays on the raw scores (its W does not). --absolute ranks the raw scores throughout.
+--null picks the nulls (default all three): "gaussian" is the normal null above, "uniform"
+draws every stance uniformly from the five Likert points, and "max" subtracts per cell the
+largest of the normal nulls at sigma 0.25/0.5/0.75/1 and the uniform null. Each null gets its own set of
+outputs in data/<dataset>_results/tables_<null>/; --absolute writes to tables/.
 
-Run from the repo root -- writes to data/<dataset>_results/tables/ by default,
+Run from the repo root -- writes to data/<dataset>_results/tables_<null>/ by default,
 next to the results it summarises rather than into analysis/ where the scripts
 live (pass --no-output for stdout only, or --output/--csv/--pairs-csv to choose):
     ./venv/Scripts/python.exe analysis/rank_consistency_tables.py --table all
@@ -101,6 +105,7 @@ from analysis.core import (
     SPEECHES_SCORED_CSV,
     VARIANT,
     find_csvs,
+    is_output_dir,
     judge_stances,
     likert_stances,
     party_sort_key,
@@ -124,6 +129,7 @@ from analysis.tables import (
     bymodel_factor_spec,
     bymodel_row_label,
     check_unique_short_names,
+    count_word,
     matrix_title,
     pairs_frame,
     reliability_r_xx,
@@ -148,6 +154,7 @@ from analysis.stats import (
     ranks_descending,
     safe_divide,
 )
+from analysis.vaa_scoring import score_long, vaa_scoring
 
 # The cross-encoder-scored reason texts are the one route analysis.core.METHODS does
 # not carry (it scores that track with the LLM judge instead). Same column layout as the
@@ -179,14 +186,20 @@ BOOTSTRAP_CHUNK = 100
 # bootstrap needs them, so these keep the statement axis and average it later.
 # --------------------------------------------------------------------------- #
 
+# How a VAA stance is scored (analysis/vaa_scoring.py); main() sets it from --positions.
+VAA_SCORING = "distance"
+
+
 def vaa_statement_scores(party_df, stances):
-    """Agreement per (EP group, language, paraphrase, statement), averaged over the
-    parties standing for the group -- so an abstaining party drops out of that
-    statement instead of dragging the group's whole mean."""
+    """Score per (EP group, language, paraphrase, statement): the cluster probability
+    under VAA_SCORING "posterior", else the agreement averaged over the parties standing
+    for the group -- so an abstaining party drops out of that statement instead of
+    dragging the group's whole mean."""
     if stances.empty:
         return pd.DataFrame()
     merged = party_df.merge(stances, on="statement_idx")
-    merged["score"] = 1 - (merged["normalized_answer"] - merged["stance"]).abs() / 2
+    merged["score"] = score_long(merged, ["language", "paraphrase", "statement_idx"],
+                                 VAA_SCORING)
     return (merged.groupby(["ep_group", "language", "paraphrase", "statement_idx"],
                            as_index=False)["score"].mean())
 
@@ -379,7 +392,7 @@ def score_tensor(scores, parties, column="score"):
 CLASSIFIER_NULL_METHOD = {"clf-reasons": "reasons_clf", "clf-speeches": "speeches_clf"}
 
 
-def with_null(scores, party_df, null_dir, positions, sigma):
+def with_null(scores, party_df, null_dir, positions, sigma, kind="gaussian"):
     """`scores` plus a "null" column: what the 0-centered null gives that (method,
     framing, language, statement, group) cell -- see the module docstring. Every scored
     cell must find its null; a gap would rank a raw score against differences."""
@@ -387,12 +400,12 @@ def with_null(scores, party_df, null_dir, positions, sigma):
     parts = []
     vaa = scores[scores["method"].str.startswith("vaa-")]
     if not vaa.empty:
-        parts.append(vaa.merge(vaa_statement_null(party_df, sigma)
+        parts.append(vaa.merge(vaa_statement_null(party_df, sigma, kind, VAA_SCORING)
                                .rename(columns={"null_score": "null"}),
                                on=["ep_group", "statement_idx"], how="left"))
     classified = scores[scores["method"].isin(CLASSIFIER_NULL_METHOD)]
     if not classified.empty:
-        null = classifier_statement_null(null_dir, positions, sigma).rename(
+        null = classifier_statement_null(null_dir, positions, sigma, kind).rename(
             columns={"method": "null_method", "variant": "framing",
                      "null_mean_probability": "null"})
         parts.append(classified.assign(null_method=classified["method"].map(
@@ -546,8 +559,9 @@ def common_paraphrases(cells, methods):
     is only a fair concordance computation if every rater draws on the same
     method composition. The prose track has 5 paraphrases (v0-v4) against the
     Likert/reasons track's 8 (v0-v7): without this restriction, rater "v0" would
-    average over all 4 methods while rater "v5" averaged over only 2, silently
-    comparing different things under the same "paraphrase" label.
+    average over every method while rater "v5" averaged over only the
+    Likert/reasons-track ones, silently comparing different things under the
+    same "paraphrase" label.
 
     Using all 8/5 would therefore mean abandoning method pooling and averaging
     per-method coefficients instead -- which was measured and rejected. The
@@ -852,8 +866,9 @@ def table_specs(args, methods):
                      "computed from its own runs -- the two are not pooled, "
                      "because under negation some methods produce close to the "
                      "reverse ranking (Table~\\ref{tab:negation-invariance}). "
-                     f"`*' marks a correlation whose {CONFIDENCE}\\% bootstrap "
-                     "CI over the euandi statements excludes zero.")),
+                     f"Square brackets give each correlation's {CONFIDENCE}\\% "
+                     "bootstrap CI over the euandi statements; `*' marks one whose "
+                     "CI excludes zero.")),
         "negation": dict(
             # Raters = framing (base, negated), one method at a time; never
             # pooled, since invariance is inherently per-method. Built
@@ -904,7 +919,8 @@ def table_specs(args, methods):
             # concordance metrics are rank-based, unlike crosslang's JSD.
             name="bymodel", label="tab:rank-consistency-bymodel",
             caption=("Per-model consistency of the EP-group ranking across "
-                     "four ``annotator'' sets, pooled over all four "
+                     "four ``annotator'' sets, pooled over all "
+                     f"{count_word(len(methods))} "
                      "measurement methods. `Lang' treats the 21 questionnaire "
                      "languages as annotators; `Prompt' the five prompt "
                      "variants common to every method; `Negation' the two "
@@ -921,7 +937,7 @@ def table_specs(args, methods):
                      "ICC(3,1) / Kendall's $W$ / argmax consistency (the "
                      "fraction of annotators agreeing on the model's closest "
                      "EP group), computed on the mean rank per group over the "
-                     "model's runs for that annotator set; all four are "
+                     "model's runs for that annotator set; all three are "
                      "fractions on $[0, 1]$ with the leading zero omitted.")),
     }
 
@@ -970,8 +986,10 @@ def parse_args():
     parser.add_argument("--format", default="latex", choices=["latex", "markdown"])
     parser.add_argument("--output", default=None,
                         help="Where to write the tables. Default: "
-                             "data/<dataset>_results/tables/rank_consistency.tex "
-                             "(analysis/ holds the scripts, not their output).")
+                             "data/<dataset>_results/tables_<null>/rank_consistency.tex, "
+                             "tables/ with --absolute (analysis/ holds the scripts, not "
+                             "their output). With more than one --null, leave the three "
+                             "paths at their defaults.")
     parser.add_argument("--csv", default=None,
                         help="Where to write the long CSV. Default: "
                              "data/<dataset>_results/tables/rank_consistency.csv")
@@ -985,21 +1003,21 @@ def parse_args():
     parser.add_argument("--results_dir", type=Path, default=None,
                         help="Read this results directory instead of the --dataset one.")
     parser.add_argument("--absolute", action="store_true",
-                        help="Rank the raw scores instead of the scores minus their "
-                             "0-centered null.")
+                        help="Rank the raw scores instead of the scores minus their null.")
+    parser.add_argument("--null", nargs="+", default=["gaussian", "uniform", "max"],
+                        choices=["gaussian", "uniform", "max"],
+                        help="The nulls to subtract, one set of tables each, into "
+                             "tables_<null>/ (default: %(default)s).")
     parser.add_argument("--sigma", type=float, default=None,
-                        help="Sigma of the null to subtract (default: the VAA null's).")
+                        help="Sigma of the gaussian null (default: the VAA null's).")
     parser.add_argument("--null_dir", type=Path, default=None,
                         help="Default: <results_dir>/tables/null_model")
     return parser.parse_args()
 
 
-NON_MODEL_DIRS = {"plots", "tables"}
-
-
 def resolve_model_dirs(results_dir, selected):
     model_dirs = sorted(path for path in results_dir.iterdir()
-                        if path.is_dir() and path.name not in NON_MODEL_DIRS)
+                        if path.is_dir() and not is_output_dir(path.name))
     if selected:
         wanted = {name.strip() for name in selected.split(",")}
         model_dirs = [path for path in model_dirs if path.name in wanted]
@@ -1143,7 +1161,10 @@ class OutputPaths:
 
 
 def main():
+    global VAA_SCORING
     args = parse_args()
+    VAA_SCORING = vaa_scoring(args.positions)
+    print(f"VAA scoring: {VAA_SCORING}")
     methods = [method.strip() for method in args.methods.split(",") if method.strip()]
     unknown = [method for method in methods if method not in ALL_METHODS]
     if unknown:
@@ -1158,17 +1179,31 @@ def main():
     results_dir = args.results_dir or Path("data") / f"{args.dataset}_results"
     if not results_dir.exists():
         raise SystemExit(f"Directory not found: {results_dir} (run from the repo root)")
+    kinds = [None] if args.absolute else list(dict.fromkeys(args.null))
+    if len(kinds) > 1 and not args.no_output and (args.output or args.csv or args.pairs_csv):
+        raise SystemExit("--output/--csv/--pairs-csv name one file each, but "
+                         f"{len(kinds)} nulls would overwrite it; pass a single --null.")
+    for kind in kinds:
+        run(args, specs, wanted, methods, results_dir, kind)
+
+
+def run(args, specs, wanted, methods, results_dir, kind):
+    """One set of tables: the raw scores (kind None, --absolute) into tables/, or the
+    scores minus the `kind` null into tables_<kind>/."""
+    from analysis.null_baseline import null_description, output_dir_name
     from analysis.vaa_null_model import DEFAULT_SIGMA
     sigma = args.sigma or DEFAULT_SIGMA
-    if not args.absolute:
-        null_note = (" Every score is taken relative to its 0-centered null (stances drawn "
-                     f"from a normal distribution around the neutral answer, $\\sigma$ = "
-                     f"{sigma:g}): rank 1 is the group furthest above what random stances "
-                     "would give it.")
+    tables_name = "tables"
+    if kind:
+        print(f"\n=== Scores minus the {kind} null ===")
+        tables_name = output_dir_name("tables", kind, sigma)
+        null_note = (" Every score is taken relative to its null (stances drawn from "
+                     f"{null_description(kind, sigma)}): rank 1 is the group furthest above "
+                     "what random stances would give it.")
         specs = {name: {**spec, "caption": spec["caption"] + null_note}
                  if "caption" in spec else spec for name, spec in specs.items()}
 
-    outputs = OutputPaths.resolve(args, results_dir / "tables")
+    outputs = OutputPaths.resolve(args, results_dir / tables_name)
 
     party_df = positions_frame(args.positions, not args.no_collapse_ecr_id)
     scores = load_scores(resolve_model_dirs(results_dir, args.model), methods, party_df)
@@ -1176,19 +1211,20 @@ def main():
                                  args.min_method_coverage)
     parties = common_parties(scores)
     raw_tensor = None
-    if args.absolute:
+    if not kind:
         tensor, cells, statements = score_tensor(scores, parties)
     else:
         scores = with_null(scores, party_df,
                            args.null_dir or results_dir / "tables" / "null_model",
-                           args.positions, sigma)
+                           args.positions, sigma, kind)
         raw_tensor, cells, statements = score_tensor(scores, parties)
         null_tensor, null_cells, _ = score_tensor(scores, parties, column="null")
         if not null_cells.equals(cells):
             raise SystemExit("Null and score tensors do not line up run for run.")
         tensor = raw_tensor - null_tensor
-        print(f"\nRanking scores minus their 0-centered null (sigma {sigma:g}); "
-              "crosslang JSD stays on the raw scores.")
+        print(f"\nRanking scores minus their {kind} null"
+              + (f" (sigma {sigma:g})" if kind == "gaussian" else "")
+              + "; crosslang JSD stays on the raw scores.")
     print(f"\n{len(cells)} runs, {len(parties)} EP groups ({', '.join(parties)}), "
           f"{len(statements)} statements.")
     if "bymodel" in wanted:
@@ -1221,8 +1257,10 @@ def main():
         f"models={','.join(sorted(cells['model'].unique()))}",
         f"{len(cells)} runs, {len(parties)} EP groups, {len(statements)} statements, "
         f"bootstrap={args.bootstrap} seed={args.seed}",
-        "scores: raw" if args.absolute
-        else f"scores: minus 0-centered null, sigma={sigma:g} (crosslang JSD on raw)",
+        "scores: raw" if not kind
+        else f"scores: minus {kind} null"
+             + (f", sigma={sigma:g}" if kind == "gaussian" else "")
+             + " (crosslang JSD on raw)",
     ]
 
     # Between-party SD per (method, model scope) for the negation table's

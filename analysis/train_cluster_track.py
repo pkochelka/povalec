@@ -43,6 +43,11 @@ of the learning rate (run dir: _lr<mult>), so they keep up with the encoder.
 a short warm-start experiment, e.g. an adversary run and its control. The default run dir
 gets _warm / _pc<N> appended.
 
+--consistency-weight W trains with analysis/classifier_training_consistency.py instead: the
+same logit-adjusted loss plus W x symmetric KL between two language versions of one speech
+(EP translations and DeepSeek MT of train speeches), so a translation keeps its label. Run
+dir gets _cons<W>. Not combined with --adversary.
+
 --evaluate-checkpoint runs/<run>/model/checkpoint-<step> skips training: it copies that
 checkpoint's weights and tokenizer to runs/<run>/model_epoch<N> (N from its
 trainer_state.json) and gives it dev-fitted biases, a manifest and test results, like a
@@ -149,6 +154,14 @@ def main():
     short.add_argument("--max-epochs", type=int, default=None, help="default 6, with early stopping")
     short.add_argument("--save-only-model", action="store_true",
                        help="epoch checkpoints without optimizer state (~1.8 GB less each; cannot be resumed)")
+    cons = parser.add_argument_group("translation-consistency loss (logit-adjusted trainers only)")
+    cons.add_argument("--consistency-weight", type=float, default=0.0,
+                      help="> 0 trains with analysis/classifier_training_consistency.py: symmetric KL between "
+                           "two language versions of one speech, at this maximum weight (run dir: _cons<w>)")
+    cons.add_argument("--consistency-pairs", type=int, default=8,
+                      help="translation pairs per process per step, on top of the ordinary batch (default 8)")
+    cons.add_argument("--consistency-mt-share", type=float, default=0.5,
+                      help="share of pairs from machine-translation groups (default 0.5; the rest are EP translations)")
     parser.add_argument("--evaluate-checkpoint", type=Path, default=None,
                         help="no training: turn this Trainer checkpoint into model_epoch<N> with "
                              "biases, manifest and results (logit-adjusted trainers only)")
@@ -184,6 +197,10 @@ def main():
             raise SystemExit(f"the checkpoint itself is broken: {problem}")
 
     module_name, train_split = TRAINERS[args.trainer]
+    if args.consistency_weight > 0:
+        if args.trainer == "balanced" or args.adversary:
+            raise SystemExit("--consistency-weight needs a logit-adjusted trainer and no --adversary")
+        module_name = "analysis.classifier_training_consistency"
     dev_split, test_split = EVAL_SPLITS.get(args.trainer, ("dev", "test"))
     data_dir = track_dir(args.track, args.k, args.suffix)
     needed = [data_dir / f"{name}.parquet" for name in (train_split, dev_split, test_split)]
@@ -194,7 +211,8 @@ def main():
     tags = (("_warm" if args.init_from else "") + (f"_pc{args.train_per_cell}" if args.train_per_cell else "")
             + (f"_adv{'' if args.adversary == 'origin' else args.adversary}{args.adv_weight:g}"
                if args.adversary else "")
-            + (f"_lr{args.adv_lr_mult:g}" if args.adversary and args.adv_lr_mult != 1.0 else ""))
+            + (f"_lr{args.adv_lr_mult:g}" if args.adversary and args.adv_lr_mult != 1.0 else "")
+            + (f"_cons{args.consistency_weight:g}" if args.consistency_weight > 0 else ""))
     run_dir = (args.run_dir or PROJECT_ROOT / "runs"
                / f"{args.track}-k{args.k}-{args.trainer}{args.suffix}{tags}").resolve()
     print(f"trainer:   {module_name} (splits: {train_split}, {dev_split}, {test_split})")
@@ -207,6 +225,9 @@ def main():
     if args.adversary:
         print(f"adversary: {args.adversary}, max reversal {args.adv_weight}, lr x{args.adv_lr_mult:g}, "
               f"min rows {args.adv_min_rows}")
+    if args.consistency_weight > 0:
+        print(f"consistency: weight {args.consistency_weight}, {args.consistency_pairs} pairs/step/process, "
+              f"mt share {args.consistency_mt_share}")
     if args.init_from or args.train_per_cell or args.max_epochs:
         print(f"short:     init_from={args.init_from} train_per_cell={args.train_per_cell or 'all'} "
               f"max_epochs={args.max_epochs or 6}")
@@ -247,6 +268,9 @@ def main():
         overrides["MAX_EPOCHS"] = args.max_epochs
     if args.save_only_model:
         overrides["SAVE_ONLY_MODEL"] = True
+    if args.consistency_weight > 0:
+        overrides.update(CONSISTENCY_WEIGHT=args.consistency_weight, CONSISTENCY_PAIRS=args.consistency_pairs,
+                         CONSISTENCY_MT_SHARE=args.consistency_mt_share)
 
     trainer = importlib.import_module(module_name)
     for module in {shared, trainer}:

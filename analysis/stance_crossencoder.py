@@ -44,10 +44,25 @@ def load_crossencoder(model_dir, device):
     model.eval()
     config_path = os.path.join(model_dir, "stance_config.json")
     max_length = DEFAULT_MAX_TOKEN_LENGTH
+    # A monotone map applied after the clip (stance_head_refit.py); None for every
+    # checkpoint that does not carry one, which then scores exactly as before.
+    model.stance_calibration = None
     if os.path.exists(config_path):
         with open(config_path, encoding="utf-8") as f:
-            max_length = json.load(f).get("max_len", DEFAULT_MAX_TOKEN_LENGTH)
+            config = json.load(f)
+        max_length = config.get("max_len", DEFAULT_MAX_TOKEN_LENGTH)
+        if config.get("calibration"):
+            model.stance_calibration = (np.asarray(config["calibration"]["x"], dtype=float),
+                                        np.asarray(config["calibration"]["y"], dtype=float))
     return tokenizer, model, max_length
+
+
+def calibrate(stance, calibration):
+    """The checkpoint's piecewise-linear calibration of a clipped stance, if it has one."""
+    if calibration is None:
+        return stance
+    x, y = calibration
+    return np.interp(stance, x, y).astype(stance.dtype)
 
 
 @torch.no_grad()
@@ -64,7 +79,7 @@ def score_pairs(statements, texts, tokenizer, model, device, max_length):
         max_length=max_length,
     ).to(device)
     logits = model(**inputs).logits.view(-1).float().cpu().numpy()
-    return np.clip(logits, -1.0, 1.0)
+    return calibrate(np.clip(logits, -1.0, 1.0), getattr(model, "stance_calibration", None))
 
 
 def load_regressor(device):

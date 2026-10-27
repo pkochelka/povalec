@@ -194,10 +194,10 @@ def load_model(model_dir, framings):
     return pd.concat(frames, ignore_index=True), checked, mismatched
 
 
-def load_cells(dataset, models, framings):
+def load_cells(results_dir, models, framings):
     frames, checked, mismatched = [], 0, 0
     for name in models:
-        model_dir = Path("data") / f"{dataset}_results" / name
+        model_dir = results_dir / name
         if not model_dir.is_dir():
             print(f"  {name}: no results directory, skipping.")
             continue
@@ -770,6 +770,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dataset", default=DEFAULT_DATASET)
+    parser.add_argument("--results_dir", type=Path, default=None,
+                        help="results tree to read (default: data/<dataset>_results)")
     parser.add_argument("--models", default=",".join(MODEL_DIRS),
                         help="comma-separated result directory names")
     parser.add_argument("--framings", default="base,negated",
@@ -823,8 +825,9 @@ def main():
     if len(framings) < 2 and "framing" in args.strata:
         args.strata = [c for c in args.strata if c != "framing"]
 
-    print(f"Loading {args.dataset} results ({', '.join(framings)} framing)")
-    cells = load_cells(args.dataset, [m.strip() for m in args.models.split(",") if m.strip()],
+    results_dir = args.results_dir or Path("data") / f"{args.dataset}_results"
+    print(f"Loading {results_dir} ({', '.join(framings)} framing)")
+    cells = load_cells(results_dir, [m.strip() for m in args.models.split(",") if m.strip()],
                        framings)
     if args.languages:
         wanted = {l.strip() for l in args.languages.split(",") if l.strip()}
@@ -847,8 +850,10 @@ def main():
                                                   args.draws, rng)
 
     header = "\n".join([
-        "Stance-bin control for the EP-group classifier",
-        f"dataset={args.dataset}  positions={args.positions}  framings={','.join(framings)}",
+        f"Stance-bin control for the EP-{'cluster' if args.positions == 'cluster' else 'group'} "
+        "classifier",
+        f"dataset={args.dataset}  results={results_dir.as_posix()}  positions={args.positions}  "
+        f"framings={','.join(framings)}",
         f"threshold=|stance|>={args.threshold}  min_bin={args.min_bin}  draws={args.draws}  "
         f"seed={args.seed}",
         f"null strata={'x'.join(args.strata) if args.strata else 'none (unstratified)'}",

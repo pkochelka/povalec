@@ -17,6 +17,7 @@ from .labels import (
 )
 from .paths import (
     CHOICE_COLUMN,
+    CLASSIFIED_TRACKS,
     FRAMING_FOR_VARIANT,
     FRAMING_ORDER,
     FRAMING_ORIENTATION,
@@ -33,6 +34,7 @@ from .paths import (
     STANCE_COLUMN,
     VARIANT,
     classified_name,
+    is_output_dir,
     responses_name,
     scored_name,
     speeches_name,

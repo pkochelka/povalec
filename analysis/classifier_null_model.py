@@ -31,7 +31,12 @@ Units follow the argmax table: the classifier counts every text on its own, so p
 the single-answer null (the VAA null averages eight draws because its cells are
 paraphrase-averaged). A thin (statement, level) cell is shrunk towards that level pooled
 over all statements, p_js = (n_jsc + m p_s(c)) / (n_js + m); the summary reports how much
-of the null's weight rests on cells thinner than m. The per-language nulls shrink towards
+of the null's weight rests on cells thinner than m.
+
+--null uniform swaps the normal pi(s) for the uniform null's, 1/5 on every level
+(vaa_null_model's "uniform": every answer iid uniform over the five Likert points); the
+rest is unchanged. Its outputs carry a `_uniform` tag in place of the sigma tag
+(classifier_null_uniform_shares.csv). The per-language nulls shrink towards
 the whole run's p_js instead (see slice_target): one language has too few texts per cell
 to stand on its own.
 
@@ -61,6 +66,7 @@ import numpy as np
 import pandas as pd
 
 from analysis.core import (
+    CLASSIFIED_TRACKS,
     REASONS_CLASSIFIED_CSV,
     SPEECHES_CLASSIFIED_CSV,
     SPEECHES_SCORED_CSV,
@@ -72,13 +78,14 @@ from analysis.plotting.plot_classified_parties import slugify_party_label
 from analysis.core.positions import POSITION_CHOICES
 from analysis.vaa_null_model import DEFAULT_SIGMA
 from analysis.plotting.plot_topical_parties import statement_rows_per_axis
-from analysis.vaa_null_model_argmax import WHOLE, output_suffix
+from analysis.vaa_null_model_argmax import NULL_KINDS, WHOLE, output_suffix
 from utils import VARIANT_PATTERN, configure_stdout, likert_to_stance
 
 configure_stdout()
 
 # Method keys and labels as plot_argmax_shares / argmax_share_methods.csv spell them.
 METHODS = {"reasons_clf": "classified reasons", "speeches_clf": "classified open-ended"}
+METHODS = {k: v for k, v in METHODS.items() if k.removesuffix("_clf") in CLASSIFIED_TRACKS}
 LEVELS = np.array([-1.0, -0.5, 0.0, 0.5, 1.0])
 DEFAULT_SHRINKAGE = 20
 POOLED = "pooled"
@@ -104,6 +111,16 @@ def null_level_probabilities(sigma):
         return 0.5 * (1.0 + math.erf(x / (sigma * math.sqrt(2.0))))
     edges = [-math.inf, -0.75, -0.25, 0.25, 0.75, math.inf]
     return np.array([cdf(high) - cdf(low) for low, high in zip(edges[:-1], edges[1:])])
+
+
+def level_probabilities(kind, sigma=DEFAULT_SIGMA):
+    """pi(s) of the named null: the normal null's for "gaussian", 1/5 per level for
+    "uniform"."""
+    if kind == "uniform":
+        return np.full(len(LEVELS), 1.0 / len(LEVELS))
+    if kind == "gaussian":
+        return null_level_probabilities(sigma)
+    raise ValueError(f"unknown null {kind!r}; expected one of {NULL_KINDS}")
 
 
 def level_of(stance):
@@ -185,7 +202,7 @@ def load_texts(results_dir):
     """{(method, variant): texts of every model}, only texts the classifier labelled."""
     frames = {}
     for model_dir in sorted(p for p in results_dir.iterdir() if p.is_dir()):
-        reasons = find_csvs(model_dir, REASONS_CLASSIFIED_CSV)
+        reasons = find_csvs(model_dir, REASONS_CLASSIFIED_CSV) if "reasons" in CLASSIFIED_TRACKS else {}
         speeches = find_csvs(model_dir, SPEECHES_CLASSIFIED_CSV)
         scored = find_csvs(model_dir, SPEECHES_SCORED_CSV)
         if not reasons and not speeches:
@@ -316,8 +333,8 @@ def statement_records(method, variant, parts, pi, groups):
     return records
 
 
-def compute(texts_by_key, sigma, shrinkage, axis_rows):
-    pi = null_level_probabilities(sigma)
+def compute(texts_by_key, sigma, shrinkage, axis_rows, kind="gaussian"):
+    pi = level_probabilities(kind, sigma)
     groups = sorted({g for texts in texts_by_key.values() for g in texts["predicted"].unique()},
                     key=party_sort_key)
     records, statement_rows = [], []
@@ -352,11 +369,13 @@ def compute(texts_by_key, sigma, shrinkage, axis_rows):
             pi, groups)
 
 
-def render_summary(table, pi, groups, sigma, shrinkage):
+def render_summary(table, pi, groups, sigma, shrinkage, kind="gaussian"):
     sliced = table[table["scope"] != ALL_SCOPE].dropna(subset=["thin_cell_weight"])
     table = table[table["scope"] == ALL_SCOPE]
-    lines =["# Classifier null model (0-centered normal stance null)", "",
-             f"Stance levels -1 .. +1; null probabilities (sigma = {sigma:.2f}): "
+    title, spread = (("0-centered normal stance null", f" (sigma = {sigma:.2f})")
+                     if kind == "gaussian" else ("uniform stance null", ""))
+    lines = [f"# Classifier null model ({title})", "",
+             f"Stance levels -1 .. +1; null probabilities{spread}: "
              + ", ".join(f"{level:+.1f}: {p:.1%}" for level, p in zip(LEVELS, pi))
              + f". Thin cells (< {shrinkage} texts) are shrunk towards the level pooled over "
              "statements.", ""]
@@ -397,8 +416,12 @@ def parse_args():
     parser.add_argument("--dataset", default="euandi_2024")
     parser.add_argument("--results_dir", type=Path, default=None,
                         help="Read this results directory instead of the --dataset one.")
+    parser.add_argument("--null", default="gaussian", choices=NULL_KINDS,
+                        help="Which stance null: the 0-centered normal one (default) or "
+                             "uniform over the five levels.")
     parser.add_argument("--sigma", type=float, default=DEFAULT_SIGMA,
-                        help="Null SD in stance units (default: the VAA null's, %(default)s).")
+                        help="Null SD in stance units (default: the VAA null's, %(default)s). "
+                             "Ignored with --null uniform.")
     parser.add_argument("--shrinkage", type=int, default=DEFAULT_SHRINKAGE,
                         help="Pseudo-count pulling a thin (statement, level) cell towards "
                              "the level pooled over statements.")
@@ -411,11 +434,11 @@ def parse_args():
     return parser.parse_args()
 
 
-def output_stem(positions, sigma=DEFAULT_SIGMA):
+def output_stem(positions, sigma=DEFAULT_SIGMA, kind="gaussian"):
     """classifier_null for the EP-group basis, classifier_null_<basis> otherwise, plus a
-    _sigma<value> tag for a non-default sigma -- the naming vaa_null_model_argmax uses.
-    The argmax table finds the file through this."""
-    return "classifier_null" + output_suffix(positions, sigma)
+    _sigma<value> tag for a non-default sigma or _uniform for the uniform null -- the
+    naming vaa_null_model_argmax uses. The argmax table finds the file through this."""
+    return "classifier_null" + output_suffix(positions, sigma, kind)
 
 
 def main():
@@ -431,11 +454,11 @@ def main():
     axis_rows = {axis: rows for axis, rows in
                  statement_rows_per_axis(args.dataset, statements).items() if len(rows)}
     table, statement_table, pi, groups = compute(texts_by_key, args.sigma, args.shrinkage,
-                                                 axis_rows)
-    stem = output_stem(args.positions, args.sigma)
+                                                 axis_rows, args.null)
+    stem = output_stem(args.positions, args.sigma, args.null)
     table.to_csv(out_dir / f"{stem}_shares.csv", index=False)
     statement_table.to_csv(out_dir / f"{stem}_statements.csv", index=False)
-    summary = render_summary(table, pi, groups, args.sigma, args.shrinkage)
+    summary = render_summary(table, pi, groups, args.sigma, args.shrinkage, args.null)
     (out_dir / f"{stem}_summary.md").write_text(summary, encoding="utf-8")
     print("\n" + summary)
     print(f"Wrote {out_dir / f'{stem}_shares.csv'}, {stem}_summary.md")

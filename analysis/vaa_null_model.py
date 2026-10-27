@@ -90,6 +90,20 @@ LIKERT_POINTS = np.arange(1, 6)
 LIKERT_STANCES = likert_to_stance(LIKERT_POINTS).astype(float)   # 1, .5, 0, -.5, -1
 
 NULLS = ["uniform", "normal", "llm-shuffle"]
+# The nulls a figure or table subtracts (analysis/null_baseline.py), and the side each
+# is under in the shares CSVs: "gaussian" is the normal null, "uniform" the uniform one.
+# The LLM-shuffle null is built from the models' own answers and is not subtracted.
+NULL_KINDS = ("gaussian", "uniform")
+NULL_SIDE = {"gaussian": "normal", "uniform": "uniform"}
+# A third null the figures and tables can subtract, built from those rather than drawn:
+# per group, the LARGEST of the normal null at each of ENVELOPE_SIGMAS and the uniform
+# null. The models' real stance distribution is unknown, so a share counts as an excess
+# only where it beats every one of them -- a conservative, assumption-light baseline. It
+# is a maximum per group, so unlike a single null it sums to more than 1 over the groups
+# and the differences from it sum to less than 0: read positive values as lower bounds.
+ENVELOPE = "max"
+ENVELOPE_SIGMAS = (0.25, 0.5, 0.75, 1.0)
+SUBTRACTED_NULLS = (*NULL_KINDS, ENVELOPE)
 SIDES = [*NULLS, "real"]
 LEVELS = ["run", "language", "cell", "model"]
 LEVEL_TITLES = {

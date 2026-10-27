@@ -20,6 +20,7 @@ import numpy as np
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 from utils import ALL_LANGS_STR, configure_stdout
+from analysis.vaa_scoring import score_long
 from analysis.evaluate_euandi import (
     DEFAULT_POSITIONS, POSITION_CHOICES,
     likert_stance_frame, load_party_positions, positions_path, speech_stance_frame,
@@ -53,19 +54,22 @@ def stance_frame_for(results_dir, model, source, variant, languages):
     return speech_stance_frame(path, variant)
 
 
-def agreement_matrices(stance_df, languages, party_df, groups, statement_index):
+def agreement_matrices(stance_df, languages, party_df, groups, statement_index,
+                       scoring="distance"):
     """Per (EP group, statement) sum and count of agreement values -- the sufficient
     statistics for a cluster bootstrap of the mean. Kept per group because parties
     abstain on some statements, so the groups carry different observation counts and
     a fixed per-party weight would not reproduce the mean-of-group-means that
-    evaluate_euandi writes into vaa*.csv."""
+    evaluate_euandi writes into vaa*.csv. scoring="posterior" sums cluster probabilities
+    per (statement, language) point instead (analysis/vaa_scoring.py)."""
     stance_columns = [f"{lang}_stance" for lang in languages]
     merged = party_df.merge(stance_df[["statement_idx", *stance_columns]], on="statement_idx")
     long = merged.melt(
         id_vars=["ep_group", "statement_idx", "normalized_answer"],
         value_vars=stance_columns, var_name="language", value_name="llm_stance",
     )
-    long["agreement"] = 1 - (long["normalized_answer"] - long["llm_stance"]).abs() / 2
+    long["agreement"] = score_long(long, ["statement_idx", "language"], scoring,
+                                   stance="llm_stance")
     aggregated = long.groupby(["ep_group", "statement_idx"])["agreement"].agg(["sum", "count"])
     return tuple(
         aggregated[column].unstack("statement_idx")

@@ -19,6 +19,7 @@ Grammar, for the record:
 
 `{variant}` is the framing suffix from `utils.VARIANT_PATTERN` — "" or "_negated".
 """
+import os
 import re
 
 from utils import VARIANT_LABELS, VARIANT_PATTERN
@@ -47,6 +48,27 @@ SPEECHES_SCORED_CSV = re.compile(rf"^speeches_(?P<langs>{LANGS}){VARIANT}_scored
 # whose name does *not* start with the speeches prefix.
 REASONS_CLASSIFIED_CSV = re.compile(rf"^(?!speeches_)(?P<langs>{LANGS}){VARIANT}_classified\.csv$")
 SPEECHES_CLASSIFIED_CSV = re.compile(rf"^speeches_(?P<langs>{LANGS}){VARIANT}_classified\.csv$")
+
+# Tracks whose text the party classifier is applied to. The reasons track is out of the
+# main analysis (2026-10-08): refusing models' reasons are mostly AI disclaimers and
+# both-sides boilerplate justifying a neutral answer, so the classifier reads style, not
+# stance (analysis/classifier_ngram_analysis.py). The direct Likert choice still comes
+# from the reasons files. INCLUDE_REASONS_CLASSIFIER=1 (or analyze_all.py
+# --with-reasons-classifier) brings the classified reasons back, e.g. for an appendix.
+CLASSIFIED_TRACKS = (("reasons", "speeches") if os.environ.get("INCLUDE_REASONS_CLASSIFIER") == "1"
+                     else ("speeches",))
+
+# Dataset-level output folders that sit next to the model directories: plots/ and
+# tables/, and their per-null twins (plots_gaussian/, tables_uniform/, ...) that hold the
+# figures and tables drawn minus a null model. Anything listing the model directories
+# skips these.
+OUTPUT_DIR_PREFIXES = ("plots", "tables")
+
+
+def is_output_dir(name: str) -> bool:
+    """True for plots/, tables/ and their `_<suffix>` twins; False for a model directory."""
+    return name.split("_", 1)[0] in OUTPUT_DIR_PREFIXES
+
 
 CHOICE_COLUMN = re.compile(rf"^choice_(?P<language>[a-z]{{2}}){VARIANT}_v(?P<paraphrase>\d+)$")
 STANCE_COLUMN = re.compile(rf"^stance_(?P<language>[a-z]{{2}}){VARIANT}_v(?P<paraphrase>\d+)$")

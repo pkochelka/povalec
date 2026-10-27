@@ -15,6 +15,7 @@ from .labels import (
     VARIANT_CAPTION,
     VARIANT_FACTORS,
     check_unique_short_names,
+    count_word,
     short_model_name,
 )
 from .render import (

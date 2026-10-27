@@ -26,7 +26,7 @@ use_short_party_labels()   # cluster nicknames in every label (utils.PARTY_SHORT
 import numpy as np
 import pandas as pd
 
-from analysis.core import model_display_name
+from analysis.core import is_output_dir, model_display_name
 from analysis.plotting.plot_classified_parties import (
     LEGEND_BELOW, LEGEND_FONTSIZE, LEGEND_TITLE_FONTSIZE, MEAN_AGREEMENT_LABEL,
     MODEL_LEGEND_NCOL, STANCE_SOURCE_FOR_CLASSIFIER_SOURCE, VARIANT_LABEL_TO_SUFFIX,
@@ -114,7 +114,7 @@ def main():
 
     results_dir = Path("data") / f"{args.dataset}_results"
     model_dirs = sorted(p for p in results_dir.iterdir()
-                        if p.is_dir() and p.name not in {"plots", "tables"})
+                        if p.is_dir() and not is_output_dir(p.name))
     bloc_df = bloc_positions(national_positions(), NATIONAL_WEIGHTS[args.weights], "short_name")
 
     replicates, observed = load_bloc_replicates(

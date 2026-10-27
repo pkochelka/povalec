@@ -8,7 +8,7 @@ matplotlib.use("Agg")
 import matplotlib.patheffects
 import matplotlib.ticker
 import matplotlib.pyplot as plt
-from analysis.core.labels import use_short_party_labels
+from analysis.core.labels import group_noun, use_short_party_labels
 use_short_party_labels()   # cluster nicknames in every label (utils.PARTY_SHORT)
 import numpy as np
 import pandas as pd
@@ -22,7 +22,7 @@ from analysis.evaluate_euandi import (
     load_party_positions,
     positions_path,
 )
-from analysis.core import model_display_name
+from analysis.core import is_output_dir, model_display_name
 from utils import VARIANT_PATTERN, flip_likert, likert_to_stance
 
 NUM_VARIANTS = 8
@@ -351,7 +351,8 @@ def draw_party_anchors(ax, anchors, x_dim, y_dim, size=260, fontsize=FONTSIZE,
                     path_effects=[matplotlib.patheffects.withStroke(
                         linewidth=3.5, foreground="white")])
     return Line2D([], [], color=color, marker=PARTY_MARKER, ls="",
-                  markersize=LEGEND_MARKERSIZE, markeredgecolor=edge, label="EP group")
+                  markersize=LEGEND_MARKERSIZE, markeredgecolor=edge,
+                  label=group_noun(anchors.index))
 
 
 def project_onto_dimensions(stances, questionnaire, dims):
@@ -994,7 +995,8 @@ def plot_axis_strips(runs_by_model, dims, one_sided, out_path, anchors=None,
         flat[cell].axis("off")
 
     if anchors is not None:
-        handles.append(Line2D([], [], color=PARTY_COLOR, ls=":", lw=1.2, label="EP group"))
+        handles.append(Line2D([], [], color=PARTY_COLOR, ls=":", lw=1.2,
+                              label=group_noun(anchors.index)))
     pooled = STRIP_SPLITS[split_by][3]
     title = f"{split_by}  (large = mean, runs pooled over {pooled})"
     flat[-1].legend(handles=handles, loc="center", fontsize=FONTSIZE, frameon=False,
@@ -1139,6 +1141,8 @@ def main():
                         choices=[*POSITION_CHOICES, "none"],
                         help="Which euandi answers the black EP-group anchors come from; "
                              "'none' draws no anchors.")
+    parser.add_argument("--results_dir", type=Path, default=None,
+                        help="Read this results directory instead of the --dataset one.")
     args = parser.parse_args()
     if args.stance_source == "llm":
         SOURCE_LABEL.update(LLM_SOURCE_LABEL)
@@ -1150,8 +1154,8 @@ def main():
     if one_sided:
         print(f"One-sided dimensions (agreement bias confounded): {sorted(one_sided)}")
 
-    results_dir = Path("data") / f"{args.dataset}_results"
-    model_dirs = sorted(p for p in results_dir.iterdir() if p.is_dir() and p.name != "plots")
+    results_dir = args.results_dir or Path("data") / f"{args.dataset}_results"
+    model_dirs = sorted(p for p in results_dir.iterdir() if p.is_dir() and not is_output_dir(p.name))
     if args.model:
         model_dirs = [d for d in model_dirs if d.name == args.model]
     if not model_dirs:

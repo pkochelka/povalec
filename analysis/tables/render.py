@@ -113,6 +113,13 @@ def rho_marker(sampled, key, local):
     return "" if low <= 0 <= high else "*"
 
 
+def rho_interval(sampled, key, local):
+    """The pair's bootstrap percentile interval (low, high), or None without replicates."""
+    if not sampled:
+        return None
+    return percentile_interval(sampled[key][:, local])
+
+
 def format_correlation(value):
     """APA-style correlation formatting: no leading zero (bounded by +-1, so it
     is redundant), no + sign, and "1.0" rather than "1.00" for a perfect
@@ -124,7 +131,8 @@ def format_correlation(value):
     if rounded <= -1.0:
         return "-1.0"
     text = f"{abs(value):.2f}".lstrip("0")
-    return f"-{text}" if value < 0 else text
+    # a value that rounds to zero carries no sign: ".00", never "-.00"
+    return f"-{text}" if value < 0 and rounded != 0 else text
 
 
 # Faint vertical rule between tabular columns; needs \usepackage{xcolor}.
@@ -168,26 +176,29 @@ def matrix_cells(methods, by_framing):
     rankings that, for Indirect, are close to opposite. "n/a" marks a pair the
     job is missing a method for (e.g. --allow-partial-models).
 
-    A grid entry is the (correlation text, significance marker) pair rather than
-    one joined string, so each renderer can mark the coefficient up on its own
-    terms -- LaTeX wraps it in \\Corr and leaves the star outside."""
+    A grid entry is the (correlation text, significance marker, interval) triple rather
+    than one joined string, so each renderer can mark the coefficient up on its own
+    terms -- LaTeX wraps it in \\Corr, leaves the star outside and sets the bootstrap
+    interval in small square brackets after it. The interval is None on the diagonal,
+    for a missing pair and for a run without bootstrap replicates."""
     labels = [MATRIX_LABEL[method] for method in methods]
     grid = []
     for row in range(len(methods)):
         cells = []
         for col in range(len(methods)):
             if row == col:
-                cells.append(("1.0", ""))
+                cells.append(("1.0", "", None))
                 continue
             framing = MATRIX_FRAMINGS[0] if row < col else MATRIX_FRAMINGS[1]
             job, values, sampled = by_framing[framing]
             local = method_pair_lookup(job).get(frozenset((methods[row], methods[col])))
             if local is None:
-                cells.append(("n/a", ""))
+                cells.append(("n/a", "", None))
                 continue
             key = "rho_lang" if "rho_lang" in values else "rho"
             cells.append((format_correlation(values[key][local]),
-                          rho_marker(sampled, key, local)))
+                          rho_marker(sampled, key, local),
+                          rho_interval(sampled, key, local)))
         grid.append(cells)
     return labels, labels, grid
 
@@ -195,16 +206,29 @@ def matrix_cells(methods, by_framing):
 NOT_AVAILABLE = "n/a"
 
 
-def latex_correlation_cell(text, marker):
+def interval_text(interval, minus="-"):
+    """"[.55, 1.0]" in format_correlation's style; `minus` replaces the sign of a
+    negative bound (a real minus sign in LaTeX)."""
+    low, high = (format_correlation(bound).replace("-", minus) for bound in interval)
+    return f"[{low}, {high}]"
+
+
+def latex_correlation_cell(text, marker, interval=None):
     """\\Corr{<rho>} so the document can style every coefficient at once (shading
     by magnitude, say) from one macro. The significance star stays outside the
     braces: it qualifies the coefficient, it is not part of the number. "n/a" is
-    not a coefficient, so it is left bare."""
-    return text + marker if text == NOT_AVAILABLE else f"\\Corr{{{text}}}{marker}"
+    not a coefficient, so it is left bare. The bootstrap interval follows in small
+    square brackets, as the paper's other consistency tables print theirs."""
+    if text == NOT_AVAILABLE:
+        return text + marker
+    cell = f"\\Corr{{{text}}}{marker}"
+    if interval is not None:
+        cell += f" {{\\scriptsize{interval_text(interval, minus='$-$')}}}"
+    return cell
 
 
-def markdown_correlation_cell(text, marker):
-    return text + marker
+def markdown_correlation_cell(text, marker, interval=None):
+    return text + marker + (f" {interval_text(interval)}" if interval is not None else "")
 
 
 def matrix_title(model_scope):
@@ -279,14 +303,14 @@ def render_matrix_latex(spec, methods, model_scope, by_framing, draws, provenanc
         r"\begin{table}[htbp]",
         r"  \centering",
         r"  \small",
-        r"  \setlength{\tabcolsep}{4pt}",
+        r"  \setlength{\tabcolsep}{3pt}",
         f"  \\begin{{tabular}}{{{alignment}}}",
         r"    \toprule",
         "    " + " & ".join(["", *(latex_escape(label) for label in col_labels)]) + r" \\",
         r"    \midrule",
     ]
     for row_label, cells in zip(row_labels, grid):
-        rendered = [latex_correlation_cell(text, marker) for text, marker in cells]
+        rendered = [latex_correlation_cell(*cell) for cell in cells]
         lines.append("    " + " & ".join([latex_escape(row_label), *rendered]) + r" \\")
     lines += [r"    \bottomrule", r"  \end{tabular}",
              f"  \\caption{{{caption}}}",
@@ -298,8 +322,8 @@ def render_matrix_latex(spec, methods, model_scope, by_framing, draws, provenanc
 def render_matrix_markdown(methods, model_scope, by_framing, draws):
     row_labels, col_labels, grid = matrix_cells(methods, by_framing)
     header = ["", *col_labels]
-    body = [[row_label, *(markdown_cell(markdown_correlation_cell(text, marker))
-                          for text, marker in cells)]
+    body = [[row_label, *(markdown_cell(markdown_correlation_cell(*cell))
+                          for cell in cells)]
             for row_label, cells in zip(row_labels, grid)]
     widths = [max(len(str(row[index])) for row in [header, *body])
              for index in range(len(header))]

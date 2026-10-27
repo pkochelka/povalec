@@ -1,5 +1,7 @@
 import argparse
 import re
+import time
+import warnings
 from pathlib import Path
 
 import matplotlib
@@ -11,9 +13,12 @@ import numpy as np
 import pandas as pd
 from matplotlib.cbook import boxplot_stats
 from matplotlib.patches import Patch
+from matplotlib.transforms import blended_transform_factory
 from scipy.stats import spearmanr
 
-from analysis.core import model_display_name
+from analysis.core import is_output_dir, model_display_name
+from analysis.vaa_null_model import DEFAULT_SIGMA, SUBTRACTED_NULLS
+from analysis.vaa_scoring import SCORE_NOUN, vaa_scoring
 from utils import FALLBACK_PARTY_COLOR, PARTY_COLORS, PARTY_DISPLAY_ORDER, VARIANT_LABELS, VARIANT_PATTERN
 
 from analysis.evaluate_euandi import (
@@ -26,15 +31,20 @@ from analysis.vaa_agreement_ci import (
 VARIANT_SUFFIX_TO_LABEL = VARIANT_LABELS
 VARIANT_LABEL_TO_SUFFIX = {label: suffix for suffix, label in VARIANT_SUFFIX_TO_LABEL.items()}
 VARIANT_LABEL_ORDER = ["base", "negated", "question"]
-SOURCE_LABELS = ["speeches", "reasons"]
+from analysis.core.paths import CLASSIFIED_TRACKS  # noqa: E402
+
+SOURCE_LABELS = [s for s in ["speeches", "reasons"] if s in CLASSIFIED_TRACKS]
 SOURCE_DISPLAY = {"speeches": "open-ended", "reasons": "reasons"}
 # Top-to-bottom order of the stacked per-source panels, which is the reverse of
 # SOURCE_LABELS: the printed figure leads with the reasons track.
-SOURCE_PANEL_ORDER = ["reasons", "speeches"]
+SOURCE_PANEL_ORDER = [s for s in ["reasons", "speeches"] if s in CLASSIFIED_TRACKS]
 VAA_SOURCE_FOR_CLASSIFIER_SOURCE = {"speeches": "vaa_speeches", "reasons": "vaa_likert"}
 # vaa_agreement_ci.py names the raw answer files by how they were elicited, not by
 # what the classifier later reads out of them.
 STANCE_SOURCE_FOR_CLASSIFIER_SOURCE = {"speeches": "speeches", "reasons": "likert"}
+# The two VAA tracks under the source key their replicates carry, in panel order, named
+# the way plot_argmax_shares names the methods.
+VAA_TRACK_DISPLAY = {"reasons": "Direct Likert", "speeches": "Indirect Likert"}
 
 SPEECHES_CLASSIFIED_PATTERN = re.compile(
     r"^speeches_[a-z]{2}(?:,[a-z]{2})*" + VARIANT_PATTERN + r"_classified\.csv$"
@@ -59,6 +69,14 @@ PARTY_PROBABILITY_COLUMN_PATTERN = re.compile(
 
 MEAN_PROBABILITY_LABEL = "Mean probability"
 MEAN_AGREEMENT_LABEL = "Mean VAA agreement"
+# The cross-model VAA panels' title and axis label; main() switches them to the cluster
+# probability when the VAA stances are scored as Gaussian posteriors (vaa_scoring).
+VAA_PANEL_TITLE = "VAA agreement"
+VAA_MEAN_LABEL = MEAN_AGREEMENT_LABEL
+VAA_DELTA_LABEL = "Δ agreement"
+# The same for the classifier panels of the combined figure: the classifier's labels are
+# the positions basis' groups, so on the cluster basis its probability is a cluster's.
+CLASSIFIER_PANEL_TITLE = "Classifier probability"
 LEGEND_UPPER_RIGHT = "upper right"
 
 BOX_MEDIAN_STYLE = {"color": "black", "linewidth": 1.3}
@@ -92,22 +110,49 @@ FOOTNOTE_FONTSIZE = 11
 LEGEND_BELOW = dict(loc="upper center", fontsize=LEGEND_FONTSIZE,
                     title_fontsize=LEGEND_TITLE_FONTSIZE, framealpha=0.9)
 
-# The three-panel figure is three panels tall but no wider than a one-panel one, so it
-# is reduced harder than any other figure here to fit a column -- and its legend, the
-# one thing that is not drawn at panel scale, came out well under the body text around
-# it. plot_argmax_shares.py sets its legends at roughly its own tick size for the same
-# reason; this brings the shared legend past it (25pt against 20pt ticks). The offset
-# goes with it: the legend hangs from the bottom panel's axes, so a fraction of ONE
-# panel's height, and the old -0.30 left a gap the size of the tick labels twice over.
-COMBINED_LEGEND_SCALE = 1.35
-COMBINED_LEGEND_OFFSET = -0.19
+# The combined VAA + classifier figure is the one the paper prints a single column wide
+# (\linewidth of a two-column page, ~3 inches), and at the 13 inches the other figures
+# here are drawn at, its 20pt type landed under 5pt -- half the caption below it. The
+# type cannot grow to make up for it (the four level party labels already fill their
+# slots), so the figure is drawn narrower instead: at 7.5 inches the reduction is 2.5x
+# and the same 20pt prints at 8pt, next to a 10pt caption. The width grows with the
+# party count so a basis with more groups than the four clusters keeps the same slot
+# per label, at the price of printing smaller.
+COMBINED_FIGURE_WIDTH = 7.5
+COMBINED_WIDTH_PER_PARTY = 1.85
+COMBINED_PANEL_HEIGHT = 3.7
+# Titles and party labels are set at the tick size: it is the one size that fits the
+# party labels, and a figure this small reads better in few sizes than many.
+COMBINED_FONTSIZE = TICK_FONTSIZE
+# The y axis is the exception, label and tick numbers a step down: the panel titles
+# already name what the bars are, so the label only has to carry the unit, and at the
+# smaller size it fits the panel's height on ONE line -- the width a second line and
+# wider numbers would take goes to the bars.
+COMBINED_YAXIS_FONTSIZE = 16
+# The model names sit at the y axis' size rather than the titles': a dozen of them at
+# the tick size made the legend the heaviest block of type in the figure.
+COMBINED_LEGEND_FONTSIZE = COMBINED_YAXIS_FONTSIZE
+# The bars of a group fill more of its slot than GROUP_WIDTH gives the wider figures: with
+# a dozen models to a group a bar prints well under a millimetre wide, and the gap
+# between groups still reads at a bar and a bit.
+COMBINED_GROUP_WIDTH = 0.92
+# How far a panel title or y label may be stepped down to stay inside its panel (see
+# shrink_texts_to_fit); only the split figure's longer titles get anywhere near it.
+COMBINED_SMALLEST_FONTSIZE = 14
+# The legend hangs from the bottom panel's axes, so a fraction of ONE panel's height:
+# enough to clear the level party labels under it.
+COMBINED_LEGEND_OFFSET = -0.14
+# Level party labels: the figure has one x axis for all its panels and the groups are few
+# and short, so they fit their slots without the tilt the other bar figures need.
+COMBINED_TICK_ROTATION = 0
 
 # Marks and gaps trimmed well in from matplotlib's defaults, which spend some 4.8 em per
 # entry on the handle and the column gap alone. The entries are colour swatches next to a
-# model name, so the mark carries no shape worth 2 em; what the trim buys is the fourth
-# column, which at this type size would not otherwise fit the figure's width.
-COMBINED_LEGEND_STYLE = dict(loc="upper center", framealpha=0.9, handlelength=1.4,
-                             handletextpad=0.5, columnspacing=1.2, borderpad=0.5)
+# model name, so the mark carries no shape worth 2 em; what the trim buys is a second
+# column at this type size, and rows close enough that the legend stays shorter than a panel.
+COMBINED_LEGEND_STYLE = dict(loc="upper center", framealpha=0.9, handlelength=1.2,
+                             handletextpad=0.4, columnspacing=1.0, borderpad=0.4,
+                             labelspacing=0.3)
 
 # The width the constants above are calibrated against. One figure here -- the
 # per-model box panel -- sizes itself by (parties x models) and runs to 26 inches
@@ -132,6 +177,9 @@ def slugify_party_label(label):
 FIGURE_FOOTNOTE = None
 
 
+SAVE_ATTEMPTS = 5
+
+
 def save_figure(fig, output_path, tight_layout=True, **savefig_kwargs):
     """`tight_layout=False` for a figure laid out some other way -- calling it on a
     constrained-layout figure replaces the engine and undoes what it did."""
@@ -141,7 +189,17 @@ def save_figure(fig, output_path, tight_layout=True, **savefig_kwargs):
                  fontsize=FOOTNOTE_FONTSIZE, color="#666666")
     if tight_layout:
         fig.tight_layout()
-    fig.savefig(output_path, dpi=300, **savefig_kwargs)
+    # An image open in a viewer is briefly locked on Windows while the viewer reloads it,
+    # and the write fails with EINVAL/EACCES; a short wait is enough, and one open preview
+    # should not abort a run that has a hundred more figures to draw.
+    for attempt in range(SAVE_ATTEMPTS):
+        try:
+            fig.savefig(output_path, dpi=300, **savefig_kwargs)
+            break
+        except OSError:
+            if attempt == SAVE_ATTEMPTS - 1:
+                raise
+            time.sleep(2.0)
     plt.close(fig)
     print(f"  Saved {output_path}")
 
@@ -164,6 +222,8 @@ def discover_classified_csvs(model_dir):
         elif (match := REASONS_CLASSIFIED_PATTERN.match(path.name)):
             source = "reasons"
         else:
+            continue
+        if source not in CLASSIFIED_TRACKS:
             continue
         variant_label = VARIANT_SUFFIX_TO_LABEL[match.group("variant")]
         classified_by_source_and_variant[(source, variant_label)] = path
@@ -495,7 +555,11 @@ def cross_model_scopes(values_by_model_source_variant):
     plot and each of its slices: per framing, per source, and every source x
     framing cell. Slices that would just duplicate the pooled plot are dropped."""
     keys = set(values_by_model_source_variant)
-    sources = [s for s in SOURCE_LABELS if any(key[1] == s for key in keys)]
+    # Every source the values carry, not just SOURCE_LABELS: the VAA agreement replicates
+    # keep the direct Likert under "reasons" even when the reasons texts are not
+    # classified, and its slices must exist if the pooled plot averages it in. Classified
+    # values only ever carry the classified tracks, so they are unaffected.
+    sources = [s for s in ["speeches", "reasons"] if any(key[1] == s for key in keys)]
     variants = [v for v in VARIANT_LABEL_ORDER if any(key[2] == v for key in keys)]
 
     scopes = [(None, None, "", "pooled over sources & variants")]
@@ -512,18 +576,33 @@ def cross_model_scopes(values_by_model_source_variant):
 PERCENT_HEADROOM = 3.0
 
 
-def percent_bar_limits(values_by_model_source_variant):
-    """(0, tallest bar + headroom) over every scope plot_cross_model_party_bars draws,
-    so the figures of one run share a y-axis and can be compared as they are browsed."""
-    tallest = 0.0
+def bar_extents(values_by_model_source_variant, replicates_by_model_source_variant=None):
+    """(lowest, highest) percent over the bars of every scope plot_cross_model_party_bars
+    draws and, when replicates are given, over the ends of their interval whiskers; None
+    when there is nothing to draw."""
+    lowest, highest = np.inf, -np.inf
     for source, variant_label, _, _ in cross_model_scopes(values_by_model_source_variant):
-        for series in scoped_mean_per_model(
-                values_by_model_source_variant, source, variant_label).values():
-            values = 100.0 * series.to_numpy(dtype=float)
-            finite = values[np.isfinite(values)]
+        drawn = [series.to_numpy(dtype=float) for series in scoped_mean_per_model(
+            values_by_model_source_variant, source, variant_label).values()]
+        if replicates_by_model_source_variant:
+            drawn += [interval.to_numpy(dtype=float).ravel()
+                      for interval in replicate_intervals(scoped_replicates_per_model(
+                          replicates_by_model_source_variant, source, variant_label)).values()]
+        for values in drawn:
+            finite = 100.0 * values[np.isfinite(values)]
             if finite.size:
-                tallest = max(tallest, float(finite.max()))
-    return (0.0, min(100.0, tallest + PERCENT_HEADROOM)) if tallest else None
+                lowest, highest = min(lowest, float(finite.min())), max(highest, float(finite.max()))
+    return (lowest, highest) if np.isfinite(lowest) else None
+
+
+def percent_bar_limits(values_by_model_source_variant, replicates_by_model_source_variant=None):
+    """(0, tallest bar or whisker + headroom) over every scope plot_cross_model_party_bars
+    draws, so the figures of one run share a y-axis and can be compared as they are
+    browsed."""
+    extents = bar_extents(values_by_model_source_variant, replicates_by_model_source_variant)
+    if extents is None or extents[1] <= 0:
+        return None
+    return 0.0, min(100.0, extents[1] + PERCENT_HEADROOM)
 
 
 def whisker_extent(values):
@@ -537,8 +616,8 @@ def whisker_extent(values):
 
 
 def percent_box_limits(replicates_by_model_source_variant, clamp=True):
-    """One padded y-range covering the whiskers of every scope plot_cross_model_vaa_boxes
-    draws. Not zero-based: the models sit within a few points of each other, so a bar from
+    """One padded y-range covering the whiskers of every scope a box figure draws
+    (plot_vaa_merged_blocs; the cross-model VAA figures here are bars now). Not zero-based: the models sit within a few points of each other, so a bar from
     zero would spend the whole axis on agreement no model is anywhere near. `clamp=False`
     for differences from the null, which may go below zero."""
     lowest, highest = np.inf, -np.inf
@@ -554,6 +633,30 @@ def percent_box_limits(replicates_by_model_source_variant, clamp=True):
     return padded_range(lowest, highest, clamp)
 
 
+def replicate_means(replicates_by_key):
+    """{key: mean score per group} from {key: bootstrap replicates per group} -- the bar
+    the VAA panels draw. The mean over the statement-bootstrap draws is the observed mean
+    up to resampling noise (a few hundredths of a point at 10,000 draws)."""
+    return {key: replicates.mean(axis=1) for key, replicates in replicates_by_key.items()}
+
+
+# The whiskers on the cross-model bars: the central 95% of the statement bootstrap.
+INTERVAL_PERCENTILES = (2.5, 97.5)
+
+
+def replicate_intervals(replicates_by_key):
+    """{key: low and high per group} -- the percentile interval of each key's bootstrap
+    replicates, what a bar's whisker spans. A group with no replicates gets NaN."""
+    intervals = {}
+    for key, replicates in replicates_by_key.items():
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", "All-NaN slice encountered")
+            low, high = np.nanpercentile(replicates.to_numpy(dtype=float),
+                                         INTERVAL_PERCENTILES, axis=1)
+        intervals[key] = pd.DataFrame({"low": low, "high": high}, index=replicates.index)
+    return intervals
+
+
 def padded_range(lowest, highest, clamp=True):
     """Room around the drawn values, clamped to the 0-100% a share can actually take --
     unless `clamp` is off, for a difference from the null, which has no such bounds."""
@@ -563,19 +666,29 @@ def padded_range(lowest, highest, clamp=True):
     return max(0.0, lowest - margin), min(100.0, highest + margin)
 
 
-def signed_bar_limits(values_by_model_source_variant):
+def signed_bar_limits(values_by_model_source_variant, replicates_by_model_source_variant=None):
     """percent_bar_limits for differences from the null: zero kept inside the axis and
-    headroom on whichever side has bars."""
-    lowest, highest = 0.0, 0.0
-    for source, variant_label, _, _ in cross_model_scopes(values_by_model_source_variant):
-        for series in scoped_mean_per_model(
-                values_by_model_source_variant, source, variant_label).values():
-            values = 100.0 * series.to_numpy(dtype=float)
-            finite = values[np.isfinite(values)]
-            if finite.size:
-                lowest = min(lowest, float(finite.min()))
-                highest = max(highest, float(finite.max()))
-    return lowest - PERCENT_HEADROOM, highest + PERCENT_HEADROOM
+    headroom on whichever side has bars (or whiskers)."""
+    lowest, highest = bar_extents(
+        values_by_model_source_variant, replicates_by_model_source_variant) or (0.0, 0.0)
+    return min(lowest, 0.0) - PERCENT_HEADROOM, max(highest, 0.0) + PERCENT_HEADROOM
+
+
+def tight_limits(drawn, signed):
+    """A y-range fitted to what one figure draws: `drawn` is a list of {model: Series or
+    DataFrame of fractions} (bar heights, whisker ends). Only a sliver of padding, so a
+    figure printed a column wide spends its height on the bars -- the run-wide limits
+    above trade that for a scale shared between figures. Zero stays in view: it is the
+    baseline of a share and the reference line of a difference from the null."""
+    values = np.concatenate([100.0 * np.asarray(frame, dtype=float).ravel()
+                             for frames in drawn for frame in frames.values()] or [np.zeros(1)])
+    finite = values[np.isfinite(values)]
+    lowest = min(0.0, float(finite.min())) if finite.size else 0.0
+    highest = max(0.0, float(finite.max())) if finite.size else 0.0
+    margin = max(0.04 * (highest - lowest), 0.3)
+    if signed:
+        return lowest - margin, highest + margin
+    return 0.0, min(100.0, highest + margin)
 
 
 def widest_limits(limits):
@@ -595,31 +708,50 @@ GROUP_WIDTH = 0.86
 # dozen capitalised names. Anything not listed falls through to the directory name, so
 # a new model dir still plots.
 def draw_models_party_bars(ax, value_per_model, parties, models, model_cmap,
-                           value_label, ylim, label_x=True, scale=1.0, unit="%"):
+                           value_label, ylim, label_x=True, scale=1.0, unit="%",
+                           intervals_per_model=None, tick_rotation=20,
+                           group_width=GROUP_WIDTH):
     """One grouped-bar panel: a bar per (party, model), colour-indexed by the
-    model's position in `models`.
+    model's position in `models`. `intervals_per_model` (replicate_intervals: low and
+    high per party) adds a whisker to every bar it covers. `tick_rotation=0` sets the
+    party labels level and centred, for a figure with few enough parties to fit them.
+    `group_width` is the share of a party's slot its bars fill.
 
     `models` is passed in rather than derived from `value_per_model` so a panel
     that is missing a model still colours the ones it has the same as its
     neighbouring panel -- the whole point of a figure that shares one legend."""
     bar_positions = np.arange(len(parties))
-    bar_width = GROUP_WIDTH / len(models)
+    bar_width = group_width / len(models)
     highest_percentage = 0.0
     for model_index, model in enumerate(models):
         if model not in value_per_model:
             continue
         percentages = 100.0 * value_per_model[model].reindex(parties).fillna(0.0).to_numpy()
         highest_percentage = max(highest_percentage, float(percentages.max()))
-        offsets = bar_positions - GROUP_WIDTH / 2 + bar_width * (model_index + 0.5)
+        offsets = bar_positions - group_width / 2 + bar_width * (model_index + 0.5)
         ax.bar(offsets, percentages, width=bar_width,
                color=model_cmap(model_index), edgecolor="black", linewidth=0.3,
                label=model)
+        if intervals_per_model and model in intervals_per_model:
+            interval = 100.0 * intervals_per_model[model].reindex(parties).to_numpy(dtype=float)
+            # Measured from the bar; a bar a hair outside its own interval (the observed
+            # mean against bootstrap percentiles) gets a zero-length side, not an error.
+            below = np.clip(percentages - interval[:, 0], 0.0, None)
+            above = np.clip(interval[:, 1] - percentages, 0.0, None)
+            shown = np.isfinite(below) & np.isfinite(above)
+            if shown.any():
+                ax.errorbar(offsets[shown], percentages[shown],
+                            yerr=[below[shown], above[shown]], fmt="none", ecolor="black",
+                            elinewidth=0.9 * scale, capsize=1.8 * scale,
+                            capthick=0.9 * scale, zorder=4)
+                highest_percentage = max(highest_percentage, float(interval[shown, 1].max()))
 
     ax.set_xticks(bar_positions)
     # The upper panel of a stacked figure hands its x-labels to the lower one;
     # ticks stay so the party boundaries still read across both panels.
     ax.set_xticklabels(parties if label_x else [""] * len(parties),
-                       rotation=20, ha="right", fontsize=TICK_FONTSIZE * scale)
+                       rotation=tick_rotation, ha="right" if tick_rotation else "center",
+                       fontsize=TICK_FONTSIZE * scale)
     ax.tick_params(axis="y", labelsize=TICK_FONTSIZE * scale)
     ax.set_xlim(-0.5, len(parties) - 0.5)
     ax.set_ylabel(f"{value_label} ({unit})", fontsize=AXIS_LABEL_FONTSIZE * scale)
@@ -635,7 +767,8 @@ def mark_zero_if_signed(ax, unit):
         ax.axhline(0.0, color="black", linewidth=1.0, zorder=3)
 
 
-def plot_models_party_bars(value_per_model, value_label, output_path, ylim=None):
+def plot_models_party_bars(value_per_model, value_label, output_path, ylim=None,
+                           intervals_per_model=None):
     if not value_per_model:
         return
     parties_present = set().union(*(series.index for series in value_per_model.values()))
@@ -649,7 +782,8 @@ def plot_models_party_bars(value_per_model, value_label, output_path, ylim=None)
     # the room the legend used to take over them.
     fig, ax = plt.subplots(figsize=(max(13, len(parties) * 2.0), 7.5))
     draw_models_party_bars(ax, value_per_model, parties, models,
-                           plt.get_cmap("tab20", max(len(models), 2)), value_label, ylim)
+                           plt.get_cmap("tab20", max(len(models), 2)), value_label, ylim,
+                           intervals_per_model=intervals_per_model)
     # Moved out from under "upper right": a 16-model legend at 17pt covers the
     # tallest bars, which on this figure are the finding. The offset clears the
     # rotated party labels, which at 20pt reach well below the axes.
@@ -754,107 +888,137 @@ def model_legend_handles(models, model_cmap, label_for=str):
                   alpha=0.85, label=label_for(model)) for index, model in enumerate(models)]
 
 
-def fitted_legend(ax, handles, fontsize, header_fontsize, bbox_to_anchor, ncol,
-                  smallest_fontsize):
-    """The legend at `ncol` columns, set as large as it can be without running past the
-    figure's own width -- `fontsize` if it fits, stepped down towards `smallest_fontsize`
-    if it does not.
+def fitted_legend(ax, handles, fontsize, bbox_to_anchor, max_ncol):
+    """The legend at `fontsize`, in as many columns (up to `max_ncol`) as fit the figure's
+    own width.
 
     A legend wider than the figure is not clipped: `bbox_inches="tight"` widens the saved
     image to hold it while the panels keep the width they were laid out with, so an
     overlong legend row silently shrinks the panels to a band down the middle of the
     page. Measuring is the only way to know -- a legend shrink-wraps its text, so its
-    width depends on the model names it happens to be drawing. The column count is what
-    is held fixed rather than the type size: the columns are what make the legend read as
-    a grid against the panels above it, and a column lost costs a whole row of height."""
+    width depends on the model names it happens to be drawing. The type size is what is
+    held fixed rather than the column count: the figure is sized so that this type prints
+    legibly, and a column given up costs only height, which a column figure has to spare.
+
+    `bbox_to_anchor` is (x, y) with x a fraction of the FIGURE's width and y a fraction of
+    the axes' height: the legend is as wide as the figure, so it is centred under the
+    whole of it, y labels included, rather than under the axes."""
     renderer = ax.figure.canvas.get_renderer()
     figure_width_px = ax.figure.get_figwidth() * ax.figure.dpi
-    header_ratio = header_fontsize / fontsize
-    while True:
+    anchor_transform = blended_transform_factory(ax.figure.transFigure, ax.transAxes)
+    for ncol in range(max_ncol, 0, -1):
         legend = ax.legend(handles=handles, ncol=ncol, fontsize=fontsize,
-                           bbox_to_anchor=bbox_to_anchor, **COMBINED_LEGEND_STYLE)
-        legend.get_texts()[0].set_fontsize(fontsize * header_ratio)
-        if legend.get_window_extent(renderer).width <= figure_width_px:
-            return legend
-        if fontsize <= smallest_fontsize:
+                           bbox_to_anchor=bbox_to_anchor, bbox_transform=anchor_transform,
+                           **COMBINED_LEGEND_STYLE)
+        if ncol == 1 or legend.get_window_extent(renderer).width <= figure_width_px:
             return legend
         legend.remove()
+
+
+def shrink_texts_to_fit(texts, available_px, dimension, smallest_fontsize):
+    """Steps `texts` down together, half a point at a time, until each one's `dimension`
+    ("width" or "height") is within `available_px` or `smallest_fontsize` is reached.
+    Together, so the panels of one figure keep one title size."""
+    renderer = texts[0].figure.canvas.get_renderer()
+    fontsize = texts[0].get_fontsize()
+    while fontsize > smallest_fontsize and any(
+            getattr(text.get_window_extent(renderer), dimension) > available_px
+            for text in texts):
         fontsize = max(smallest_fontsize, fontsize - 0.5)
+        for text in texts:
+            text.set_fontsize(fontsize)
 
 
-def legend_header_handle(title):
-    """An entry with nothing drawn for it, so a legend's title can sit in the first
-    cell of its grid rather than on a row of its own above it -- a row that on a
-    figure this tall is the difference between the legend reading with the panels
-    and reading as a block under them."""
-    return Patch(alpha=0.0, linewidth=0.0, label=title)
-
-
-def plot_models_agreement_and_source_panels(replicates_per_model, values_per_model_per_source,
+def plot_models_agreement_and_source_panels(vaa_replicates_per_panel, values_per_model_per_source,
                                             agreement_label, probability_label, output_path,
-                                            box_ylim=None, bar_ylim=None, unit="%"):
-    """The VAA-agreement box figure and the two per-source probability panels drawn as
-    one three-panel figure sharing a single model legend.
+                                            ylim=None, unit="%",
+                                            replicates_per_model_per_source=None):
+    """The VAA panel and the per-source probability panels drawn as one stacked figure
+    sharing a single model legend.
 
-    The three were printed side by side carrying the same 13-entry model legend twice
+    The panels were printed side by side carrying the same 13-entry model legend twice
     over, which at this type size costs more of the page than the panels themselves. One
-    x-axis of EP groups runs down all three, and a model keeps one colour throughout, so
-    a model's agreement can be read against its own classified shares by eye.
+    x-axis of EP groups runs down all of them, and a model keeps one colour throughout, so
+    a model's VAA score can be read against its own classified shares by eye.
 
-    Only the y-range is per-panel: agreement sits in a narrow band well away from zero
-    (see plot_models_party_boxes), while the probability panels are zero-based and share
-    their range with each other."""
+    Every panel is grouped bars on one shared y-range, the VAA one included (`ylim`; by
+    default fitted to this figure's own bars and whiskers, see tight_limits): a
+    bar per (group, model) at the model's mean score (replicate_means), drawn exactly
+    like the classifier's mean probability below it. `vaa_replicates_per_panel` is
+    {panel title: bootstrap replicates per model}: one VAA panel with the tracks pooled,
+    or one per track. Each bar carries the 95% interval of its statement bootstrap as a
+    whisker: the VAA bars from their replicates, the classifier bars from
+    `replicates_per_model_per_source` ({panel title: replicates per model}) when given."""
     panels = [(title, values) for title, values in values_per_model_per_source.items() if values]
-    if not replicates_per_model or not panels:
+    vaa_panels = [(title, replicates) for title, replicates in vaa_replicates_per_panel.items()
+                  if replicates]
+    if not vaa_panels or not panels:
         return
+    replicates_per_model_per_source = replicates_per_model_per_source or {}
 
     parties = ordered_parties_present(
         set().union(
-            *(replicates.index for replicates in replicates_per_model.values()),
+            *(replicates.index for _, per_model in vaa_panels for replicates in per_model.values()),
             *(series.index for _, values in panels for series in values.values()),
         ))
-    # The union across all three panels, so a model present in only one still gets a
+    # The union across all the panels, so a model present in only one still gets a
     # legend entry and one colour.
     models = sorted(
-        set(replicates_per_model).union(
-            model for _, values in panels for model in values))
+        set().union(*(per_model for _, per_model in vaa_panels),
+                    *(values for _, values in panels)))
     if not parties or not models:
         return
 
     model_cmap = plt.get_cmap("tab20", max(len(models), 2))
-    bar_ylim = bar_ylim or (0.0, min(100.0, PERCENT_HEADROOM + max(
-        100.0 * float(np.nanmax(series.to_numpy(dtype=float)))
-        for _, values in panels for series in values.values())))
+    # (title, bar values, whiskers, y label), top to bottom: the VAA panels, then the
+    # classifier's.
+    drawn = [(title, replicate_means(per_model), replicate_intervals(per_model), agreement_label)
+             for title, per_model in vaa_panels]
+    drawn += [(title, values,
+               replicate_intervals(replicates_per_model_per_source.get(title, {})),
+               probability_label)
+              for title, values in panels]
+    if ylim is None:
+        ylim = tight_limits([frames for _, values, intervals, _ in drawn
+                             for frames in (values, intervals)], signed=unit == "pp")
 
-    figure_width = max(13.0, len(parties) * 2.0)
-    panel_count = len(panels) + 1
+    figure_width = max(COMBINED_FIGURE_WIDTH, len(parties) * COMBINED_WIDTH_PER_PARTY)
+    panel_count = len(drawn)
     fig, axes = plt.subplots(panel_count, 1,
-                             figsize=(figure_width, 5.5 * panel_count), sharex=True)
-    draw_models_party_boxes(axes[0], replicates_per_model, parties, models, model_cmap,
-                            agreement_label, box_ylim, label_x=False, unit=unit)
-    axes[0].set_title("VAA agreement" + (" minus null" if unit == "pp" else ""),
-                      fontsize=TITLE_FONTSIZE)
-    for index, (ax, (title, values)) in enumerate(zip(axes[1:], panels), start=1):
-        draw_models_party_bars(ax, values, parties, models, model_cmap, probability_label,
-                               bar_ylim, label_x=index == panel_count - 1, unit=unit)
-        ax.set_title(title, fontsize=TITLE_FONTSIZE)
+                             figsize=(figure_width, COMBINED_PANEL_HEIGHT * panel_count),
+                             sharex=True)
+    for index, (ax, (title, values, intervals, label)) in enumerate(zip(axes, drawn)):
+        draw_models_party_bars(ax, values, parties, models, model_cmap, label,
+                               ylim, label_x=index == panel_count - 1, unit=unit,
+                               intervals_per_model=intervals,
+                               tick_rotation=COMBINED_TICK_ROTATION,
+                               group_width=COMBINED_GROUP_WIDTH)
+        ax.yaxis.label.set_fontsize(COMBINED_YAXIS_FONTSIZE)
+        ax.tick_params(axis="y", labelsize=COMBINED_YAXIS_FONTSIZE)
+        ax.set_title(title, fontsize=COMBINED_FONTSIZE)
 
     # Hung off the bottom panel, so the offset is measured against one panel's height
     # rather than the whole stack's. The handles are built rather than collected: the
-    # box panel labels nothing, and the bar panels each label only the models they drew.
-    # "model" is a handle-less entry rather than the legend's title, which puts it in
-    # the grid's top-left cell with the first entry of every other column beside it.
-    fitted_legend(
+    # bar panels each label only the models they drew. No title: the entries are
+    # model names and say so themselves.
+    legend = fitted_legend(
         axes[-1],
-        [legend_header_handle("model")]
-        + model_legend_handles(models, model_cmap, model_display_name),
-        fontsize=LEGEND_FONTSIZE * COMBINED_LEGEND_SCALE,
-        header_fontsize=LEGEND_TITLE_FONTSIZE * COMBINED_LEGEND_SCALE,
+        model_legend_handles(models, model_cmap, model_display_name),
+        fontsize=COMBINED_LEGEND_FONTSIZE,
         bbox_to_anchor=(0.5, COMBINED_LEGEND_OFFSET),
-        ncol=min(len(models) + 1, MODEL_LEGEND_NCOL),
-        smallest_fontsize=LEGEND_FONTSIZE,
+        max_ncol=min(len(models), MODEL_LEGEND_NCOL),
     )
-    save_figure(fig, output_path, bbox_inches="tight")
+    # Kept out of the layout and handed to the save instead: the legend is as tall as a
+    # panel here, and tight_layout would make room for it inside the figure by squeezing
+    # the panels to a third of their height. The saved image grows downwards to hold it.
+    legend.set_in_layout(False)
+    fig.tight_layout()
+    panel = axes[0].get_window_extent()
+    shrink_texts_to_fit([ax.title for ax in axes], panel.width, "width",
+                        COMBINED_SMALLEST_FONTSIZE)
+    shrink_texts_to_fit([ax.yaxis.label for ax in axes], panel.height, "height",
+                        COMBINED_SMALLEST_FONTSIZE)
+    save_figure(fig, output_path, bbox_inches="tight", bbox_extra_artists=[legend])
 
 
 def plot_models_party_boxes(replicates_per_model, value_label, output_path, ylim=None):
@@ -902,33 +1066,36 @@ def style_boxes(parts, facecolor):
             artist.set_linewidth(0.9)
 
 
-def plot_cross_model_vaa_boxes(replicates_by_model_source_variant, value_label,
-                               dataset_plots_dir, filename_stem, ylim=None):
-    """One box figure per scope, mirroring plot_cross_model_party_bars. The scopes share
-    a y-axis; pass `ylim` to widen that to a whole run of calls."""
-    ylim = ylim or percent_box_limits(replicates_by_model_source_variant)
-    for source, variant_label, suffix, scope_label in cross_model_scopes(replicates_by_model_source_variant):
-        scoped = scoped_replicates_per_model(
-            replicates_by_model_source_variant, source, variant_label)
-        if len(scoped) < 2:
-            print(f"  only {len(scoped)} model(s) for '{scope_label}', skipping.")
-            continue
-        plot_models_party_boxes(
-            scoped, value_label, dataset_plots_dir / f"{filename_stem}{suffix}.png", ylim)
+def plot_cross_model_vaa_bars(replicates_by_model_source_variant, value_label,
+                              dataset_plots_dir, filename_stem, ylim=None):
+    """The VAA scores as plot_cross_model_party_bars draws the classifier's: one
+    grouped-bar figure per scope, a bar per (group, model) at the model's mean score
+    (replicate_means) with the 95% interval of its statement bootstrap as a whisker. The
+    scopes share a zero-based y-axis; pass `ylim` to widen that to a whole run of calls."""
+    plot_cross_model_party_bars(replicate_means(replicates_by_model_source_variant),
+                                value_label, dataset_plots_dir, filename_stem, ylim,
+                                replicates_by_model_source_variant)
 
 
 def plot_cross_model_party_bars(values_by_model_source_variant, value_label,
-                                dataset_plots_dir, filename_stem, ylim=None):
+                                dataset_plots_dir, filename_stem, ylim=None,
+                                replicates_by_model_source_variant=None):
     """One grouped-bar figure per scope: pooled, per framing, per source, per cell. The
-    scopes share a y-axis; pass `ylim` to widen that to a whole run of calls."""
-    ylim = ylim or percent_bar_limits(values_by_model_source_variant)
+    scopes share a y-axis; pass `ylim` to widen that to a whole run of calls. With
+    bootstrap replicates of the same cells, every bar gets the 95% interval of its scope
+    as a whisker (the cells of a scope are averaged draw by draw)."""
+    ylim = ylim or percent_bar_limits(values_by_model_source_variant,
+                                      replicates_by_model_source_variant)
     for source, variant_label, suffix, scope_label in cross_model_scopes(values_by_model_source_variant):
         value_per_model = scoped_mean_per_model(values_by_model_source_variant, source, variant_label)
         if len(value_per_model) < 2:
             print(f"  only {len(value_per_model)} model(s) for '{scope_label}', skipping.")
             continue
+        intervals = replicate_intervals(scoped_replicates_per_model(
+            replicates_by_model_source_variant or {}, source, variant_label))
         plot_models_party_bars(
-            value_per_model, value_label, dataset_plots_dir / f"{filename_stem}{suffix}.png", ylim)
+            value_per_model, value_label, dataset_plots_dir / f"{filename_stem}{suffix}.png",
+            ylim, intervals)
 
 
 def plot_cross_model_source_panels(values_by_model_source_variant, value_label,
@@ -966,29 +1133,42 @@ def plot_cross_model_source_panels(values_by_model_source_variant, value_label,
 def plot_cross_model_agreement_and_source_panels(
         values_by_model_source_variant, replicates_by_model_source_variant,
         agreement_label, probability_label, dataset_plots_dir, filename_stem,
-        bar_ylim=None, box_ylim=None, unit="%"):
-    """plot_cross_model_source_panels' figure with the VAA agreement boxes stacked on
-    top of it: one figure per framing scope, since the lower panels ARE the sources.
+        ylim=None, unit="%", classifier_replicates_by_model_source_variant=None):
+    """plot_cross_model_source_panels' figure with the VAA bars stacked on top of it:
+    one figure per framing scope, since the lower panels ARE the sources.
 
-    The agreement panel pools over sources -- it is drawn from the raw answers of both
-    tracks, the way plot_cross_model_vaa_boxes' pooled figure is -- so it is the
-    framing, not the source, that the scopes vary."""
-    signed = unit == "pp"
-    bar_ylim = bar_ylim or (signed_bar_limits(values_by_model_source_variant) if signed
-                            else percent_bar_limits(values_by_model_source_variant))
-    box_ylim = box_ylim or percent_box_limits(replicates_by_model_source_variant,
-                                              clamp=not signed)
+    The VAA panel pools over sources -- it is drawn from the raw answers of both
+    tracks, the way plot_cross_model_vaa_bars' pooled figure is -- so it is the
+    framing, not the source, that the scopes vary. The panels of one figure share one
+    y-range, so a VAA bar and a classifier bar of the same height mean the same number of
+    points; it is fitted to that figure's own bars and whiskers (tight_limits) unless
+    `ylim` fixes it, so the pooled, base and negated figures each use their full height."""
+    classifier_replicates = classifier_replicates_by_model_source_variant or {}
     keys = set(values_by_model_source_variant)
     sources = [source for source in SOURCE_PANEL_ORDER if any(key[1] == source for key in keys)]
-    if len(sources) < 2:
+    # one classified source is enough here: the VAA bars are a panel of their own
+    if not sources:
         return
     variants = [variant for variant in VARIANT_LABEL_ORDER if any(key[2] == variant for key in keys)]
     scopes = [(None, "")] + ([(variant, f"_{variant}") for variant in variants]
                              if len(variants) > 1 else [])
+    minus = " minus null" if unit == "pp" else ""
+    # Named for what the bars are, like the VAA panel above them; the source is only
+    # spelled out when there is more than one classified track to tell apart.
+    panel_title = {
+        source: (f"{CLASSIFIER_PANEL_TITLE}{minus}" if len(sources) == 1 else
+                 f"{SOURCE_DISPLAY[source]}: {CLASSIFIER_PANEL_TITLE}{minus}")
+        for source in sources
+    }
     for variant_label, suffix in scopes:
         panels = {
-            f"Source: {SOURCE_DISPLAY[source]}": scoped_mean_per_model(
+            panel_title[source]: scoped_mean_per_model(
                 values_by_model_source_variant, source, variant_label)
+            for source in sources
+        }
+        panel_replicates = {
+            panel_title[source]: scoped_replicates_per_model(
+                classifier_replicates, source, variant_label)
             for source in sources
         }
         replicates_per_model = scoped_replicates_per_model(
@@ -998,8 +1178,23 @@ def plot_cross_model_agreement_and_source_panels(
                   f"'{variant_label or 'pooled'}', skipping the combined figure.")
             continue
         plot_models_agreement_and_source_panels(
-            replicates_per_model, panels, agreement_label, probability_label,
-            dataset_plots_dir / f"{filename_stem}{suffix}.png", box_ylim, bar_ylim, unit)
+            {VAA_PANEL_TITLE + minus: replicates_per_model}, panels, agreement_label,
+            probability_label, dataset_plots_dir / f"{filename_stem}{suffix}.png", ylim, unit,
+            panel_replicates)
+        # The same figure with the VAA panel split by track: the pooled panel averages
+        # the direct and the indirect Likert, which can hide that they disagree.
+        per_track = {
+            f"{VAA_TRACK_DISPLAY[track]}: {VAA_PANEL_TITLE}{minus}": scoped_replicates_per_model(
+                replicates_by_model_source_variant, track, variant_label)
+            for track in VAA_TRACK_DISPLAY
+        }
+        per_track = {title: replicates for title, replicates in per_track.items()
+                     if len(replicates) >= 2}
+        if len(per_track) > 1:
+            plot_models_agreement_and_source_panels(
+                per_track, panels, agreement_label, probability_label,
+                dataset_plots_dir / f"{filename_stem}_split{suffix}.png", ylim, unit,
+                panel_replicates)
 
 
 def discover_vaa_csvs(model_dir):
@@ -1011,6 +1206,8 @@ def discover_vaa_csvs(model_dir):
             classifier_source = "reasons"
         else:
             continue
+        # every VAA file, classified track or not: the direct Likert ("reasons" key) is a
+        # method of its own even when the reasons texts are not classified
         variant_label = VARIANT_SUFFIX_TO_LABEL[match.group("variant")]
         vaa_by_source_and_variant[(classifier_source, variant_label)] = path
     return vaa_by_source_and_variant
@@ -1052,8 +1249,7 @@ def load_vaa_agreement_replicates(model_dirs, positions, bootstrap_draws, seed):
     statement_index = np.sort(party_df["statement_idx"].unique())
     groups = sorted(party_df["ep_group"].unique())
 
-    rng = np.random.default_rng(seed)
-    draws = rng.integers(0, len(statement_index), size=(bootstrap_draws, len(statement_index)))
+    draws = statement_draws(len(statement_index), bootstrap_draws, seed)
 
     replicates_per_model_source_variant = {}
     for model_dir, vaa_csvs in vaa_csvs_per_model.items():
@@ -1067,12 +1263,54 @@ def load_vaa_agreement_replicates(model_dirs, positions, bootstrap_draws, seed):
             if stance_df is None:
                 continue
             matrices = agreement_matrices(
-                stance_df, languages, party_df, groups, statement_index)
+                stance_df, languages, party_df, groups, statement_index,
+                scoring=vaa_scoring(positions))
             if not matrices[1].any():
                 continue
             _, replicates = bootstrap_group_means(matrices, draws)
             replicates_per_model_source_variant[(model_dir.name, source, variant_label)] = (
                 pd.DataFrame(replicates, index=groups))
+    return replicates_per_model_source_variant
+
+
+def statement_draws(statement_count, bootstrap_draws, seed):
+    """(draws, statements) resampled statement positions: one cluster bootstrap over the
+    questionnaire, the unit that is actually sampled. The same count and seed give the
+    same draws, which is how the VAA and the classifier replicates come to share them."""
+    rng = np.random.default_rng(seed)
+    return rng.integers(0, statement_count, size=(bootstrap_draws, statement_count))
+
+
+def load_classifier_probability_replicates(predictions_by_model, bootstrap_draws, seed):
+    """{(model, source, variant): mean classifier probability per party per bootstrap
+    draw} -- load_vaa_agreement_replicates' counterpart for the classified texts.
+
+    The statements are resampled, not the texts: every text of a drawn statement goes
+    with it (all its languages and paraphrases), as on the VAA side, so the two sets of
+    whiskers answer the same question -- how far the mean would move on another
+    questionnaire of this size. A cell's replicates average to mean_probability_per_party
+    up to resampling noise."""
+    statements = sorted({int(row) for long_by_source_variant in predictions_by_model.values()
+                         for long_df in long_by_source_variant.values()
+                         for row in long_df["row_idx"].dropna().unique()})
+    if not statements:
+        return {}
+    draws = statement_draws(len(statements), bootstrap_draws, seed)
+    replicates_per_model_source_variant = {}
+    for model_dir, long_by_source_variant in predictions_by_model.items():
+        for (source, variant_label), long_df in long_by_source_variant.items():
+            scored = long_df.dropna(subset=["probability"])
+            if scored.empty:
+                continue
+            cells = scored.groupby(["party", "row_idx"])["probability"].agg(["sum", "count"])
+            parties = sorted(scored["party"].unique())
+            matrices = tuple(
+                cells[column].unstack("row_idx").reindex(index=parties, columns=statements)
+                .fillna(0.0).to_numpy(dtype=float)
+                for column in ("sum", "count"))
+            _, replicates = bootstrap_group_means(matrices, draws)
+            replicates_per_model_source_variant[(model_dir.name, source, variant_label)] = (
+                pd.DataFrame(replicates, index=parties))
     return replicates_per_model_source_variant
 
 
@@ -1208,8 +1446,9 @@ def plot_cross_model_vaa_correlation_heatmap(comparison_rows, value_column, valu
     save_figure(fig, output_path)
 
 
-def plots_dir_for(model_dir):
-    plots_dir = model_dir / "plots"
+def plots_dir_for(model_dir, name="plots"):
+    """<model_dir>/plots, or a per-null twin such as plots_gaussian."""
+    plots_dir = model_dir / name
     plots_dir.mkdir(exist_ok=True)
     return plots_dir
 
@@ -1538,9 +1777,15 @@ def parse_args():
                         help="Read this results directory instead of the --dataset one.")
     parser.add_argument("--absolute", action="store_true",
                         help="Draw vaa_agreement_and_classified_sources*.png as raw mean "
-                             "agreement and mean probability, not minus their 0-centered null.")
+                             "agreement and mean probability (into plots/), not minus their "
+                             "nulls.")
+    parser.add_argument("--null", nargs="+", default=list(SUBTRACTED_NULLS),
+                        choices=SUBTRACTED_NULLS,
+                        help="The nulls vaa_agreement_and_classified_sources*.png is drawn "
+                             "minus, one figure each, into plots_<null>/ (default: "
+                             "%(default)s). Every other figure is raw and goes to plots/.")
     parser.add_argument("--sigma", type=float, default=None,
-                        help="Sigma of the null to subtract (default: the VAA null's).")
+                        help="Sigma of the gaussian null (default: the VAA null's).")
     parser.add_argument("--null_dir", type=Path, default=None,
                         help="Default: <results_dir>/tables/null_model")
     return parser.parse_args()
@@ -1552,12 +1797,14 @@ CLASSIFIER_METHOD_FOR_SOURCE = {"reasons": "reasons_clf", "speeches": "speeches_
 
 
 def minus_null_inputs(mean_probability_per_model_source_variant,
-                      vaa_replicates_per_model_source_variant, baseline):
-    """The combined figure's two inputs minus their 0-centered nulls: every (model,
-    source, framing) cell's mean probability minus the classifier's mean-probability null
-    of that source and framing, and every agreement replicate minus the agreement null of
-    its VAA track. Per cell, before any scope pools them, so a pooled panel subtracts the
-    mean of the nulls it pools."""
+                      vaa_replicates_per_model_source_variant, baseline,
+                      classifier_replicates_per_model_source_variant=None):
+    """The combined figure's inputs minus one null model: every (model, source, framing)
+    cell's mean probability -- and its bootstrap replicates, when given -- minus the
+    classifier's mean-probability null of that source and framing, and every agreement
+    replicate minus the agreement null of its VAA track. Per cell, before any scope pools
+    them, so a pooled panel subtracts the mean of the nulls it pools. The null is a
+    constant here, so a whisker is the bootstrap interval of the score alone, shifted."""
     from analysis.null_baseline import minus_null
     probabilities = {
         (model, source, variant): minus_null(series, baseline.mean_probability(
@@ -1570,25 +1817,42 @@ def minus_null_inputs(mean_probability_per_model_source_variant,
             .reindex(cell.index), axis=0)
         for (model, source, variant), cell in vaa_replicates_per_model_source_variant.items()
     }
-    return probabilities, replicates
+    classifier_replicates = {
+        (model, source, variant): cell.sub(
+            baseline.mean_probability(CLASSIFIER_METHOD_FOR_SOURCE[source], variant)
+            .reindex(cell.index).fillna(0.0), axis=0)
+        for (model, source, variant), cell
+        in (classifier_replicates_per_model_source_variant or {}).items()
+    }
+    return probabilities, replicates, classifier_replicates
 
 
 def main():
+    global VAA_PANEL_TITLE, VAA_MEAN_LABEL, VAA_DELTA_LABEL, CLASSIFIER_PANEL_TITLE
     args = parse_args()
+    scoring = vaa_scoring(args.positions)
+    print(f"VAA scoring: {scoring}")
+    if scoring == "posterior":
+        VAA_PANEL_TITLE = "VAA " + SCORE_NOUN[scoring]
+        VAA_MEAN_LABEL = "Mean VAA " + SCORE_NOUN[scoring]
+        VAA_DELTA_LABEL = "Δ VAA probability"
+        CLASSIFIER_PANEL_TITLE = "Classifier " + SCORE_NOUN[scoring]
     results_dir = args.results_dir or Path("data") / f"{args.dataset}_results"
     if not results_dir.exists():
         raise SystemExit(f"Directory not found: {results_dir}")
-    baseline = None
+    sigma = args.sigma or DEFAULT_SIGMA
+    baselines = {}
     if not args.absolute:
         # Imported here: null_baseline reaches this module back through
         # classifier_null_model, so a top-level import would be circular.
-        from analysis.null_baseline import NullBaseline
-        from analysis.vaa_null_model import DEFAULT_SIGMA
-        baseline = NullBaseline.load(args.null_dir or results_dir / "tables" / "null_model",
-                                     args.positions, args.sigma or DEFAULT_SIGMA)
+        from analysis.null_baseline import NullBaseline, output_dir_name
+        null_dir = args.null_dir or results_dir / "tables" / "null_model"
+        baselines = {output_dir_name("plots", kind, sigma):
+                     NullBaseline.load(null_dir, args.positions, sigma, kind)
+                     for kind in dict.fromkeys(args.null)}
 
     model_dirs = sorted(p for p in results_dir.iterdir()
-                        if p.is_dir() and p.name not in ("plots", "tables"))
+                        if p.is_dir() and not is_output_dir(p.name))
     if args.model:
         model_dirs = [d for d in model_dirs if d.name == args.model]
     if not model_dirs:
@@ -1607,6 +1871,10 @@ def main():
     }
     models_with_data = {model for model, _, _ in mean_probability_per_model_source_variant}
     dataset_plots_dir = results_dir / "plots"
+    # The whiskers of the cross-model classifier bars: the same statement bootstrap, on
+    # the same draws, as the VAA replicates below.
+    classifier_replicates_per_model_source_variant = load_classifier_probability_replicates(
+        predictions_by_model, args.bootstrap, args.seed)
 
     if len(models_with_data) > 1:
         dataset_plots_dir.mkdir(exist_ok=True)
@@ -1614,6 +1882,7 @@ def main():
         plot_cross_model_party_bars(
             mean_probability_per_model_source_variant, MEAN_PROBABILITY_LABEL,
             dataset_plots_dir, "classified_all_models_party_distribution",
+            replicates_by_model_source_variant=classifier_replicates_per_model_source_variant,
         )
         plot_cross_model_source_panels(
             mean_probability_per_model_source_variant, MEAN_PROBABILITY_LABEL,
@@ -1625,33 +1894,40 @@ def main():
     if len({model for model, _, _ in vaa_replicates_per_model_source_variant}) > 1:
         dataset_plots_dir.mkdir(exist_ok=True)
         print("\nCross-model VAA agreement:")
-        plot_cross_model_vaa_boxes(
-            vaa_replicates_per_model_source_variant, MEAN_AGREEMENT_LABEL,
+        plot_cross_model_vaa_bars(
+            vaa_replicates_per_model_source_variant, VAA_MEAN_LABEL,
             dataset_plots_dir, "vaa_all_models_mean_agreement",
         )
         if len(models_with_data) > 1:
             # The agreement boxes and the two per-source probability panels in one
             # three-panel figure: they carry the same model legend, and the thesis
             # prints them together.
-            # Minus their 0-centered nulls unless --absolute: agreement and probability
-            # a group gets beyond what random stances around neutral would give it.
-            if baseline:
-                probabilities, replicates = minus_null_inputs(
+            # Minus each null unless --absolute, into plots_<null>/: agreement and
+            # probability a group gets beyond what random stances would give it.
+            for plots_name, baseline in baselines.items():
+                print(f"\n  minus the {baseline.source} -> {plots_name}/")
+                null_plots_dir = results_dir / plots_name
+                null_plots_dir.mkdir(exist_ok=True)
+                probabilities, replicates, classifier_replicates = minus_null_inputs(
                     mean_probability_per_model_source_variant,
-                    vaa_replicates_per_model_source_variant, baseline)
+                    vaa_replicates_per_model_source_variant, baseline,
+                    classifier_replicates_per_model_source_variant)
                 plot_cross_model_agreement_and_source_panels(
                     probabilities, replicates,
                     # Short: three stacked panels leave each rotated label one panel of
                     # height, and "Mean VAA agreement − null" runs into its neighbour.
-                    "Δ agreement", "Δ probability",
-                    dataset_plots_dir, "vaa_agreement_and_classified_sources", unit="pp",
+                    VAA_DELTA_LABEL, "Δ probability",
+                    null_plots_dir, "vaa_agreement_and_classified_sources", unit="pp",
+                    classifier_replicates_by_model_source_variant=classifier_replicates,
                 )
-            else:
+            if not baselines:
                 plot_cross_model_agreement_and_source_panels(
                     mean_probability_per_model_source_variant,
                     vaa_replicates_per_model_source_variant,
-                    MEAN_AGREEMENT_LABEL, MEAN_PROBABILITY_LABEL,
+                    VAA_MEAN_LABEL, MEAN_PROBABILITY_LABEL,
                     dataset_plots_dir, "vaa_agreement_and_classified_sources",
+                    classifier_replicates_by_model_source_variant=(
+                        classifier_replicates_per_model_source_variant),
                 )
 
     vaa_comparison_rows_across_models = []

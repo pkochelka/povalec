@@ -5,6 +5,9 @@ data/*
 __pycache__/
 .env.local
 results*
+# the pattern above is meant for the results_*.txt run reports, not this module
+!analysis/core/results.py
 mmBERT-*
 models/
 .venv/
+runs/

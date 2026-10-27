@@ -28,7 +28,9 @@ use_short_party_labels()   # cluster nicknames in every label (utils.PARTY_SHORT
 from analysis import plotting  # noqa: F401  (package import for the module below)
 from analysis.plotting import plot_classified_parties as pcp
 
+from analysis.core import is_output_dir
 from analysis.core.questionnaire import axis_directions_in_admin_order
+from analysis.vaa_scoring import vaa_scoring
 from analysis.evaluate_euandi import (
     DEFAULT_POSITIONS, POSITION_CHOICES, load_party_positions, positions_path,
 )
@@ -111,7 +113,8 @@ def load_full_agreement_matrices(model_dirs, positions):
             if stance_df is None:
                 continue
             matrices = agreement_matrices(
-                stance_df, languages, party_df, groups, statement_index)
+                stance_df, languages, party_df, groups, statement_index,
+                scoring=vaa_scoring(positions))
             if not matrices[1].any():
                 continue
             matrices_per_key[(model_dir.name, source, variant_label)] = matrices
@@ -158,7 +161,7 @@ def axis_mean_probability_per_key(predictions_by_model, rows):
 
 def run_wide_percent_limits(predictions_by_model, axis_rows, matrices_per_key,
                             statement_index, groups, bootstrap_draws, seed):
-    """(bar ylim, box ylim) covering every axis this run plots.
+    """(classifier bar ylim, VAA bar ylim) covering every axis this run plots.
 
     The cross-model helpers already share one scale between the scopes of a single call,
     but each axis is a separate call, so the limits are worked out up front. The
@@ -170,7 +173,7 @@ def run_wide_percent_limits(predictions_by_model, axis_rows, matrices_per_key,
             axis_mean_probability_per_key(predictions_by_model, rows)))
         _, replicates = axis_vaa_results(
             matrices_per_key, statement_index, groups, rows, bootstrap_draws, seed)
-        box_limits.append(pcp.percent_box_limits(replicates))
+        box_limits.append(pcp.percent_bar_limits(pcp.replicate_means(replicates), replicates))
     return pcp.widest_limits(bar_limits), pcp.widest_limits(box_limits)
 
 
@@ -323,7 +326,7 @@ def main():
     if not results_dir.exists():
         raise SystemExit(f"Directory not found: {results_dir}")
 
-    model_dirs = sorted(p for p in results_dir.iterdir() if p.is_dir() and p.name != "plots")
+    model_dirs = sorted(p for p in results_dir.iterdir() if p.is_dir() and not is_output_dir(p.name))
     if args.model:
         model_dirs = [d for d in model_dirs if d.name == args.model]
     if not model_dirs:
@@ -402,8 +405,10 @@ def main():
                     axis_dataset_dir, "classified_all_models_party_distribution", bar_ylim,
                 )
             if len({model for model, _, _ in replicates_vaa}) > 1:
-                pcp.plot_cross_model_vaa_boxes(
-                    replicates_vaa, pcp.MEAN_AGREEMENT_LABEL,
+                pcp.plot_cross_model_vaa_bars(
+                    replicates_vaa,
+                    pcp.MEAN_AGREEMENT_LABEL if vaa_scoring(args.positions) == "distance"
+                    else "Mean VAA cluster probability",
                     axis_dataset_dir, "vaa_all_models_mean_agreement", box_ylim,
                 )
 

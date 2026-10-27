@@ -29,8 +29,18 @@ MATRIX_LABEL = {
 assert set(MATRIX_LABEL) == set(METHOD_LABEL)
 # "Indirect" means NLI-scored prose (the open-ended answers), not the NLI-scored reasons --
 # the reasons track is only measured here via the classifier.
-DEFAULT_METHODS = ["vaa-likert", "vaa-speeches", "clf-reasons", "clf-speeches"]
+# The classifier on reasons is out unless analysis.core.CLASSIFIED_TRACKS brings it back
+# (--methods clf-reasons still asks for it explicitly).
+from analysis.core.paths import CLASSIFIED_TRACKS  # noqa: E402
+
+DEFAULT_METHODS = ["vaa-likert", "vaa-speeches"] + [f"clf-{track}" for track in CLASSIFIED_TRACKS]
 DEFAULT_TABLES = ["internal", "negation", "crosslang", "variants", "bymodel"]
+# Counts spelled out in captions, so "all three methods" follows the methods in play.
+NUMBER_WORDS = {2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven"}
+
+
+def count_word(count):
+    return NUMBER_WORDS.get(count, str(count))
 
 # Short row labels for the per-model table; anything not listed falls back to its
 # first hyphen-separated token, capitalised.

@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+"""Bag-of-n-grams baseline for the party/cluster classifier: hashed n-gram features
+and a linear SVM (SGD, class-balanced), fit out-of-core on train, epoch picked on dev
+macro F1, scored once on test.
+
+    --word-ngrams 2,3 --char-ngrams none    word bigrams + trigrams only
+    --word-ngrams 1,2 --char-ngrams 3,4     the original mixed baseline
+"""
 import argparse
 import os
 import json
@@ -22,20 +29,30 @@ SEED = 42
 MAX_CHARS = 2000
 CHUNK_SIZE = 50_000
 EPOCHS = 3
-DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "EuroParl Custom")
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "EuroParl Custom",
+                        "clusters_k4_national_ni")
 
-word_vec = HashingVectorizer(
-    analyzer="word", ngram_range=(1, 2), n_features=2**21,
-    alternate_sign=False, norm="l2", strip_accents="unicode",
-)
-char_vec = HashingVectorizer(
-    analyzer="char_wb", ngram_range=(3, 4), n_features=2**21,
-    alternate_sign=False, norm="l2", strip_accents="unicode",
-)
+vectorizers = []
+
+
+def parse_ngram_range(value):
+    if value.lower() == "none":
+        return None
+    low, high = (int(n) for n in value.replace("-", ",").split(","))
+    return low, high
+
+
+def build_vectorizers(word_ngrams, char_ngrams):
+    specs = [("word", word_ngrams), ("char_wb", char_ngrams)]
+    return [
+        HashingVectorizer(analyzer=analyzer, ngram_range=ngram_range, n_features=2**21,
+                          alternate_sign=False, norm="l2", strip_accents="unicode")
+        for analyzer, ngram_range in specs if ngram_range is not None
+    ]
 
 
 def vectorize(texts):
-    return hstack([word_vec.transform(texts), char_vec.transform(texts)]).tocsr()
+    return hstack([vec.transform(texts) for vec in vectorizers]).tocsr()
 
 
 def predict_in_chunks(clf, texts):
@@ -45,7 +62,7 @@ def predict_in_chunks(clf, texts):
     return np.concatenate(preds)
 
 
-def evaluate(clf, split_name, df, target_names, tag, extra=None):
+def evaluate(clf, split_name, df, target_names, tag, out_dir, extra=None):
     y_true = df["labels"].to_numpy()
     langs = df["language"].to_numpy()
     y_pred = predict_in_chunks(clf, df["text"].tolist())
@@ -69,13 +86,14 @@ def evaluate(clf, split_name, df, target_names, tag, extra=None):
     print("\n".join(per_language_reports))
 
     output_tag = f"{tag}_{split_name}"
-    with open(f"results_{output_tag}.txt", "w") as f:
+    out_path = os.path.join(out_dir, f"results_{output_tag}.txt")
+    with open(out_path, "w") as f:
         f.write(output_tag + "\n" + "-" * 40 + "\n")
         f.write(json.dumps(results, indent=2))
         f.write("\n\n=== OVERALL ===\n" + overall_report)
         f.write(summary)
         f.write("\n".join(per_language_reports))
-    print(f"\nSaved results_{output_tag}.txt")
+    print(f"\nSaved {out_path}")
 
 
 def main():
@@ -86,7 +104,18 @@ def main():
     parser.add_argument("--test-split", default="test")
     parser.add_argument("--tag", default="baseline_hashing_sgd")
     parser.add_argument("--epochs", type=int, default=EPOCHS)
+    parser.add_argument("--word-ngrams", type=parse_ngram_range, default=(1, 2),
+                        help="word n-gram range as LOW,HIGH (or LOW-HIGH), or none")
+    parser.add_argument("--char-ngrams", type=parse_ngram_range, default=(3, 4),
+                        help="char_wb n-gram range as LOW,HIGH (or LOW-HIGH), or none")
+    parser.add_argument("--out-dir", default=".")
     args = parser.parse_args()
+
+    if args.word_ngrams is None and args.char_ngrams is None:
+        parser.error("need at least one of --word-ngrams / --char-ngrams")
+    vectorizers.extend(build_vectorizers(args.word_ngrams, args.char_ngrams))
+    print(f"data: {args.data_dir}")
+    print(f"word n-grams: {args.word_ngrams}, char_wb n-grams: {args.char_ngrams}")
 
     df_train = load_split(args.train_split, args.data_dir, max_chars=MAX_CHARS)
     df_dev   = load_split(args.dev_split, args.data_dir, max_chars=MAX_CHARS)
@@ -137,8 +166,8 @@ def main():
     target_names = [id2label[i] for i in range(num_labels)]
     selection = {"selected_epoch": best_epoch, "epochs": args.epochs,
                  "selection_dev_f1_macro": best_dev_f1}
-    evaluate(clf, "dev",  df_dev,  target_names, args.tag, extra=selection)
-    evaluate(clf, "test", df_test, target_names, args.tag, extra=selection)
+    evaluate(clf, "dev",  df_dev,  target_names, args.tag, args.out_dir, extra=selection)
+    evaluate(clf, "test", df_test, target_names, args.tag, args.out_dir, extra=selection)
 
 
 if __name__ == "__main__":

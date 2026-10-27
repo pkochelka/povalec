@@ -13,10 +13,17 @@ Refusals are pooled from two channels:
 
 Outputs (under data/<dataset>_results/plots/refusals/):
   * refusal_rates.csv -- per (model, language, variant, source) counts
+  * refusal_records.parquet -- every scored field (no text), so --replot can redraw
   * refusal_heatmap.png -- models x languages, overall refusal rate
   * refusal_per_model.png -- bar chart, per-language refusal rate per model
   * refusal_breakdown.png -- hard vs semantic stacked bars per model
   * refusal_by_variant.png -- grouped bars per model broken down by statement variant
+  * refusal_per_question.png -- per-proposition rate, stacked by model
+  * refusal_breakdown_by_track.png -- reasons vs open-ended side by side per model
+
+The two tracks refuse very differently (the reasons ~16%, the open-ended answers ~0.1%
+on the 2026 runs), so every figure and summary CSV above is also written per track:
+<name>_reasons.* and <name>_speeches.*; the unsuffixed files pool both, as before.
 """
 import argparse
 import re
@@ -25,6 +32,7 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 from analysis.core.labels import use_short_party_labels
 use_short_party_labels()   # cluster nicknames in every label (utils.PARTY_SHORT)
 import numpy as np
@@ -34,11 +42,12 @@ import torch.nn.functional as F
 from tqdm import tqdm
 from transformers import AutoModel, AutoTokenizer
 
-from analysis.core import model_display_name
+from analysis.core import is_output_dir, model_display_name
 from utils import ALL_LANGS, FAILED_REASON_VALUES, REFUSED_REASON_PREFIXES, VARIANTS, VARIANT_LABELS, VARIANT_PATTERN
 
 
-SKIP_MODEL_SUBSTRINGS = ()
+# Models left out of every output (also applied on --replot, to records saved before the skip).
+SKIP_MODEL_SUBSTRINGS = ("kimi-k2.7",)
 
 # Models dropped from the per-question figure only (they stay in every other output).
 PER_QUESTION_PLOT_EXCLUDE = ()
@@ -432,7 +441,7 @@ def order_languages(languages_present):
     return ordered + extras
 
 
-def plot_heatmap(overall_df, output_path):
+def plot_heatmap(overall_df, output_path, track_label="both tracks"):
     pivot = overall_df.pivot(index="model", columns="language", values="refusal_rate")
     languages = order_languages(pivot.columns.tolist())
     pivot = pivot.reindex(columns=languages).sort_index()
@@ -450,15 +459,15 @@ def plot_heatmap(overall_df, output_path):
             if not np.isnan(value):
                 ax.text(c, r, f"{value:.2f}", ha="center", va="center", fontsize=7,
                         color="white" if value > 0.5 * np.nanmax(matrix) else "black")
-    ax.set_title("Refusal rate per model and language (hard + semantic, all variants pooled)",
-                 fontsize=11, pad=8)
+    ax.set_title(f"Refusal rate per model and language ({track_label}; hard + semantic, "
+                 f"all variants pooled)", fontsize=11, pad=8)
     fig.tight_layout()
     fig.savefig(output_path, dpi=150)
     plt.close(fig)
     print(f"  Saved {output_path}")
 
 
-def plot_per_model_languages(overall_df, output_path):
+def plot_per_model_languages(overall_df, output_path, track_label="both tracks"):
     models = sorted(overall_df["model"].unique())
     languages = order_languages(overall_df["language"].unique().tolist())
     fig, axes = plt.subplots(
@@ -478,7 +487,8 @@ def plot_per_model_languages(overall_df, output_path):
         ax.grid(axis="y", linestyle="--", alpha=0.4)
 
     axes[-1].set_xticks(range(len(languages)), languages, rotation=45, ha="right", fontsize=8)
-    fig.suptitle("Refusal rate per language (per model, all variants pooled)", fontsize=12)
+    fig.suptitle(f"Refusal rate per language ({track_label}; per model, all variants pooled)",
+                 fontsize=12)
     fig.tight_layout()
     fig.savefig(output_path, dpi=150)
     plt.close(fig)
@@ -537,7 +547,7 @@ def plot_hard_vs_semantic_per_model(overall_df, output_path):
     print(f"  Saved {output_path}")
 
 
-def plot_refusal_by_variant(variant_df, output_path):
+def plot_refusal_by_variant(variant_df, output_path, track_label="both tracks"):
     models = sorted(variant_df["model"].unique())
     variants = ["base", "question", "negated"]
     variant_colors = {"base": "#4C72B0", "question": "#DD8452", "negated": "#55A868"}
@@ -568,13 +578,84 @@ def plot_refusal_by_variant(variant_df, output_path):
 
     ax.set_xticks(positions, models, rotation=20, ha="right", fontsize=9)
     ax.set_ylabel("Refusal rate")
-    ax.set_title("Refusal rate per statement variant per model (all languages pooled)", fontsize=11, pad=8)
+    ax.set_title(f"Refusal rate per statement variant per model ({track_label}; all languages pooled)",
+                 fontsize=11, pad=8)
     ax.grid(axis="y", linestyle="--", alpha=0.4)
     ax.legend(title="Variant", loc="upper right", fontsize=9, framealpha=0.9)
     fig.tight_layout()
     fig.savefig(output_path, dpi=150)
     plt.close(fig)
     print(f"  Saved {output_path}")
+
+
+TRACKS = {"reason": ("reasons", "_reasons"), "speech": ("open-ended", "_speeches")}
+TRACK_HATCH = {"reason": "", "speech": "///"}
+
+
+def plot_breakdown_by_track(rates_df, output_path):
+    """refusal_breakdown.png with the two tracks side by side: per model one bar per
+    track, hard refusals at the bottom, semantic ones on top, the track told apart by
+    hatching so the hard/semantic colours mean the same as in the pooled figure."""
+    per = rates_df.groupby(["model", "source"])[["n_total", "n_hard", "n_semantic"]].sum()
+    per["hard_rate"] = per["n_hard"] / per["n_total"]
+    per["semantic_rate"] = per["n_semantic"] / per["n_total"]
+    models = sorted(rates_df["model"].unique())
+    sources = [source for source in TRACKS if source in rates_df["source"].unique()]
+    width = 0.8 / max(len(sources), 1)
+    positions = np.arange(len(models))
+
+    fig, ax = plt.subplots(figsize=(
+        max(BREAKDOWN_MIN_WIDTH, 1.3 * BREAKDOWN_WIDTH_PER_MODEL * len(models) + 2),
+        BREAKDOWN_HEIGHT))
+    top = 0.0
+    for i, source in enumerate(sources):
+        rows = per.xs(source, level="source").reindex(models).fillna(0.0)
+        x = positions + (i - (len(sources) - 1) / 2) * width
+        ax.bar(x, rows["hard_rate"], width * 0.95, color="#4C72B0", edgecolor="black",
+               linewidth=0.4, hatch=TRACK_HATCH[source])
+        ax.bar(x, rows["semantic_rate"], width * 0.95, bottom=rows["hard_rate"], color="#DD8452",
+               edgecolor="black", linewidth=0.4, hatch=TRACK_HATCH[source])
+        totals = rows["hard_rate"] + rows["semantic_rate"]
+        top = max(top, float(totals.max()))
+        for xi, total in zip(x, totals):
+            ax.text(xi, total + 0.002, f"{total:.3f}", ha="center", va="bottom",
+                    fontsize=BREAKDOWN_VALUE_FONTSIZE * 0.8, rotation=90)
+
+    ax.set_xticks(positions, [model_display_name(model) for model in models],
+                  rotation=40, ha="right", fontsize=BREAKDOWN_TICK_FONTSIZE)
+    ax.tick_params(axis="y", labelsize=BREAKDOWN_TICK_FONTSIZE)
+    ax.set_ylabel("Refusal rate", fontsize=BREAKDOWN_AXIS_LABEL_FONTSIZE)
+    ax.set_ylim(0, top * BREAKDOWN_VALUE_HEADROOM or 1.0)
+    ax.grid(axis="y", linestyle="--", alpha=0.4)
+    ax.set_axisbelow(True)
+    handles = [Patch(facecolor="#4C72B0", edgecolor="black", label="Hard"),
+               Patch(facecolor="#DD8452", edgecolor="black", label="Semantic"),
+               *(Patch(facecolor="white", edgecolor="black", hatch=TRACK_HATCH[source],
+                       label=TRACKS[source][0].capitalize()) for source in sources)]
+    ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, -0.48),
+              fontsize=BREAKDOWN_LEGEND_FONTSIZE, ncol=len(handles), framealpha=0.9)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved {output_path}")
+
+
+def write_scope(rates_df, annotated_df, output_dir, suffix, track_label):
+    """The summary CSVs and figures for one scope: both tracks pooled (suffix "") or one."""
+    overall_df = overall_rate_per_model_language(rates_df)
+    variant_df = overall_rate_per_model_variant(rates_df)
+    for name, frame in [("refusal_rates_overall", overall_df), ("refusal_rates_by_variant", variant_df)]:
+        frame.to_csv(output_dir / f"{name}{suffix}.csv", index=False)
+    plot_heatmap(overall_df, output_dir / f"refusal_heatmap{suffix}.png", track_label)
+    plot_per_model_languages(overall_df, output_dir / f"refusal_per_model{suffix}.png", track_label)
+    plot_hard_vs_semantic_per_model(overall_df, output_dir / f"refusal_breakdown{suffix}.png")
+    plot_refusal_by_variant(variant_df, output_dir / f"refusal_by_variant{suffix}.png", track_label)
+    if annotated_df is not None and not annotated_df.empty:
+        per_question_model, question_totals = aggregate_per_question(annotated_df)
+        per_question_model.to_csv(output_dir / f"refusal_rates_per_question{suffix}.csv", index=False)
+        question_totals.to_csv(output_dir / f"refusal_rates_per_question_overall{suffix}.csv", index=False)
+        plot_refusal_per_question(per_question_model, question_totals,
+                                  output_dir / f"refusal_per_question{suffix}.png")
 
 
 def parse_args():
@@ -587,17 +668,35 @@ def parse_args():
     parser.add_argument("--model", default=None,
                         help="Restrict to a single model directory under data/<dataset>_results/.")
     parser.add_argument("--output_dir", default=None,
-                        help="Override output directory (default: data/<dataset>_results/plots/refusals).")
+                        help="Override output directory (default: <results_dir>/plots/refusals).")
+    parser.add_argument("--results_dir", type=Path, default=None,
+                        help="Results tree to read (default: data/<dataset>_results), e.g. "
+                             "data/euandi_2024_results_mt.")
+    parser.add_argument("--replot", action="store_true",
+                        help="No embedding: redraw every figure and summary CSV from the "
+                             "refusal_records.parquet a previous run saved.")
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    results_dir = Path("data") / f"{args.dataset}_results"
+    results_dir = args.results_dir or Path("data") / f"{args.dataset}_results"
+    output_dir = Path(args.output_dir) if args.output_dir else results_dir / "plots" / "refusals"
+    records_path = output_dir / "refusal_records.parquet"
+    if args.replot:
+        if not records_path.exists():
+            raise SystemExit(f"{records_path} not found: run once without --replot first.")
+        annotated_df = pd.read_parquet(records_path)
+        if not args.model:
+            annotated_df = annotated_df[~annotated_df["model"].map(
+                lambda m: any(s in m for s in SKIP_MODEL_SUBSTRINGS))]
+        write_outputs(annotated_df, output_dir)
+        print("\nDone.")
+        return
     if not results_dir.exists():
         raise SystemExit(f"Directory not found: {results_dir}")
 
-    model_dirs = sorted(p for p in results_dir.iterdir() if p.is_dir() and p.name != "plots")
+    model_dirs = sorted(p for p in results_dir.iterdir() if p.is_dir() and not is_output_dir(p.name))
     if args.model:
         model_dirs = [d for d in model_dirs if d.name == args.model]
     else:
@@ -633,22 +732,7 @@ def main():
           f"(threshold = {args.threshold})...")
     annotated_df = annotate_semantic_refusals(records_df, tokenizer, embed_model, args.device, args.threshold)
 
-    rates_df = aggregate_refusal_rates(annotated_df)
-    overall_df = overall_rate_per_model_language(rates_df)
-    variant_df = overall_rate_per_model_variant(rates_df)
-    per_question_model, question_totals = aggregate_per_question(annotated_df)
-
-    output_dir = Path(args.output_dir) if args.output_dir else results_dir / "plots" / "refusals"
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    rates_csv = output_dir / "refusal_rates.csv"
-    rates_df.to_csv(rates_csv, index=False)
-    print(f"\n  Saved {rates_csv}")
-
-    overall_csv = output_dir / "refusal_rates_overall.csv"
-    overall_df.to_csv(overall_csv, index=False)
-    print(f"  Saved {overall_csv}")
-
     examples_path = output_dir / "semantic_refusal_examples.csv"
     examples = (
         annotated_df[annotated_df["semantic_refusal"]]
@@ -658,26 +742,25 @@ def main():
     )
     examples.to_csv(examples_path, index=False)
     print(f"  Saved {examples_path}")
-
-    variant_csv = output_dir / "refusal_rates_by_variant.csv"
-    variant_df.to_csv(variant_csv, index=False)
-    print(f"  Saved {variant_csv}")
-
-    per_question_csv = output_dir / "refusal_rates_per_question.csv"
-    per_question_model.to_csv(per_question_csv, index=False)
-    print(f"  Saved {per_question_csv}")
-
-    per_question_overall_csv = output_dir / "refusal_rates_per_question_overall.csv"
-    question_totals.to_csv(per_question_overall_csv, index=False)
-    print(f"  Saved {per_question_overall_csv}")
-
-    plot_heatmap(overall_df, output_dir / "refusal_heatmap.png")
-    plot_per_model_languages(overall_df, output_dir / "refusal_per_model.png")
-    plot_hard_vs_semantic_per_model(overall_df, output_dir / "refusal_breakdown.png")
-    plot_refusal_by_variant(variant_df, output_dir / "refusal_by_variant.png")
-    plot_refusal_per_question(per_question_model, question_totals, output_dir / "refusal_per_question.png")
-
+    annotated_df.drop(columns=["text"]).to_parquet(records_path, index=False)
+    print(f"  Saved {records_path}")
+    write_outputs(annotated_df, output_dir)
     print("\nDone.")
+
+
+def write_outputs(annotated_df, output_dir):
+    """Every rate CSV and figure, pooled over both tracks and once per track."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    rates_df = aggregate_refusal_rates(annotated_df)
+    rates_csv = output_dir / "refusal_rates.csv"
+    rates_df.to_csv(rates_csv, index=False)
+    print(f"\n  Saved {rates_csv}")
+
+    write_scope(rates_df, annotated_df, output_dir, "", "both tracks")
+    for source, (track_label, suffix) in TRACKS.items():
+        write_scope(rates_df[rates_df["source"] == source],
+                    annotated_df[annotated_df["source"] == source], output_dir, suffix, track_label)
+    plot_breakdown_by_track(rates_df, output_dir / "refusal_breakdown_by_track.png")
 
 
 if __name__ == "__main__":

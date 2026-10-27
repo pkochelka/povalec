@@ -38,11 +38,13 @@ from matplotlib.patches import Patch
 
 from analysis.core import (
     CELL_KEYS,
+    CLASSIFIED_TRACKS,
     DEFAULT_POSITIONS,
     FRAMING_ORDER,
     METHODS,
     POSITION_CHOICES,
     count,
+    is_output_dir,
     load_scores,
     party_sort_key,
     positions_frame,
@@ -295,7 +297,8 @@ def parse_args():
     parser.add_argument("--dataset", default="euandi_2024")
     parser.add_argument("--model", default=None,
                         help="Comma-separated model dirs; default uses every model.")
-    parser.add_argument("--methods", default=",".join(METHODS),
+    parser.add_argument("--methods", default=",".join(
+                            m for m in METHODS if not m.startswith("clf-") or m[4:] in CLASSIFIED_TRACKS),
                         help=f"Comma-separated subset of: {', '.join(METHODS)}")
     parser.add_argument("--factors", default=",".join(FACTORS),
                         help=f"Which factors to draw a figure for: {', '.join(FACTORS)}")
@@ -326,7 +329,7 @@ def main():
     results_dir = Path("data") / f"{args.dataset}_results"
     if not results_dir.exists():
         raise SystemExit(f"Directory not found: {results_dir} (run from the repo root)")
-    model_dirs = sorted(p for p in results_dir.iterdir() if p.is_dir() and p.name != "plots")
+    model_dirs = sorted(p for p in results_dir.iterdir() if p.is_dir() and not is_output_dir(p.name))
     if args.model:
         wanted = {m.strip() for m in args.model.split(",")}
         model_dirs = [d for d in model_dirs if d.name in wanted]

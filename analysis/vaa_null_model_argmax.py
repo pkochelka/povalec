@@ -30,6 +30,18 @@ Outputs (under --out-dir, inside the gitignored data/ tree), each named with a
                                  plain mean agreement per group (not an argmax share),
                                  which the VAA agreement panel of
                                  plot_classified_parties subtracts
+  null_model_agreement_uniform.csv
+                                 the same for the uniform null
+
+The figures and tables subtract either null ("gaussian" = the normal one, or "uniform");
+output_suffix() names the files of both, and NULL_KINDS lists them.
+
+Every vector, real or null, is scored the way plot_argmax_shares scores the models
+(analysis/vaa_scoring.py): on the cluster basis a cell's score is the probability of each
+cluster under one Gaussian per cluster and statement, and null_model_agreement holds the
+mean probability; on the other bases both are the agreement 1 - |position - stance| / 2.
+The posterior outputs are tagged `_posterior` (null_model_argmax_cluster_posterior_shares.csv)
+so they never stand in for distance-scored ones.
 
 Usage, from the repository root with the package installed:
   python analysis/vaa_null_model_argmax.py
@@ -54,6 +66,8 @@ from analysis.plotting.plot_topical_parties import statement_rows_per_axis
 from analysis.vaa_null_model import (
     ALL_MODELS,
     DEFAULT_SIGMA,
+    NULL_KINDS,
+    NULL_SIDE,
     NULLS,
     SIDE_COLORS,
     SIDE_LABELS,
@@ -67,6 +81,7 @@ from analysis.vaa_null_model import (
     positions_tensor,
     summarise_cells,
 )
+from analysis.vaa_scoring import posterior_cells, scoring_suffix, vaa_scoring
 from utils import configure_stdout
 
 configure_stdout()
@@ -86,10 +101,20 @@ def language_vectors(runs):
     return vectors
 
 
-def cell_shares(S, P, party_group, groups, rows):
-    """{group: argmax share} over the (vector, statement) cells of `rows`."""
-    summary = summarise_cells(cell_scores(S[:, rows], P[:, rows], party_group, groups), groups)
-    return {group: share for group, (share, _, _) in summary.items()}
+def scored_cells(S, P, party_group, groups, scoring):
+    """(N, G, statements) score of every cell: the cluster probability under "posterior",
+    the mean agreement over the group's parties under "distance"."""
+    if scoring == "posterior":
+        return posterior_cells(S, groups)
+    return cell_scores(S, P, party_group, groups)
+
+
+def cell_shares(cells, groups, rows):
+    """{group: (argmax share, mean score)} over the (vector, statement) cells of `rows`.
+    The mean score is the mean cluster probability under the posterior scoring -- what
+    plot_argmax_shares --measure probability draws."""
+    summary = summarise_cells(cells[:, :, rows], groups)
+    return {group: (share, mean) for group, (share, mean, _) in summary.items()}
 
 
 def score_source(source, runs, P, party_group, groups, topic_rows, args, rng):
@@ -101,33 +126,47 @@ def score_source(source, runs, P, party_group, groups, topic_rows, args, rng):
     print(f"  {source}: {len(runs)} runs, {paraphrases} paraphrases per language, "
           f"{args.draws} null draws x {paraphrases}")
 
+    scoring = vaa_scoring(args.positions)
+    real_cells = {model: scored_cells(S, P, party_group, groups, scoring)
+                  for model, S in vectors.items()}
+    null_cells = {name: scored_cells(S, P, party_group, groups, scoring)
+                  for name, S in nulls.items()}
     records = []
     for topic, rows in [(WHOLE, np.arange(P.shape[1])), *topic_rows.items()]:
-        for model, S in vectors.items():
-            for group, share in cell_shares(S, P, party_group, groups, rows).items():
+        for model, cells in real_cells.items():
+            for group, (share, mean) in cell_shares(cells, groups, rows).items():
                 records.append(dict(method=source, side="real", model=model, topic=topic,
-                                    ep_group=group, argmax_share=share))
-        for name, S in nulls.items():
-            for group, share in cell_shares(S, P, party_group, groups, rows).items():
+                                    ep_group=group, argmax_share=share, mean_score=mean))
+        for name, cells in null_cells.items():
+            for group, (share, mean) in cell_shares(cells, groups, rows).items():
                 records.append(dict(method=source, side=name, model=ALL_MODELS, topic=topic,
-                                    ep_group=group, argmax_share=share))
-    # The same normal vectors scored as plain mean agreement per group, pooled over the
-    # group's (party, statement) cells -- what plot_classified_parties' VAA agreement
-    # boxes show, so their null is in the same units. No further draws: the argmax
+                                    ep_group=group, argmax_share=share, mean_score=mean))
+    # The same normal and uniform vectors as a plain mean score per group -- what
+    # plot_classified_parties' VAA panel shows, so their null is in the same units: the
+    # mean cluster probability over every cell under "posterior", the mean agreement over
+    # the group's (party, statement) cells under "distance". No further draws: the argmax
     # outputs above stay exactly as they were.
-    agreement = group_scores(nulls["normal"], P, party_group, groups).mean(axis=0)
-    agreement_records = [dict(method=source, ep_group=group, null_agreement=value)
-                         for group, value in zip(groups, agreement)]
+    agreement_records = {}
+    for kind in NULL_KINDS:
+        S = nulls[NULL_SIDE[kind]]
+        if scoring == "posterior":
+            with np.errstate(invalid="ignore"):
+                agreement = np.nanmean(np.moveaxis(null_cells[NULL_SIDE[kind]], 1, 2)
+                                       .reshape(-1, len(groups)), axis=0)
+        else:
+            agreement = group_scores(S, P, party_group, groups).mean(axis=0)
+        agreement_records[kind] = [dict(method=source, ep_group=group, null_agreement=value)
+                                   for group, value in zip(groups, agreement)]
     return pd.DataFrame.from_records(records), agreement_records
 
 
 def with_average(table):
-    """Add method="average": the mean of the two tracks' shares for every (side, model,
-    topic, group) both tracks have."""
-    both = table.groupby(["side", "model", "topic", "ep_group"])["argmax_share"]
-    average = both.agg(["mean", "size"]).reset_index()
-    average = average[average["size"] == len(SOURCES)].drop(columns="size")
-    average = average.rename(columns={"mean": "argmax_share"}).assign(method="average")
+    """Add method="average": the mean of the two tracks' shares and mean scores for every
+    (side, model, topic, group) both tracks have."""
+    keys = ["side", "model", "topic", "ep_group"]
+    grouped = table.groupby(keys)
+    average = grouped[["argmax_share", "mean_score"]].mean()
+    average = average[grouped.size() == len(SOURCES)].reset_index().assign(method="average")
     return pd.concat([table, average], ignore_index=True)
 
 
@@ -162,7 +201,8 @@ def render_summary(table, groups, models, topic_rows, args):
         f"{'separate' if args.no_collapse_ecr_id else 'collapsed'}. Nulls: {args.draws} "
         f"vectors each, every vector the mean of as many draws as a language has "
         f"paraphrases; normal null sigma = {args.sigma:.3f}. The LLM-shuffle null resamples "
-        "each statement from that track's own pooled answers.", "",
+        "each statement from that track's own pooled answers. VAA scoring: "
+        f"{vaa_scoring(args.positions)}.", "",
     ]
     for method in ["average", *SOURCES]:
         lines += [f"## {METHOD_LABEL[method]}, all statements", "",
@@ -225,10 +265,18 @@ def sigma_suffix(sigma):
     return "" if np.isclose(sigma, DEFAULT_SIGMA) else f"_sigma{sigma:g}"
 
 
-def output_suffix(positions, sigma=DEFAULT_SIGMA):
-    """"" for the EP-group basis, "_<basis>" otherwise (see main), plus the sigma tag. The
+def null_suffix(kind, sigma=DEFAULT_SIGMA):
+    """The tag of one null: the sigma tag for the gaussian null ("" at the default sigma),
+    "_uniform" for the uniform one, which has no sigma."""
+    if kind not in NULL_KINDS:
+        raise ValueError(f"unknown null {kind!r}; expected one of {NULL_KINDS}")
+    return sigma_suffix(sigma) if kind == "gaussian" else f"_{kind}"
+
+
+def output_suffix(positions, sigma=DEFAULT_SIGMA, kind="gaussian"):
+    """"" for the EP-group basis, "_<basis>" otherwise (see main), plus the null's tag. The
     argmax table finds the null it subtracts through this too."""
-    return ("" if positions == "ep-group" else f"_{positions}") + sigma_suffix(sigma)
+    return ("" if positions == "ep-group" else f"_{positions}") + null_suffix(kind, sigma)
 
 
 def main():
@@ -252,7 +300,7 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(args.seed)
 
-    tables, agreement_records, models, P = [], [], None, None
+    tables, agreement_records, models, P = [], {kind: [] for kind in NULL_KINDS}, None, None
     for source in SOURCES:
         print(f"Loading real {source} runs")
         runs = load_runs(model_dirs, source)
@@ -266,22 +314,31 @@ def main():
         table, agreement = score_source(source, runs, P, party_group, groups, topic_rows,
                                         args, rng)
         tables.append(table)
-        agreement_records += agreement
+        for kind in NULL_KINDS:
+            agreement_records[kind] += agreement[kind]
     table = with_average(pd.concat(tables, ignore_index=True))
 
     # The EP-group run keeps its original names; any other basis carries it in the name,
     # so a cluster run cannot overwrite the EP-group outputs in the same directory.
-    stem = "null_model_argmax" + output_suffix(args.positions, args.sigma)
+    tag = scoring_suffix(vaa_scoring(args.positions))
+    print(f"VAA scoring: {vaa_scoring(args.positions)}")
+    stem = "null_model_argmax" + output_suffix(args.positions, args.sigma) + tag
     table.to_csv(out_dir / f"{stem}_shares.csv", index=False)
     summary = render_summary(table, groups, models, topic_rows, args)
     (out_dir / f"{stem}_summary.md").write_text(summary, encoding="utf-8")
     plot_shares(table, groups, models, out_dir / f"{stem}_shares.png")
-    agreement_path = out_dir / f"null_model_agreement{output_suffix(args.positions, args.sigma)}.csv"
-    pd.DataFrame(agreement_records).to_csv(agreement_path, index=False)
+    # The uniform null has no sigma, so only a default-sigma run writes its agreement: a
+    # sensitivity run (--sigma 0.25) must not overwrite the file the figures read.
+    kinds = NULL_KINDS if np.isclose(args.sigma, DEFAULT_SIGMA) else ("gaussian",)
+    agreement_paths = []
+    for kind in kinds:
+        path = out_dir / f"null_model_agreement{output_suffix(args.positions, args.sigma, kind)}{tag}.csv"
+        pd.DataFrame(agreement_records[kind]).to_csv(path, index=False)
+        agreement_paths.append(path.name)
     print()
     print(summary.split("\n## VAA average per topic")[0])
     print(f"\nWrote {out_dir / f'{stem}_shares.csv'}, {stem}_summary.md, {stem}_shares.png, "
-          f"{agreement_path.name}")
+          f"{', '.join(agreement_paths)}")
 
 
 if __name__ == "__main__":

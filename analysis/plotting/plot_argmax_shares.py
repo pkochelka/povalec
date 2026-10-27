@@ -17,17 +17,32 @@ figures. This puts them side by side, one figure per model:
 "Argmax share" is the share of units won by a group. For the classifier that is a
 predicted party per (text, language, prompt variant), which is what plot_classified_parties
 already counts. The two euandi methods have no argmax of their own, so the analogue is
-built here: per (statement, language) the group with the highest mean agreement wins the
-cell, and cells with a tie split their credit equally, so the shares still sum to 1.
+built here: per (statement, language) the group with the highest score wins the cell, and
+cells with a tie split their credit equally, so the shares still sum to 1. On the cluster
+basis the score is the probability that the stance belongs to each cluster, one Gaussian
+per cluster and statement (analysis/vaa_scoring.py); on the other bases it is the mean
+agreement 1 - |position - stance| / 2.
 
-By default every share is drawn minus its 0-centered normal null (analysis/null_baseline.py):
-the share a group would win if the stances were random around the neutral answer, which
-is how much of a raw share is only the group's position near the centre. Every figure,
-breakdowns included, then shows signed differences in percentage points -- each topic and
-language minus that slice's own null -- and the method stacks diverge from zero: what a
-method adds goes up, what it takes away goes down, and a black tick marks their net, the
-mean over methods. --absolute draws the raw shares as before. argmax_share_methods.csv
-always holds the raw shares; argmax_share_methods_minus_null.csv the differences.
+By default every share is drawn minus its null (analysis/null_baseline.py), once per null
+in --null: the 0-centered normal ("gaussian"), the uniform one, and "max", the largest
+of the normal nulls at four sigmas and the uniform null per group (a conservative baseline
+when the models' own stance distribution is unknown). A null share is what a
+group would win if the stances were random, which is how much of a raw share is only the
+group's position relative to the centre. Every figure, breakdowns included, then shows
+signed differences in percentage points -- each topic and language minus that slice's own
+null -- and the method stacks diverge from zero: what a method adds goes up, what it takes
+away goes down, and a black tick marks their net, the mean over methods. The figures of
+each null go to plots_<null>/ (the dataset's and every model's), e.g. plots_gaussian/ and
+plots_uniform/, with argmax_share_methods_minus_null.csv next to them. --absolute draws
+the raw shares into plots/ instead. plots/argmax_share_methods.csv always holds the raw
+shares.
+
+--measure probability draws the companion figures: every method's mean probability per
+group instead of its argmax share -- the classifier's mean softmax probability, and for the
+two VAA tracks the mean cluster probability over the cells (posterior scoring only, so the
+cluster basis). Same figures, slices and nulls (each method's mean-probability null), with
+`meanprob_` in place of `argmax_` in every file name: plots/meanprob_share_methods.csv,
+plots_gaussian/meanprob_all_models_party_distribution.png, ...
 """
 import argparse
 import itertools
@@ -40,20 +55,25 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from analysis.core.labels import use_short_party_labels
+from analysis.core.labels import group_noun, use_short_party_labels
 use_short_party_labels()   # cluster nicknames in every label (utils.PARTY_SHORT)
 from matplotlib import patheffects
 from matplotlib.patches import Patch
 
-from analysis.core import MODEL_DISPLAY_NAME, model_display_name
+from analysis.core import (
+    CLASSIFIED_TRACKS, MODEL_DISPLAY_NAME, is_output_dir, model_display_name,
+)
 from analysis.plotting import plot_classified_parties as pcp
 from analysis.plotting.plot_topical_parties import statement_rows_per_axis
 from analysis.evaluate_euandi import (
     DEFAULT_POSITIONS, POSITION_CHOICES, load_party_positions, positions_path,
 )
-from analysis.null_baseline import NullBaseline, minus_null
+from analysis.null_baseline import (
+    SUBTRACTED_NULLS, NullBaseline, minus_null, output_dir_name,
+)
 from analysis.vaa_agreement_ci import stance_frame_for
 from analysis.vaa_null_model import DEFAULT_SIGMA
+from analysis.vaa_scoring import score_long, vaa_scoring
 from utils import ALL_LANGS, AXES, configure_stdout
 
 configure_stdout()
@@ -65,6 +85,8 @@ METHODS = [
     ("reasons_clf", "classified reasons", "classifier"),
     ("speeches_clf", "classified open-ended", "classifier"),
 ]
+# Classified reasons only when analysis.core.CLASSIFIED_TRACKS includes them.
+METHODS = [m for m in METHODS if m[2] != "classifier" or m[0].removesuffix("_clf") in CLASSIFIED_TRACKS]
 METHOD_ORDER = [key for key, _, _ in METHODS]
 METHOD_LABEL = {key: label for key, label, _ in METHODS}
 METHOD_COLORS = {
@@ -112,11 +134,30 @@ def language_colors(languages):
 
 
 ARGMAX_SHARE_LABEL = "Argmax share"
+
+# What a bar measures; main() sets it from --measure. "argmax" is the share of units a group
+# wins, "probability" the mean probability a group gets over the same units. The second
+# writes every file with a meanprob_ prefix (measure_path) and relabels the axes.
+MEASURE = "argmax"
+VALUE_COLUMN = {"argmax": "argmax_share", "probability": "mean_probability"}
+PROBABILITY_LABELS = {ARGMAX_SHARE_LABEL: "Mean probability", "Share": "Probability",
+                      "Mean share": "Mean probability"}
+
+
+def measure_path(path):
+    """`path` for the current measure: argmax_* becomes meanprob_* under "probability"."""
+    if MEASURE == "probability":
+        return path.with_name(path.name.replace("argmax_", "meanprob_", 1))
+    return path
+
+
+def measure_label(label):
+    return PROBABILITY_LABELS.get(label, label) if MEASURE == "probability" else label
 POOLED_LABEL = "pooled"
 AVERAGE_LABEL = "average of methods"
 
-# Whether the shares are drawn minus their 0-centered null; main() sets it from
-# --absolute. Every value is then a signed difference in percentage points, so the axes,
+# Whether the shares are drawn minus a null; main() sets it per null it draws, and to
+# False for --absolute. Every value is then a signed difference in percentage points, so the axes,
 # value labels and stacks below all read it.
 MINUS_NULL = True
 
@@ -124,12 +165,14 @@ MINUS_NULL = True
 def units(label):
     """An axis label with the unit of the current mode: "Argmax share (%)" or, with the
     null subtracted, "Argmax share − null (pp)"."""
+    label = measure_label(label)
     return f"{label} − null (pp)" if MINUS_NULL else f"{label} (%)"
 
 
 def short_units(label):
     """The same for the panels whose height is set by their rotated y label: "Share (%)",
     or "Δ share (pp)" rather than the longer "Share − null (pp)"."""
+    label = measure_label(label)
     return f"Δ {label.lower()} (pp)" if MINUS_NULL else f"{label} (%)"
 
 
@@ -267,8 +310,16 @@ COLUMN_LAYOUT = Layout(bar_span=0.22, aspect=1.8, font_scale=2.5, legend_scale=0
 # of the figure that carries no data. Kept apart from COLUMN_LAYOUT rather than folded into
 # it so the thirteen per-model figures, which are browsed rather than printed as a set, keep
 # the legends they were drawn with.
+# The y axis is set well under the titles: at COLUMN_LAYOUT's size the rotated label ran the
+# whole height of a panel and, with the tick numbers, took a sixth of the figure's width out
+# of the bars. The groups on the x axis are four short names, so they sit level -- a tilted
+# label that size hangs a third of a panel below the axes.
 LANGUAGE_PANEL_LAYOUT = COLUMN_LAYOUT._replace(legend_scale=0.68, legend_gap=0.012,
-                                               side_by_side_legends=True)
+                                               side_by_side_legends=True, tick_rotation=0,
+                                               xtick_scale=0.7, yaxis_scale=0.6)
+# Its transpose has the languages along the x axis instead: two-letter codes, but 24 of
+# them, so they are set smaller again to sit level in their slots without touching.
+LANGUAGE_BY_LANG_PANEL_LAYOUT = LANGUAGE_PANEL_LAYOUT._replace(xtick_scale=0.55)
 # For the stacked per-topic panels, which are the opposite problem to the per-language
 # ones: 6 EP groups by 7 topics is only 42 bars, so the figure does not need the 18-inch
 # floor and is better off without it -- at ~10 inches the reduction to a ~3.3-inch column
@@ -314,10 +365,10 @@ TOPIC_GRID_LAYOUT = TOPIC_PANEL_LAYOUT._replace(aspect=2.5, fit_legends=False,
 
 # The two models the thesis prints the per-language figure for, in panel order. Any other
 # pair is one --panel-models away; these are only the default.
-DEFAULT_PANEL_MODELS = ("grok-4.5", "gemma-4-31b")
+DEFAULT_PANEL_MODELS = ("gpt-5.6-luna", "grok-4.5")
 # The per-topic figure prints a different pair, so it gets its own flag rather than
 # sharing --panel-models.
-DEFAULT_TOPIC_PANEL_MODELS = ("granite-4.1-8b", "gemini3.5-flash")
+DEFAULT_TOPIC_PANEL_MODELS = ("gpt-oss-120b", "grok-4.5")
 # Rows x columns of the per-topic grid, and the models it covers: everything except the
 # pair above, which already has the stacked figure of its own. `None` rows means "as many
 # as the models need", counting the one spare cell their shared legends go in -- see
@@ -361,10 +412,16 @@ def language_of_stance_column(column):
     return stem
 
 
+# How a VAA stance is scored against the groups (analysis/vaa_scoring.py); main() sets it
+# from --positions, so the cells and the null subtracted from them agree.
+SCORING = "distance"
+
+
 def cell_agreement(stance_df, languages, party_df):
-    """Mean agreement per (statement, language, EP group) -- one row per cell a group
-    can win. Kept as a mean over the group's parties so a group with more parties in
-    the positions file does not count more, matching evaluate_euandi."""
+    """Score per (statement, language, EP group) -- one row per cell a group can win: the
+    cluster probability under SCORING "posterior", else the mean agreement. Kept as a mean
+    over the group's parties so a group with more parties in the positions file does not
+    count more, matching evaluate_euandi (a cluster is a single row)."""
     stance_columns = [f"{language}_stance" for language in languages]
     merged = party_df.merge(stance_df[["statement_idx", *stance_columns]], on="statement_idx")
     long = merged.melt(
@@ -372,7 +429,8 @@ def cell_agreement(stance_df, languages, party_df):
         value_vars=stance_columns, var_name="language", value_name="llm_stance",
     )
     long["language"] = long["language"].map(language_of_stance_column)
-    long["agreement"] = 1 - (long["normalized_answer"] - long["llm_stance"]).abs() / 2
+    long["agreement"] = score_long(long, ["statement_idx", "language"], SCORING,
+                                   stance="llm_stance")
     return (
         long.dropna(subset=["agreement"])
         .groupby(["statement_idx", "language", "ep_group"], as_index=False)["agreement"]
@@ -431,7 +489,8 @@ def shares_from_frames(long_frames, cell_frames, rows=None, language=None):
             long_df = long_df[long_df["row_idx"].isin(rows)]
         if language is not None:
             long_df = long_df[long_df["language"] == language]
-        share = pcp.predicted_party_share(long_df)
+        share = (pcp.mean_probability_per_party(long_df) if MEASURE == "probability"
+                 else pcp.predicted_party_share(long_df))
         if not share.empty:
             shares[key] = share
     for key, cells in cell_frames.items():
@@ -439,7 +498,8 @@ def shares_from_frames(long_frames, cell_frames, rows=None, language=None):
             cells = cells[cells["statement_idx"].isin(rows)]
         if language is not None:
             cells = cells[cells["language"] == language]
-        share = vaa_argmax_share(cells)
+        share = (cells.groupby("ep_group")["agreement"].mean() if MEASURE == "probability"
+                 else vaa_argmax_share(cells))
         if not share.empty:
             shares[key] = share
     return shares
@@ -790,7 +850,7 @@ def plot_methods_argmax_share(share_per_method, output_path, ylim=None):
                fontsize=LEGEND_FONTSIZE, title="method",
                title_fontsize=LEGEND_TITLE_FONTSIZE, framealpha=0.9,
                ncol=min(len(methods), 4))
-    pcp.save_figure(fig, output_path, bbox_inches="tight")
+    pcp.save_figure(fig, measure_path(output_path), bbox_inches="tight")
 
 
 def shares_for_variant(shares_by_method_variant, variant_label):
@@ -829,7 +889,7 @@ def summary_records(model_name, shares_by_method_variant):
             "method": METHOD_LABEL[method],
             "variant": variant_label,
             "ep_group": party,
-            "argmax_share": float(share_value),
+            VALUE_COLUMN[MEASURE]: float(share_value),
         }
         for (method, variant_label), share in sorted(shares_by_method_variant.items())
         for party, share_value in share.items()
@@ -842,7 +902,7 @@ def summary_records(model_name, shares_by_method_variant):
                 "method": AVERAGE_LABEL,
                 "variant": variant_label,
                 "ep_group": party,
-                "argmax_share": float(share_value),
+                VALUE_COLUMN[MEASURE]: float(share_value),
             }
             for party, share_value in average.items()
         ]
@@ -883,8 +943,8 @@ def topic_labels_with_counts(axes_present, topic_counts):
 
 
 def plot_model(model_dir, shares_by_method_variant, per_axis, per_language, topic_counts,
-               ylim, topic_ylim, language_ylim):
-    plots_dir = pcp.plots_dir_for(model_dir)
+               ylim, topic_ylim, language_ylim, plots_name="plots"):
+    plots_dir = pcp.plots_dir_for(model_dir, plots_name)
     for variant_label in variants_present(shares_by_method_variant):
         plot_methods_argmax_share(
             shares_for_variant(shares_by_method_variant, variant_label),
@@ -942,7 +1002,7 @@ def plot_slice_both_ways(per_slice, plots_dir, ylim, *, stem, transposed_stem,
         per_party, plots_dir / f"argmax_share_{transposed_stem}_pooled.png", ylim,
         series_order=pcp.ordered_parties_present(per_party),
         series_colors={party: pcp.color_for_party(party) for party in per_party},
-        series_legend_title="EP group", category_order=slice_order,
+        series_legend_title=group_noun(per_party), category_order=slice_order,
         category_labels=slice_labels, layout=layout,
     )
 
@@ -975,17 +1035,15 @@ def stacked_language_panels(languages_by_model, panel_model_dirs, dataset_plots_
         series_order=languages, series_colors=colors, series_legend_title="language",
         series_ncol=min(len(languages), 7), layout=LANGUAGE_PANEL_LAYOUT,
     )
+    parties = pcp.ordered_parties_present(
+        {party for _, per_language in panels for party in transposed_shares(per_language)})
     plot_stacked_split_bars(
         [(title, transposed_shares(per_language)) for title, per_language in panels],
         dataset_plots_dir / "argmax_share_languages_by_lang_pooled_panels.png", ylim,
-        series_order=pcp.ordered_parties_present(
-            {party for _, per_language in panels
-             for party in transposed_shares(per_language)}),
-        series_colors={party: pcp.color_for_party(party)
-                       for _, per_language in panels
-                       for party in transposed_shares(per_language)},
-        series_legend_title="EP group", category_order=languages,
-        layout=LANGUAGE_PANEL_LAYOUT,
+        series_order=parties,
+        series_colors={party: pcp.color_for_party(party) for party in parties},
+        series_legend_title=group_noun(parties), category_order=languages,
+        layout=LANGUAGE_BY_LANG_PANEL_LAYOUT,
     )
 
 
@@ -1010,7 +1068,7 @@ def stacked_topic_panels(topics_by_model, topic_counts_by_model, panel_model_dir
         panels, dataset_plots_dir / "argmax_share_topics_by_topic_pooled_panels.png", ylim,
         series_order=parties,
         series_colors={party: pcp.color_for_party(party) for party in parties},
-        series_legend_title="EP group", category_order=axes_present,
+        series_legend_title=group_noun(parties), category_order=axes_present,
         category_labels=topic_labels_with_counts(axes_present, merged_counts),
         # Three across, not six: a legend wider than the panels makes bbox_inches="tight"
         # widen the whole figure to fit it, and every inch of width added that way is an
@@ -1069,7 +1127,7 @@ def grid_topic_panels(topics_by_model, topic_counts_by_model, grid_model_dirs,
         ylim, shape=shape,
         series_order=parties,
         series_colors={party: pcp.color_for_party(party) for party in parties},
-        series_legend_title="EP group", category_order=axes_present,
+        series_legend_title=group_noun(parties), category_order=axes_present,
         category_labels=topic_labels_with_counts(axes_present, merged_counts),
         series_ncol=3,
         layout=TOPIC_GRID_LAYOUT,
@@ -1290,7 +1348,8 @@ def draw_split_bar_panel(ax, share_per_series_and_method, series, methods, categ
     ax.set_xticks(category_positions)
     if show_xticklabels:
         ax.set_xticklabels([display_name(category, category_labels) for category in categories],
-                           rotation=layout.tick_rotation, ha="right",
+                           rotation=layout.tick_rotation,
+                           ha="right" if layout.tick_rotation else "center",
                            fontsize=TICK_FONTSIZE * layout.font_scale * layout.xtick_scale)
     else:
         ax.set_xticklabels([])
@@ -1397,7 +1456,7 @@ def plot_split_bars(share_per_series_and_method, output_path, ylim=None,
         legend_below(ax, series_handles, title, ncol=series_ncol,
                      y_offset=-0.10 - 0.06 * (method_rows + 1),
                      font_scale=layout.font_scale)
-    pcp.save_figure(fig, output_path, bbox_inches="tight")
+    pcp.save_figure(fig, measure_path(output_path), bbox_inches="tight")
     plt.rcParams["hatch.linewidth"] = matplotlib.rcParamsDefault["hatch.linewidth"]
 
 
@@ -1451,7 +1510,7 @@ def plot_stacked_split_bars(panels, output_path, ylim=None,
     stack_legends_below(axes[-1], blocks, layout.font_scale * layout.legend_scale,
                         gap=layout.legend_gap / len(panels),
                         side_by_side=layout.side_by_side_legends)
-    pcp.save_figure(fig, output_path, bbox_inches="tight")
+    pcp.save_figure(fig, measure_path(output_path), bbox_inches="tight")
     plt.rcParams["hatch.linewidth"] = matplotlib.rcParamsDefault["hatch.linewidth"]
 
 
@@ -1621,7 +1680,7 @@ def plot_grid_split_bars(panels, output_path, ylim=None, *, shape, series_order=
         above_index = len(panels) - ncols
         legends_in_cell(spare_axes[0], blocks, layout.font_scale * layout.legend_scale,
                         overhang_from=flat_axes[above_index] if above_index >= 0 else None)
-    pcp.save_figure(fig, output_path, tight_layout=False, bbox_inches="tight")
+    pcp.save_figure(fig, measure_path(output_path), tight_layout=False, bbox_inches="tight")
     plt.rcParams["hatch.linewidth"] = matplotlib.rcParamsDefault["hatch.linewidth"]
 
 
@@ -1708,11 +1767,23 @@ def parse_args():
     parser.add_argument("--results_dir", type=Path, default=None,
                         help="Read this results directory instead of the --dataset one.")
     parser.add_argument("--absolute", action="store_true",
-                        help="Draw the raw argmax shares instead of the shares minus their "
-                             "0-centered null.")
+                        help="Draw the raw argmax shares (into plots/) instead of the shares "
+                             "minus their nulls.")
+    parser.add_argument("--measure", default="argmax", choices=list(VALUE_COLUMN),
+                        help="argmax: the share of units each group wins (default); "
+                             "probability: the mean probability each group gets -- the "
+                             "companion figures, written as meanprob_* (VAA tracks need the "
+                             "posterior scoring, i.e. --positions cluster).")
+    parser.add_argument("--null", nargs="+", default=list(SUBTRACTED_NULLS),
+                        choices=SUBTRACTED_NULLS,
+                        help="The nulls to subtract, one set of figures each, into "
+                             "plots_<null>/ (default: %(default)s). max = per group the "
+                             "largest of the normal nulls at sigma 0.25/0.5/0.75/1 and the "
+                             "uniform null.")
     parser.add_argument("--sigma", type=float, default=DEFAULT_SIGMA,
-                        help="Sigma of the null to subtract, in stance units (default "
-                             "%(default)s = one Likert step); its files must exist.")
+                        help="Sigma of the gaussian null, in stance units (default "
+                             "%(default)s = one Likert step); its files must exist. A "
+                             "non-default sigma draws into plots_gaussian_sigma<value>/.")
     parser.add_argument("--null_dir", type=Path, default=None,
                         help="Where the null-model CSVs are. Default: "
                              "<results_dir>/tables/null_model")
@@ -1722,14 +1793,15 @@ def parse_args():
 def subtract_null(shares, per_axis, per_language, baseline):
     """The three share families of one model minus their nulls: every (method, framing)
     over all statements, and the framing-pooled shares per topic and per language minus
-    that slice's own null."""
-    shares = {(method, variant): minus_null(share, baseline.share(method, variant))
+    that slice's own null -- the argmax-share null or the mean-probability one, as
+    MEASURE says."""
+    null = baseline.mean_probability if MEASURE == "probability" else baseline.share
+    shares = {(method, variant): minus_null(share, null(method, variant))
               for (method, variant), share in shares.items()}
-    per_axis = {axis: {method: minus_null(share, baseline.share(method, POOLED_LABEL,
-                                                                "topic", axis))
+    per_axis = {axis: {method: minus_null(share, null(method, POOLED_LABEL, "topic", axis))
                        for method, share in per_method.items()}
                 for axis, per_method in per_axis.items()}
-    per_language = {language: {method: minus_null(share, baseline.share(
+    per_language = {language: {method: minus_null(share, null(
                                    method, POOLED_LABEL, "language", language))
                                for method, share in per_method.items()}
                     for language, per_method in per_language.items()}
@@ -1737,43 +1809,82 @@ def subtract_null(shares, per_axis, per_language, baseline):
 
 
 def main():
-    global MINUS_NULL
+    global MINUS_NULL, SCORING, MEASURE
     args = parse_args()
-    MINUS_NULL = not args.absolute
+    SCORING = vaa_scoring(args.positions)
+    MEASURE = args.measure
+    print(f"VAA scoring: {SCORING}; measure: {MEASURE}")
+    if MEASURE == "probability" and SCORING != "posterior":
+        # Skipped, not failed, so analyze_all can list the companion for every basis.
+        print("--measure probability: skipped -- the VAA tracks are on the distance score "
+              f"(--positions {args.positions}), so they have no probability to average.")
+        return
     results_dir = args.results_dir or Path("data") / f"{args.dataset}_results"
     if not results_dir.exists():
         raise SystemExit(f"Directory not found: {results_dir}")
     # Loaded before any model is processed, so a missing null stops the run up front.
-    baseline = (NullBaseline.load(args.null_dir or results_dir / "tables" / "null_model",
-                                  args.positions, args.sigma)
-                if MINUS_NULL else None)
-    if baseline:
-        print(f"Drawing shares minus the 0-centered null ({baseline.source})")
+    null_dir = args.null_dir or results_dir / "tables" / "null_model"
+    baselines = ({} if args.absolute else
+                 {kind: NullBaseline.load(null_dir, args.positions, args.sigma, kind)
+                  for kind in dict.fromkeys(args.null)})
 
     model_dirs = sorted(p for p in results_dir.iterdir()
-                        if p.is_dir() and p.name not in ("plots", "tables"))
+                        if p.is_dir() and not is_output_dir(p.name))
     if args.model:
         model_dirs = [d for d in model_dirs if d.name in set(args.model)]
     if not model_dirs:
         raise SystemExit("No model directories found.")
 
     party_df = party_positions_frame(model_dirs, args.positions)
-    shares_by_model, topics_by_model, languages_by_model, topic_counts_by_model = {}, {}, {}, {}
-    raw_records = []
+    raw_by_model, raw_records = {}, []
     for model_dir in model_dirs:
         shares, per_axis, per_language, topic_counts = collect_model_shares(
             model_dir, party_df, args.dataset)
         if shares:
             raw_records += summary_records(model_dir.name, shares)
-            if baseline:
-                shares, per_axis, per_language = subtract_null(
-                    shares, per_axis, per_language, baseline)
-            shares_by_model[model_dir] = shares
-            topics_by_model[model_dir] = per_axis
-            languages_by_model[model_dir] = per_language
-            topic_counts_by_model[model_dir] = topic_counts
-    if not shares_by_model:
+            raw_by_model[model_dir] = (shares, per_axis, per_language, topic_counts)
+    if not raw_by_model:
         raise SystemExit("No model produced argmax shares.")
+
+    # The raw shares are written whatever is drawn: argmax_share_table.py and the null
+    # scripts compare against them.
+    summary_path = measure_path(results_dir / "plots" / "argmax_share_methods.csv")
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(raw_records).to_csv(summary_path, index=False)
+    print(f"\n  Wrote {summary_path}")
+
+    if args.absolute:
+        MINUS_NULL = False
+        draw_all(raw_by_model, "plots", results_dir, args)
+    for kind, baseline in baselines.items():
+        MINUS_NULL = True
+        plots_name = output_dir_name("plots", kind, args.sigma)
+        print(f"\n=== Shares minus the {kind} null ({baseline.source}) -> {plots_name}/")
+        subtracted = {model_dir: (*subtract_null(shares, per_axis, per_language, baseline),
+                                  topic_counts)
+                      for model_dir, (shares, per_axis, per_language, topic_counts)
+                      in raw_by_model.items()}
+        draw_all(subtracted, plots_name, results_dir, args)
+        relative_path = measure_path(results_dir / plots_name
+                                     / "argmax_share_methods_minus_null.csv")
+        pd.DataFrame([record for model_dir, (shares, *_) in subtracted.items()
+                      for record in summary_records(model_dir.name, shares)]
+                     ).to_csv(relative_path, index=False)
+        print(f"  Wrote {relative_path}")
+
+    print("\nDone.")
+
+
+def draw_all(by_model, plots_name, results_dir, args):
+    """Every figure of one view -- raw shares or shares minus one null -- into
+    <model>/<plots_name>/ and <results_dir>/<plots_name>/. `by_model` maps a model
+    directory to its (shares, per_axis, per_language, topic_counts)."""
+    shares_by_model = {model_dir: values[0] for model_dir, values in by_model.items()}
+    topics_by_model = {model_dir: values[1] for model_dir, values in by_model.items()}
+    languages_by_model = {model_dir: values[2] for model_dir, values in by_model.items()}
+    topic_counts_by_model = {model_dir: values[3] for model_dir, values in by_model.items()}
+    dataset_plots_dir = results_dir / plots_name
+    dataset_plots_dir.mkdir(parents=True, exist_ok=True)
 
     ylim = share_limits(shares_by_model)
     topic_ylim = stacked_series_limits(topics_by_model)
@@ -1787,11 +1898,11 @@ def main():
         print(f"\nProcessing: {model_dir.name}")
         plot_model(model_dir, shares, topics_by_model[model_dir],
                    languages_by_model[model_dir], topic_counts_by_model[model_dir],
-                   ylim, topic_ylim, language_ylim)
+                   ylim, topic_ylim, language_ylim, plots_name)
 
     if len(shares_by_model) > 1:
         print("\nCross-model argmax shares:")
-        plot_cross_model_argmax_shares(shares_by_model, results_dir / "plots", ylim)
+        plot_cross_model_argmax_shares(shares_by_model, dataset_plots_dir, ylim)
 
     # Keyed by name so the panels come out in the order they were asked for rather than
     # in the order the directories were listed.
@@ -1806,7 +1917,7 @@ def main():
         print(f"\nStacked per-language panels (y-axis {limits_text(panel_language_ylim)} "
               f"over these models alone):"
               if panel_language_ylim else "\nStacked per-language panels:")
-        stacked_language_panels(languages_by_model, panel_dirs, results_dir / "plots",
+        stacked_language_panels(languages_by_model, panel_dirs, dataset_plots_dir,
                                 panel_language_ylim)
 
     topic_panel_dirs = [by_name[name] for name in args.topic_panel_models if name in by_name]
@@ -1821,7 +1932,7 @@ def main():
               f"over these models alone):"
               if panel_topic_ylim else "\nStacked per-topic panels:")
         stacked_topic_panels(topics_by_model, topic_counts_by_model, topic_panel_dirs,
-                             results_dir / "plots", panel_topic_ylim)
+                             dataset_plots_dir, panel_topic_ylim)
 
     # Everything the stacked pair does not already print, unless asked for by name.
     grid_names = (args.topic_grid_models if args.topic_grid_models is not None
@@ -1838,23 +1949,8 @@ def main():
               f"{limits_text(grid_topic_ylim)} over these models alone):"
               if grid_topic_ylim else f"\nPer-topic grid over {len(grid_dirs)} model(s):")
         grid_topic_panels(topics_by_model, topic_counts_by_model, grid_dirs,
-                          results_dir / "plots", grid_topic_ylim,
+                          dataset_plots_dir, grid_topic_ylim,
                           shape=(None, args.topic_grid_columns))
-
-    # The raw shares are written whatever was drawn: argmax_share_table.py and the null
-    # scripts compare against them. The differences go next to them.
-    summary_path = results_dir / "plots" / "argmax_share_methods.csv"
-    summary_path.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(raw_records).to_csv(summary_path, index=False)
-    print(f"\n  Wrote {summary_path}")
-    if baseline:
-        relative_path = summary_path.with_name("argmax_share_methods_minus_null.csv")
-        pd.DataFrame([record for model_dir, shares in shares_by_model.items()
-                      for record in summary_records(model_dir.name, shares)]
-                     ).to_csv(relative_path, index=False)
-        print(f"  Wrote {relative_path}")
-
-    print("\nDone.")
 
 
 if __name__ == "__main__":

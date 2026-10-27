@@ -81,6 +81,11 @@ MEAN_COLOR = "#111111"
 # Sequential = one hue, light -> dark.
 USER_CMAP = matplotlib.colors.LinearSegmentedColormap.from_list(
     "eu_blue", ["#ffffff", EU_BLUE])
+# Where the country-mean inset sits, in axes fractions, per anchor basis: the band right
+# of the legend is free of EP-group anchors but holds the Sov-right cluster, which leaves
+# the lower-right corner (where ID sits on the EP-group basis).
+INSET_BOUNDS = [0.44, 0.04, 0.34, 0.34]
+INSET_BOUNDS_CLUSTER = [0.66, 0.05, 0.30, 0.30]
 
 
 def load_user_stances(path: str, min_answered: int) -> pd.DataFrame:
@@ -135,7 +140,8 @@ def style_inset(ax, inset, means, pad=0.06):
 
 
 def plot_user_compass(positions, x_dim, y_dim, one_sided, out_path,
-                      by_language=False, bins=140, anchors=None):
+                      by_language=False, bins=140, anchors=None, anchor_label="EP group",
+                      inset_bounds=INSET_BOUNDS):
     fig, ax = plt.subplots(figsize=(9, 9))
     setup_compass(ax, x_dim, y_dim, one_sided)
 
@@ -158,9 +164,8 @@ def plot_user_compass(positions, x_dim, y_dim, one_sided, out_path,
                  for lang, group in positions.groupby("language")}
         # The country means sit inside a few hundredths of each other, so they
         # get an inset of their own; on the full compass they are dots only. It
-        # sits right of the legend, in the one band of the panel no EP-group
-        # anchor falls into.
-        inset = ax.inset_axes([0.44, 0.04, 0.34, 0.34])
+        # sits where no anchor falls (INSET_BOUNDS).
+        inset = ax.inset_axes(inset_bounds)
         for lang, mean in means.items():
             for target, size in ((ax, 60), (inset, 90)):
                 target.scatter(*mean, s=size, marker="o", facecolor=colors[lang],
@@ -183,6 +188,7 @@ def plot_user_compass(positions, x_dim, y_dim, one_sided, out_path,
                           label="all users"))
     party_handle = draw_party_anchors(ax, anchors, x_dim, y_dim, color=EU_YELLOW)
     if party_handle is not None:
+        party_handle.set_label(anchor_label)
         handles.append(party_handle)
 
     # Labels are kept short on purpose: at 15pt a wider box reaches the GUE/NGL
@@ -192,8 +198,10 @@ def plot_user_compass(positions, x_dim, y_dim, one_sided, out_path,
               title_fontsize=FONTSIZE, title="mean position")
     fig.tight_layout()
     fig.savefig(out_path, dpi=300, bbox_inches="tight")
+    # The paper includes the compass as a PDF.
+    fig.savefig(out_path.with_suffix(".pdf"), bbox_inches="tight")
     plt.close(fig)
-    print(f"  Saved {out_path}")
+    print(f"  Saved {out_path} (+ .pdf)")
 
 
 def plot_user_violins(positions, dims, one_sided, out_path, rng, sample=60_000):
@@ -233,6 +241,9 @@ def plot_user_violins(positions, dims, one_sided, out_path, rng, sample=60_000):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", default="euandi_2024")
+    parser.add_argument("--results_dir", type=Path, default=None,
+                        help="Results directory the figures go under. Default: "
+                             "data/<dataset>_results")
     parser.add_argument("--users", default=USER_DATASET_PATH)
     parser.add_argument("--x-dim", default="Left-Right")
     parser.add_argument("--y-dim", default="Europe")
@@ -263,7 +274,8 @@ def main():
     print(f"Languages: {sorted(set(stances['language']))}")
 
     positions = user_positions(stances, questionnaire, dims)
-    out_dir = Path("data") / f"{args.dataset}_results" / "plots" / "users"
+    results_dir = args.results_dir or Path("data") / f"{args.dataset}_results"
+    out_dir = results_dir / "plots" / "users"
     out_dir.mkdir(parents=True, exist_ok=True)
     positions.to_csv(out_dir / "user_positions.csv", index=False)
 
@@ -271,11 +283,15 @@ def main():
     print(positions[dims].mean().round(3).to_string())
 
     anchors = None if args.parties == "none" else party_anchors(questionnaire, dims, args.parties)
+    anchor_label = "EP cluster" if args.parties == "cluster" else "EP group"
     plot_user_compass(positions, args.x_dim, args.y_dim, one_sided,
-                      out_dir / "political_compass_users.png", anchors=anchors)
+                      out_dir / "political_compass_users.png", anchors=anchors,
+                      anchor_label=anchor_label)
     plot_user_compass(positions, args.x_dim, args.y_dim, one_sided,
                       out_dir / "political_compass_users_by_language.png",
-                      by_language=True, anchors=anchors)
+                      by_language=True, anchors=anchors, anchor_label=anchor_label,
+                      inset_bounds=INSET_BOUNDS_CLUSTER if args.parties == "cluster"
+                      else INSET_BOUNDS)
     plot_user_violins(positions, dims, one_sided,
                       out_dir / "dimension_violins_users.png",
                       np.random.default_rng(args.seed), args.violin_sample)

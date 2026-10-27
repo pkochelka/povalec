@@ -13,7 +13,7 @@ import pandas as pd
 
 from utils import VARIANTS, VARIANT_LABELS, flip_likert
 from analysis.sample_speeches_for_labeling import STANCE_BIN_EDGES
-from analysis.core import model_display_name
+from analysis.core import is_output_dir, model_display_name
 
 VARIANT_COLORS = {"base": "#2CA02C", "negated": "#D62728"}
 # On the cross-model panel the colour is spent on the model, so the framing split
@@ -438,7 +438,7 @@ def main():
         raise SystemExit(f"Directory not found: {results_dir}")
 
     model_dirs = sorted(p for p in results_dir.iterdir()
-                        if p.is_dir() and p.name not in ("plots", "tables"))
+                        if p.is_dir() and not is_output_dir(p.name))
     if args.model:
         model_dirs = [d for d in model_dirs if d.name == args.model]
     if not model_dirs:

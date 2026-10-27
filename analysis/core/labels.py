@@ -57,6 +57,12 @@ def short_party(text):
     return _PARTY_SHORT_RE.sub(lambda match: PARTY_SHORT[match.group(0)], text)
 
 
+def group_noun(names):
+    """What a legend calls the groups it lists: "EP cluster" when they are the k=4
+    clusters (the cluster positions basis), "EP group" for the real groups."""
+    return "EP cluster" if any(name in PARTY_SHORT for name in names) else "EP group"
+
+
 def use_short_party_labels():
     """Make every matplotlib text in this process show the cluster nicknames.
 

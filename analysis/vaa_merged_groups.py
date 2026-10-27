@@ -35,6 +35,7 @@ import pandas as pd
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 from utils import ALL_LANGS_STR, configure_stdout
+from analysis.core import is_output_dir
 from analysis.evaluate_euandi import (
     likert_stance_frame, load_party_positions, positions_path, speech_stance_frame,
 )
@@ -125,7 +126,7 @@ def stance_frame(results_dir, model, source, variant, languages):
 
 def models_in(results_dir):
     return sorted(d for d in os.listdir(results_dir)
-                  if os.path.isdir(os.path.join(results_dir, d)) and d not in {"plots", "tables"})
+                  if os.path.isdir(os.path.join(results_dir, d)) and not is_output_dir(d))
 
 
 def markdown_table(wide, columns):
